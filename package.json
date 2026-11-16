@@ -1,0 +1,11 @@
+{
+  "name": "medisin-auto-klinik",
+  "private": true,
+  "description": "Userscript Violentmonkey AUTO KLINIK untuk app.medisin.id",
+  "scripts": {
+    "test": "node --test tests/script.test.cjs tests/medisin.test.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
