@@ -1882,10 +1882,11 @@
     String(ITEMS[itemKey]?.target || itemKey)
       .replace(/^BPJS\s*--\s*/i, "")
       .trim();
-  // Kata pencarian awal untuk daftar pilihan: kata pertama (≥3 huruf) dari nama obat. (pure)
+  // Kata pencarian awal untuk daftar pilihan: 6 huruf pertama dari kata pertama (≥3 huruf)
+  // nama obat, supaya beda ejaan tetap ketemu (CETIRIZINE -> "CETIRI" cocok "CETIRIZIN"). (pure)
   function drugSearchWord(name) {
     const words = String(name || "").split(/[^A-Za-z]+/).filter(Boolean);
-    return words.find((w) => w.length >= 3) || String(name || "").trim().slice(0, 4);
+    return (words.find((w) => w.length >= 3) || String(name || "").trim()).slice(0, 6);
   }
 
   function drugMapStorageKey() {
@@ -2209,7 +2210,7 @@
     }
     LOG(`Racikan ${title} terisi di dialog (belum disimpan)`);
     notify(
-      `Racikan ${title} sudah terisi di dialog Tambah Racikan. Periksa, lalu tekan SIMPAN di dialog itu (atau tutup bila batal).` +
+      `Racikan terisi di dialog Tambah Racikan: ${title}. Periksa, lalu tekan SIMPAN di dialog itu (atau tutup bila batal).` +
         (missing.length ? ` Bahan belum masuk: ${missing.join(", ")}.` : ""),
       missing.length ? "warn" : "info",
       20000,

@@ -174,6 +174,7 @@ test("fungsi murni Medisin: id kunjungan, umur, ICD, signa, racikan", () => {
   assert.equal(api.racikanSignaFor(api.SALEP_RACIKAN), "2 x 1 oles di lesi");
   assert.equal(api.drugSearchWord("CTM 4 MG"), "CTM");
   assert.equal(api.drugSearchWord("ZINC 20 MG"), "ZINC");
+  assert.equal(api.drugSearchWord("CETIRIZINE HCL 10 MG"), "CETIRI");
 });
 
 test("urutan nama obat yang dicoba: pilihan dokter dulu, baru nama template", () => {
