@@ -2486,7 +2486,9 @@
     const chosen = new Set(list.map((f) => f.key));
     const banding = [];
     const addB = (k) => k && has(k) && !chosen.has(k) && !banding.includes(k) && banding.push(k);
-    for (const f of list) for (const k of DX_BANDING[f.key] || []) addB(k);
+    // Bergantian per diagnosis, supaya tiap diagnosis punya pilihan bandingnya.
+    const lists = list.map((f) => DX_BANDING[f.key] || []);
+    for (let i = 0; i < 6; i++) for (const l of lists) addB(l[i]);
     for (const k of extra) if (!DX_SYMPTOM_ONLY.has(k)) addB(k);
     for (const f of subsumed) if (!DX_SYMPTOM_ONLY.has(f.key)) addB(f.key);
     return { list: list.map((f) => ({ key: f.key, keyword: f.keyword })), banding: banding.slice(0, 6) };
