@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.0 — 2026-11-18
+
+- **Keluhan kulit**: bintik, bintik merah, bintik berair/lenting, bintik bernanah, bercak putih/merah/hitam, bercak bersisik, dll. dikenali. Diagnosis baru: Ruam kulit (R21), Dermatitis venenata/tomcat, Folikulitis, Pitiriasis rosea, Pitiriasis alba, Vitiligo, Melasma, Moluskum, Kandidiasis kulit, Intertrigo.
+- **Keluhan umum tambahan**: kulit kering/tumit pecah, kapalan/mata ikan, keloid, tahi lalat, keringat berlebih, bau badan, gumoh, mengompol, tali pusat basah, masalah ASI, nyeri saat berhubungan, susah menelan, kencing darah, mudah lupa, keterlambatan tumbuh kembang, mata juling, mata bengkak, bibir pecah, kelenjar bengkak, telat haid, berhenti merokok, tangan gemetar, telinga kemasukan air, dll. Semua 46 kode ICD baru dicek ada di pencarian ICD Medisin. Diagnosis baru **tanpa obat otomatis** (dokter memilih).
+- **Banyak diagnosis**: keluhan yang berbeda (mis. "batuk pilek, diare") mengisi 2-3 diagnosis (yang pertama = Primer). Gejala dari penyakit yang sama tidak ditambah (mis. batuk pilek demam = ISPA saja; demam + bintik merah + mimisan = DBD).
+- **Hapus diagnosis**: di Paket Resep tiap diagnosa punya tombol ✕ (hanya yang belum tersimpan; yang sudah tersimpan dihapus lewat ikon Medisin sendiri).
+- **Diagnosis banding**: daftar pilihan banding (maks 6) di Paket Resep; ketuk untuk menambah tanpa mengganti diagnosis yang ada.
+- Saran obat Paket Resep mengikuti **semua** diagnosis yang terisi; diagnosis yang dihapus ikut menghapus saran obatnya.
+
 ## v0.6.2 — 2026-11-17
 
 - Perangkat yang dibuka dengan PIN bisa **dikunci lagi dari jarak jauh** tanpa membuka kunci dulu: cukup ubah `kunci.json` lagi (misalnya naikkan `"kunci_ke"` 1 → 2, atau ganti `"pesan"`). Buka-PIN hanya berlaku untuk isi `kunci.json` saat PIN dimasukkan.

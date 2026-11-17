@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.6.2
+// @version      0.7.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.6.2";
+  const SCRIPT_VERSION_FALLBACK = "0.7.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -2146,6 +2146,352 @@
     else DIAGNOSIS_FROM_COMPLAINT.push(entry);
   }
 
+  // ============================================================
+  // v0.7.0: KELUHAN KULIT (bintik, bintik berair, bercak) + DIAGNOSIS BANYAK + BANDING
+  // - Diagnosis baru tanpa obat otomatis (dokter memilih obat sendiri).
+  // - detectDiagnoses(): beberapa keluhan berbeda -> 2-3 diagnosis; diagnosis lain
+  //   yang mirip menjadi pilihan DIAGNOSIS BANDING (ditambah dokter bila sesuai).
+  // ============================================================
+  const DIAGNOSIS_TEMPLATES_V07 = [
+    { key: "RUAM_KULIT", label: "Ruam kulit (belum khas)", icd: ["R21"], query: "rash and other nonspecific skin eruption", adult: [], child: [],
+      edu: "Catat kapan bintik/bercak muncul, makanan/obat baru, dan demam. Kembali bila menyebar cepat, melepuh, demam tinggi, atau sesak." },
+    { key: "DERMATITIS_VENENATA", label: "Dermatitis venenata (tomcat)", icd: ["L24.8", "L24.9"], query: "irritant contact dermatitis due to other agents", adult: [], child: [],
+      edu: "Cuci kulit dengan sabun & air mengalir, jangan digaruk/dipecahkan, kompres dingin. Jangan memencet serangga di kulit; tutup lampu/jendela malam hari." },
+    { key: "FOLIKULITIS", label: "Folikulitis", icd: ["L73.9"], query: "follicular disorder", adult: [], child: [],
+      edu: "Mandi teratur, jangan memencet bintik bernanah, ganti pakaian/handuk bersih, hindari mencukur area yang meradang." },
+    { key: "PITIRIASIS_ROSEA", label: "Pitiriasis rosea", icd: ["L42"], query: "pityriasis rosea", adult: [], child: [],
+      edu: "Biasanya sembuh sendiri dalam 6-8 minggu dan tidak menular berat. Hindari sabun keras dan garukan." },
+    { key: "PITIRIASIS_ALBA", label: "Pitiriasis alba", icd: ["L30.5"], query: "pityriasis alba", adult: [], child: [],
+      edu: "Pakai pelembap dan tabir surya, mandi dengan sabun lembut. Bercak memudar perlahan dalam beberapa bulan." },
+    { key: "VITILIGO", label: "Vitiligo", icd: ["L80"], query: "vitiligo", adult: [], child: [],
+      edu: "Tidak menular. Lindungi bercak dari sinar matahari. Kontrol bila bercak cepat meluas." },
+    { key: "MELASMA", label: "Melasma (flek wajah)", icd: ["L81.1"], query: "chloasma", adult: [], child: [],
+      edu: "Pakai tabir surya setiap hari, hindari kosmetik pemutih tanpa izin edar (merkuri)." },
+    { key: "MOLUSKUM", label: "Moluskum kontagiosum", icd: ["B08.1"], query: "molluscum contagiosum", adult: [], child: [],
+      edu: "Menular lewat kontak: jangan digaruk/dipencet, jangan berbagi handuk. Sering sembuh sendiri dalam beberapa bulan." },
+    { key: "KANDIDIASIS_KULIT", label: "Kandidiasis kulit", icd: ["B37.2"], query: "candidiasis of skin and nail", adult: [], child: [],
+      edu: "Jaga lipatan kulit tetap kering, ganti pakaian basah/berkeringat, kontrol gula darah bila diabetes." },
+    { key: "INTERTRIGO", label: "Intertrigo (lecet lipatan)", icd: ["L30.4"], query: "erythema intertrigo", adult: [], child: [],
+      edu: "Keringkan lipatan kulit setelah mandi, pakai pakaian longgar menyerap keringat." },
+    { key: "BLEFARITIS", label: "Blefaritis / kelopak mata bengkak", icd: ["H01.0"], query: "blepharitis", adult: [], child: [],
+      edu: "Kompres hangat kelopak mata 2x sehari, bersihkan tepi kelopak, jangan mengucek mata." },
+    { key: "KEILITIS", label: "Keilitis (bibir pecah / sudut bibir luka)", icd: ["K13.0"], query: "diseases of lips", adult: [], child: [],
+      edu: "Jangan menjilat bibir, pakai pelembap bibir, cukup minum air, makan sayur & buah." },
+    { key: "LIMFADENOPATI", label: "Pembesaran kelenjar getah bening", icd: ["R59.0", "L04.9"], query: "localized enlarged lymph nodes", adult: [], child: [],
+      edu: "Kontrol 2 minggu. Kembali lebih cepat bila benjolan membesar, keras, tidak nyeri, demam lama, atau BB turun." },
+    { key: "TREMOR", label: "Tremor (gemetar)", icd: ["R25.1"], query: "tremor", adult: [], child: [],
+      edu: "Kurangi kopi/rokok, tidur cukup. Periksa gula darah & tiroid bila gemetar disertai berdebar/BB turun." },
+    { key: "AMENORE", label: "Terlambat haid (amenore)", icd: ["N91.2"], query: "amenorrhoea", adult: [], child: [],
+      edu: "Lakukan tes kehamilan. Bila negatif dan belum haid >3 bulan, kontrol untuk pemeriksaan lanjut." },
+    { key: "ROKOK", label: "Konseling berhenti merokok", icd: ["Z71.6", "F17.2"], query: "tobacco abuse counselling", adult: [], child: [],
+      edu: "Tentukan tanggal berhenti, jauhi pemicu (kopi, teman merokok), minta dukungan keluarga. Layanan berhenti merokok: 0800-177-6565." },
+    { key: "XEROSIS", label: "Kulit kering / tumit pecah (xerosis)", icd: ["L85.3"], query: "xerosis cutis", adult: [], child: [],
+      edu: "Pakai pelembap setelah mandi, kurangi sabun keras & air panas, rendam kaki air hangat lalu oles pelembap untuk tumit pecah." },
+    { key: "KALUS", label: "Kalus / mata ikan (kapalan)", icd: ["L84"], query: "corns and callosities", adult: [], child: [],
+      edu: "Pakai alas kaki yang pas & empuk, rendam air hangat lalu kikis perlahan. Penderita diabetes jangan mengikis sendiri." },
+    { key: "KELOID", label: "Keloid", icd: ["L91.0"], query: "hypertrophic scar", adult: [], child: [],
+      edu: "Jangan digaruk/ditekan. Hindari tindik/tato baru. Keloid besar atau mengganggu dapat dirujuk." },
+    { key: "NEVUS", label: "Tahi lalat (nevus)", icd: ["D22.9"], query: "melanocytic naevi", adult: [], child: [],
+      edu: "Kembali/rujuk bila tahi lalat membesar cepat, warna tidak rata, tepi tidak rata, gatal, atau berdarah." },
+    { key: "HIPERHIDROSIS", label: "Keringat berlebih (hiperhidrosis)", icd: ["R61.9", "R61"], query: "hyperhidrosis", adult: [], child: [],
+      edu: "Pakai pakaian menyerap keringat, antiperspiran malam hari. Periksa gula darah/tiroid bila disertai berdebar atau BB turun." },
+    { key: "BAU_BADAN", label: "Bau badan (bromhidrosis)", icd: ["L75.0"], query: "bromhidrosis", adult: [], child: [],
+      edu: "Mandi 2x sehari dengan sabun, keringkan ketiak, ganti pakaian berkeringat, pakai deodoran/antiperspiran." },
+    { key: "GUMOH", label: "Gumoh / regurgitasi bayi", icd: ["P92.1"], query: "regurgitation and rumination of newborn", adult: [], child: [],
+      edu: "Sendawakan bayi setelah menyusu, posisi kepala lebih tinggi, jangan langsung ditidurkan. Kembali bila muntah menyemprot, hijau, atau BB tidak naik." },
+    { key: "ENURESIS", label: "Mengompol (enuresis)", icd: ["F98.0", "R32"], query: "nonorganic enuresis", adult: [], child: [],
+      edu: "Batasi minum 1-2 jam sebelum tidur, ajak buang air kecil sebelum tidur, beri pujian saat tidak mengompol, jangan dimarahi." },
+    { key: "TALI_PUSAT", label: "Infeksi tali pusat (omfalitis)", icd: ["P38"], query: "omphalitis of newborn", adult: [], child: [],
+      edu: "Rawat tali pusat kering & bersih, jangan diberi ramuan/bedak. Segera kembali bila kemerahan meluas, berbau, atau bayi demam/malas menyusu." },
+    { key: "MENYUSUI", label: "Masalah menyusui / ASI", icd: ["O92.7", "O92.0"], query: "disorders of lactation", adult: [], child: [],
+      edu: "Susui sesering mungkin (8-12x/hari), pelekatan yang benar, ibu cukup minum & istirahat. Konseling laktasi bila perlu." },
+    { key: "DISPAREUNIA", label: "Nyeri saat berhubungan (dispareunia)", icd: ["N94.1"], query: "dyspareunia", adult: [], child: [],
+      edu: "Perlu pemeriksaan lanjut (infeksi, keputihan). Perdarahan setelah berhubungan perlu skrining IVA/pap smear." },
+    { key: "DISFAGIA", label: "Sulit menelan (disfagia)", icd: ["R13"], query: "dysphagia", adult: [], child: [],
+      edu: "Makan lunak, potongan kecil, kunyah pelan. Kembali/rujuk bila makin sulit menelan, BB turun, atau muntah darah." },
+    { key: "HEMATURIA", label: "Kencing darah (hematuria)", icd: ["R31"], query: "unspecified haematuria", adult: [], child: [],
+      edu: "Perlu cek urin. Banyak minum air putih. Segera kembali bila tidak bisa kencing, nyeri pinggang hebat, atau demam." },
+    { key: "PELUPA", label: "Mudah lupa", icd: ["R41.3"], query: "other amnesia", adult: [], child: [],
+      edu: "Tidur cukup, aktif bergerak & bersosialisasi, kontrol tensi/gula. Kembali bila lupa makin berat atau mengganggu kegiatan harian." },
+    { key: "TUMBUH_KEMBANG", label: "Keterlambatan tumbuh kembang", icd: ["R62.0"], query: "delayed milestone", adult: [], child: [],
+      edu: "Stimulasi anak setiap hari (bicara, bermain), gizi seimbang, pantau di posyandu. Perlu skrining perkembangan (KPSP) dan rujuk bila terlambat." },
+    { key: "STRABISMUS", label: "Mata juling (strabismus)", icd: ["H50.9"], query: "strabismus", adult: [], child: [],
+      edu: "Juling pada anak perlu diperiksa dokter mata sedini mungkin agar penglihatan tidak malas (ambliopia)." },
+  ];
+  DIAGNOSIS_TEMPLATES.push(...DIAGNOSIS_TEMPLATES_V07);
+
+  // Tier pecahan (0.9) = kalimat sangat khas, mengalahkan kata umum ("gatal" -> dermatitis).
+  const COMPLAINT_PATTERNS_V07 = [
+    // ---- kulit: bintik / bintik berair / bercak ----
+    { key: "DERMATITIS_VENENATA", tier: 0.9, pattern: /tomcat|semut\s+(?:semai|kanal|charlie)|dermatitis\s+venenata|(?:kena|terkena|tergencet|memencet)\s+(?:\w+\s+)?serangga\s+(?:\w+\s+){0,3}?(?:melepuh|perih|panas|merah)|(?:melepuh|lepuh)\s+(?:\w+\s+){0,3}?(?:kena|karena)\s+(?:\w+\s+)?serangga/ },
+    { key: "HERPES_LABIALIS", tier: 0.9, pattern: /(?:bintik|bintil|lenting|lepuh|gelembung)\w*\s+(?:\w+\s+){0,2}?(?:berair\s+|berisi\s+air\s+)?(?:di\s+)?(?:bibir|sudut\s+bibir|pinggir\s+bibir)/ },
+    { key: "ZOSTER", tier: 0.9, pattern: /(?:bintik|bintil|lenting|lepuh|gelembung)\w*[\s-]+(?:\w+[\s-]+){0,3}?(?:berair|berisi\s+air|bening)\s+(?:\w+\s+){0,4}?(?:sebelah|satu\s+sisi|melingkar|berderet|bergerombol|seperti\s+sabuk|menjalar|terbakar|nyeri\s+panas)(?:\s+(?:\w+\s+){0,2}?(?:pinggang|dada|punggung|perut|leher|wajah|muka|lengan|paha))?/ },
+    { key: "HFMD", tier: 0.9, pattern: /(?:bintik|bintil|lenting|lepuh)\w*\s+(?:\w+\s+){0,3}?(?:di\s+)?(?:telapak\s+)?tangan\s+(?:\w+\s+){0,2}?(?:kaki|mulut)|(?:bintik|bintil|lenting|lepuh)\w*\s+(?:\w+\s+){0,3}?(?:di\s+)?mulut\s+(?:\w+\s+){0,2}?(?:tangan|kaki)/ },
+    { key: "IMPETIGO", tier: 0.9, pattern: /(?:koreng|keropeng|kerak|krusta)\s+(?:\w+\s+){0,2}?(?:kuning|madu|menyebar)|(?:lepuh|bintil|bintik)\w*\s+(?:\w+\s+){0,2}?(?:pecah\s+)?(?:jadi\s+|menjadi\s+)?(?:koreng|keropeng)\s+(?:\w+\s+)?kuning|impetigo/ },
+    { key: "FOLIKULITIS", tier: 0.9, pattern: /folikulitis|(?:bintik|bintil)\w*\s+(?:\w+\s+){0,2}?(?:bernanah|nanah|isi\s+nanah|berisi\s+nanah|putih\s+di\s+tengah)|(?:jerawat|bintik\s+nanah)\s+(?:di\s+)?(?:badan|punggung|dada|ketiak|paha|bokong|pantat|kepala|kulit\s+kepala)/ },
+    { key: "MOLUSKUM", tier: 0.9, pattern: /moluskum|molluscum|(?:bintik|bintil|benjolan\s+kecil)\w*\s+(?:\w+\s+){0,3}?(?:seperti\s+mutiara|mengkilap|mengkilat|berlubang\s+(?:di\s+)?tengah|ada\s+lekukan|cekung\s+di\s+tengah)/ },
+    { key: "KANDIDIASIS_ORAL", tier: 0.9, pattern: /(?:bercak|bintik|lapisan|selaput)\w*\s+(?:\w+\s+)?(?:putih|keputihan)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:lidah|mulut|langit[\s-]*langit|pipi\s+dalam|bibir\s+dalam)|lidah\s+(?:\w+\s+)?(?:berjamur|putih[\s-]*putih|keputihan)|(?:mulut|lidah)\s+bayi\s+(?:\w+\s+)?putih/ },
+    { key: "PITIRIASIS_ALBA", tier: 0.9, pattern: /pitiriasis\s+alba|(?:bercak|belang|panu)\w*\s+(?:\w+\s+){0,2}?putih\w*\s+(?:\w+\s+){0,3}?(?:di\s+)?(?:wajah|muka|pipi)|(?:wajah|muka|pipi)\s+(?:\w+\s+){0,2}?(?:bercak|belang)\s+(?:\w+\s+)?putih/ },
+    { key: "VITILIGO", tier: 0.9, pattern: /vitiligo|(?:bercak|belang|kulit)\s+(?:\w+\s+)?putih\s+(?:\w+\s+){0,2}?(?:seperti\s+susu|seperti\s+kapur|susu|makin\s+(?:lebar|luas|banyak)|melebar)|kulit\s+(?:\w+\s+)?(?:kehilangan\s+warna|belang\s+putih\s+susu)/ },
+    { key: "KUSTA", tier: 0.9, pattern: /(?:bercak|belang)\s+(?:\w+\s+){0,3}?(?:mati\s+rasa|baal|kebas|tidak\s+terasa|tak\s+terasa)/ },
+    { key: "PSORIASIS", tier: 0.9, pattern: /(?:bercak|plak|kulit)\s+(?:\w+\s+){0,2}?(?:merah\s+)?(?:bersisik\s+)?(?:tebal|seperti\s+lilin|putih\s+perak|keperakan)\s+(?:\w+\s+){0,3}?(?:siku|lutut|kulit\s+kepala|punggung\s+bawah)|(?:siku|lutut)\s+(?:\w+\s+){0,2}?(?:bersisik\s+tebal|bercak\s+(?:\w+\s+)?bersisik\s+tebal)/ },
+    { key: "PITIRIASIS_ROSEA", tier: 0.9, pattern: /pitiriasis\s+rosea|(?:bercak|ruam)\s+(?:\w+\s+){0,3}?(?:pohon\s+cemara|bercak\s+induk|lonjong[\s-]+lonjong|oval\s+(?:\w+\s+)?(?:di\s+)?(?:dada|punggung|badan))|(?:satu|1)\s+bercak\s+(?:\w+\s+){0,2}?(?:besar\s+)?(?:dulu|duluan)\s+(?:\w+\s+){0,3}?(?:menyebar|banyak)/ },
+    { key: "MELASMA", tier: 0.9, pattern: /melasma|kloasma|flek\s+(?:\w+\s+)?(?:hitam|coklat|gelap)?\s*(?:di\s+)?(?:wajah|muka|pipi|dahi)|(?:bercak|noda)\s+(?:\w+\s+)?(?:hitam|coklat|gelap|kecoklatan)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:wajah|muka|pipi|dahi)/ },
+    { key: "INTERTRIGO", tier: 0.9, pattern: /intertrigo|(?:lecet|merah|perih)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:lipatan|lipat\s+paha|bawah\s+(?:payudara|perut|leher))|lipatan\s+(?:\w+\s+){0,3}?(?:merah|lecet|lembab|perih|basah)|(?:selangkangan|ketiak)\s+(?:\w+\s+)?(?:lecet|merah\s+lecet|lecet\s+perih)/ },
+    { key: "KANDIDIASIS_KULIT", tier: 0.9, pattern: /kandidiasis\s+kulit|(?:jamur|ruam|bintik)\s+(?:\w+\s+){0,2}?(?:merah\s+)?(?:basah|lembab)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:lipatan|bawah\s+payudara|sela\s+jari\s+tangan)|(?:sela\s+jari\s+tangan)\s+(?:\w+\s+)?(?:merah|lecet|gatal\s+basah)/ },
+    { key: "SKABIES", tier: 0.9, pattern: /(?:bintik|bintil|bentol)\w*\s+(?:\w+\s+){0,3}?gatal\s+(?:\w+\s+){0,3}?(?:malam|sela\s+jari)|(?:bintik|bintil)\w*\s+(?:\w+\s+){0,2}?(?:di\s+)?sela[\s-]+(?:sela\s+)?jari\s+(?:\w+\s+){0,2}?gatal|(?:serumah|satu\s+rumah|keluarga|teman\s+(?:asrama|pondok))\s+(?:\w+\s+){0,2}?(?:juga\s+)?gatal/ },
+    { key: "VARICELLA", tier: 3, pattern: /(?:bintik|bintil|lenting|lepuh|gelembung|bentol)\w*[\s-]+(?:\w+[\s-]+){0,2}?(?:berair|berisi\s+air|bening|berisi\s+cairan|berisi\s+cairan\s+bening)|\blenting\w*|bintik\s+air\b/ },
+    { key: "TINEA", tier: 3, pattern: /bercak\w*[\s-]+(?:\w+[\s-]+){0,2}?(?:merah\s+)?(?:bersisik|berkerak|bersisik\s+gatal)|bercak\s+(?:\w+\s+)?(?:melingkar|bulat\s+(?:\w+\s+)?gatal|seperti\s+cincin|tepi\s+(?:merah|aktif|meninggi))/ },
+    { key: "PANU", tier: 3, pattern: /bercak[\s-]*(?:bercak\s+)?(?:putih|keputihan|coklat\s+muda)|belang[\s-]+belang|kulit\s+(?:\w+\s+)?belang/ },
+    { key: "RUAM_KULIT", tier: 3, pattern: /bintik[\s-]*(?:bintik\s+)?(?:merah|kecil|hitam|coklat)|bercak[\s-]*(?:bercak\s+)?(?:merah|hitam|coklat|ungu|biru|gelap)|\bbintik\w*|\bbercak\w*|\bbintil\w*|kemerahan\s+(?:di\s+)?kulit|kulit\s+(?:\w+\s+)?kemerahan|ruam\s+(?:\w+\s+)?(?:tidak|tak|gak|ga)\s+gatal/ },
+    // ---- keluhan umum lain ----
+    { key: "LIMFADENOPATI", tier: 1, before: "STRUMA", pattern: /kelenjar\s+(?:getah\s+bening\s+)?(?:\w+\s+)?(?:bengkak|membesar|teraba)|getah\s+bening|limfadeno\w*|limfadeni\w*|(?:bengkak|benjol\w*)\s+(?:\w+\s+)?(?:di\s+)?(?:ketiak|lipat\s+paha|selangkangan|bawah\s+rahang|belakang\s+telinga|bawah\s+telinga)|bengkak\s+(?:di\s+)?leher/ },
+    { key: "KEILITIS", tier: 1, pattern: /keilitis|cheilitis|angular|bibir\s+(?:\w+\s+)?(?:pecah[\s-]*pecah|kering\s+(?:\w+\s+)?(?:pecah|mengelupas|perih)|mengelupas|luka\s+(?:di\s+)?sudut)|sudut\s+(?:bibir|mulut)\s+(?:\w+\s+)?(?:luka|pecah|perih|lecet|robek)|(?:luka|lecet)\s+(?:di\s+)?sudut\s+(?:bibir|mulut)/ },
+    { key: "BLEFARITIS", tier: 0.9, pattern: /blefaritis|kelopak\s+mata\s+(?:\w+\s+){0,2}?(?:bersisik|berketombe|berkerak)|bulu\s+mata\s+(?:\w+\s+)?(?:berketombe|berkerak|rontok)/ },
+    { key: "BLEFARITIS", tier: 3, pattern: /(?:mata|kelopak\s+mata|kelopak)\s+(?:\w+\s+)?(?:bengkak|sembab|membengkak)/ },
+    { key: "OTITIS_EKSTERNA", tier: 3, pattern: /(?:telinga|kuping)\s+(?:\w+\s+){0,2}?kemasukan\s+air|(?:telinga|kuping)\s+(?:\w+\s+)?(?:kemasukan\s+)?air\s+(?:\w+\s+)?(?:habis|setelah|sesudah)\s+(?:berenang|mandi|keramas)/ },
+    { key: "TREMOR", tier: 3, pattern: /tremor|(?:tangan|jari|badan)\s+(?:\w+\s+)?(?:gemetar|gemeter|bergetar)|gemetaran/ },
+    { key: "AMENORE", tier: 1, before: "GANGGUAN_HAID", pattern: /amenore\w*|telat\s+(?:datang\s+)?(?:haid|mens\w*|datang\s+bulan|bulan)|(?:haid|mens\w*|datang\s+bulan)\s+(?:\w+\s+)?(?:telat|terlambat|tidak\s+datang|belum\s+datang|tidak\s+keluar|berhenti)|(?:belum|tidak|gak|ga)\s+(?:haid|mens\w*|datang\s+bulan)\s+(?:\w+\s+){0,2}?(?:\d+|dua|tiga|empat|se)\s*bulan/ },
+    { key: "XEROSIS", tier: 1, pattern: /(?:tumit|kaki|telapak\s+kaki|tangan)\s+(?:\w+\s+)?pecah[\s-]*(?:pecah)?|kulit\s+(?:\w+\s+)?(?:kering\s+(?:bersisik|pecah|kasar)|bersisik\s+kering|kasar\s+kering)|xerosis/ },
+    { key: "KALUS", tier: 0.9, pattern: /kapalan|mata\s+ikan|kalus|tumit\s+(?:\w+\s+)?(?:tebal|keras\s+tebal)/ },
+    { key: "KELOID", tier: 1, pattern: /keloid|bekas\s+luka\s+(?:\w+\s+){0,2}?(?:menonjol|menebal|membesar|tumbuh|timbul)/ },
+    { key: "NEVUS", tier: 1, pattern: /tahi\s+lalat|\bnevus\b|\btompel\b/ },
+    { key: "HIPERHIDROSIS", tier: 1, pattern: /hiperhidrosis|keringat\s+(?:\w+\s+)?(?:berlebih\w*|banyak\s+sekali|terus[\s-]*terusan|bercucuran)|(?:tangan|telapak\s+tangan|kaki|ketiak)\s+(?:\w+\s+)?berkeringat\s+(?:\w+\s+)?(?:terus|banyak|basah)|sering\s+berkeringat\s+(?:banyak|berlebihan)/ },
+    { key: "BAU_BADAN", tier: 1, pattern: /bau\s+badan|badan\s+(?:\w+\s+)?bau|ketiak\s+(?:\w+\s+)?bau|bau\s+ketiak|bromhidrosis|kaki\s+(?:\w+\s+)?bau/ },
+    { key: "GUMOH", tier: 1, before: "DISPEPSIA", pattern: /gumoh|(?:bayi|anak\s+bayi)\s+(?:\w+\s+){0,2}?(?:muntah|keluar\s+susu)\s+(?:\w+\s+){0,3}?(?:setelah|habis|sesudah)\s+(?:minum\s+susu|menyusu|nyusu|minum\s+asi|netek)/ },
+    { key: "ENURESIS", tier: 1, pattern: /ngompol|mengompol|ompol|enuresis|kencing\s+(?:\w+\s+)?(?:di\s+kasur|saat\s+tidur|waktu\s+tidur)/ },
+    { key: "TALI_PUSAT", tier: 0.9, pattern: /(?:tali\s+pusat|pusar|pusat)\s+(?:bayi\s+)?(?:\w+\s+)?(?:basah|bau|bernanah|merah|berdarah|lembab|keluar\s+cairan)|omfalitis/ },
+    { key: "MENYUSUI", tier: 1, pattern: /asi\s+(?:\w+\s+)?(?:sedikit|kurang|tidak\s+lancar|seret|tidak\s+keluar|belum\s+keluar)|puting\s+(?:\w+\s+)?(?:masuk|datar|tenggelam|lecet|luka)|susah\s+menyusui|bayi\s+(?:\w+\s+)?(?:tidak\s+mau|susah)\s+(?:menyusu|nyusu|netek)/ },
+    { key: "DISPAREUNIA", tier: 1, pattern: /dispareunia|(?:nyeri|sakit|perih)\s+(?:saat|waktu|ketika|kalau|setelah)\s+(?:berhubungan|hubungan\s+(?:suami\s+istri|intim|badan)|bersenggama|senggama)|(?:perdarahan|keluar\s+darah|flek)\s+(?:\w+\s+)?(?:setelah|sehabis|saat)\s+(?:berhubungan|senggama)/ },
+    { key: "DISFAGIA", tier: 1, before: "FARINGITIS", pattern: /disfagia|(?:susah|sulit|sakit)\s+(?:untuk\s+)?menelan\s+(?:\w+\s+){0,2}?(?:makanan|nasi|lama|terus)|(?:tenggorokan|leher)\s+(?:\w+\s+){0,3}?(?:mengganjal|ada\s+yang\s+(?:nyangkut|mengganjal))|makanan\s+(?:\w+\s+)?(?:nyangkut|tersangkut)|\b(?:susah|sulit)\s+menelan\b/ },
+    { key: "HEMATURIA", tier: 1, before: "ISK", pattern: /hematuri\w*|kencing\s+(?:\w+\s+)?(?:darah|berdarah|merah\s+(?:seperti\s+)?darah|warna\s+merah)|(?:bak|pipis)\s+(?:\w+\s+)?(?:darah|berdarah)/ },
+    { key: "PELUPA", tier: 3, pattern: /(?:sering|mudah|gampang|cepat)\s+lupa|pikun|pelupa|daya\s+ingat\s+(?:\w+\s+)?(?:menurun|berkurang)/ },
+    { key: "TUMBUH_KEMBANG", tier: 1, pattern: /(?:belum|tidak)\s+bisa\s+(?:jalan|berjalan|bicara|ngomong|duduk|merangkak|tengkurap)\b|terlambat\s+(?:bicara|jalan|berjalan)|telat\s+(?:bicara|ngomong|jalan)|speech\s+delay|\bgagap\b|tumbuh\s+kembang\s+(?:\w+\s+)?(?:terlambat|lambat)/ },
+    { key: "STRABISMUS", tier: 1, pattern: /juling|strabismus|mata\s+(?:\w+\s+)?(?:tidak\s+sejajar|miring\s+ke\s+(?:dalam|luar))/ },
+    // kata awam tambahan untuk diagnosis yang sudah ada
+    { key: "VULNUS", tier: 1, pattern: /(?:kena|tertusuk|ketusuk|tergores|kegores)\s+(?:\w+\s+)?(?:duri|pecahan\s+kaca|beling|kaca|seng|pisau|parang|sabit|gunting|kawat|paku|kail)|tertusuk|ketusuk|tergores|kegores/ },
+    { key: "KONTUSIO", tier: 1, pattern: /terjepit|kejepit|kejedot|terbentur|kebentur|tertimpa|ketiban/ },
+    { key: "GIGITAN_SERANGGA", tier: 1, pattern: /(?:tersengat|kena|disengat)\s+(?:\w+\s+)?(?:ubur[\s-]*ubur|ulat\s+bulu|lebah|tawon|kalajengking)|ulat\s+bulu/ },
+    { key: "KANDIDIASIS_ORAL", tier: 0.9, pattern: /lidah\s+(?:\w+\s+)?putih|sariawan\s+putih\s+(?:\w+\s+)?bayi/ },
+    { key: "KELILIPAN", tier: 0.9, pattern: /mata\s+(?:\w+\s+)?(?:kena|kemasukan|terkena|kecipratan)\s+(?:\w+\s+)?(?:sabun|sampo|shampo|cairan|minyak|getah|air\s+sabun|deterjen|pasir|serbuk)/ },
+    { key: "GIZI_KURANG", tier: 1, pattern: /(?:tidak|tak|belum|susah|sulit)\s+naik\s+(?:\w+\s+)?(?:berat\s+badan|bb)\b|berat\s+badan\s+(?:\w+\s+)?(?:tetap|segitu[\s-]*segitu|tidak\s+bertambah)/ },
+    { key: "PAROTITIS", tier: 3, pattern: /(?:sakit|nyeri|bengkak)\s+(?:\w+\s+)?(?:di\s+)?(?:bawah|depan)\s+telinga/ },
+    { key: "BPH", tier: 3, pattern: /(?:susah|sulit|tidak\s+lancar|seret)\s+(?:untuk\s+)?(?:kencing|bak|pipis)|kencing\s+(?:\w+\s+)?(?:tidak\s+lancar|menetes|lemah|harus\s+mengejan|ngeden)/ },
+    { key: "DM", tier: 2, pattern: /sering\s+(?:merasa\s+)?(?:haus|lapar)|(?:haus|lapar)\s+terus/ },
+    { key: "CEPHALGIA", tier: 3, pattern: /nyeri\s+(?:di\s+)?belakang\s+(?:bola\s+)?mata|(?:sakit|nyeri)\s+(?:di\s+)?(?:belakang|balik)\s+mata/ },
+    { key: "TTH", tier: 3, pattern: /kepala\s+(?:bagian\s+)?belakang\s+(?:\w+\s+)?(?:sakit|nyeri|berat|kencang|tegang)|(?:sakit|nyeri)\s+kepala\s+(?:bagian\s+)?belakang/ },
+    { key: "MYALGIA", tier: 3, pattern: /otot\s+(?:\w+\s+)?kaku|kaku\s+otot/ },
+    { key: "ARTRALGIA", tier: 3, pattern: /(?:jari|sendi)\s+(?:\w+\s+)?(?:kaku|bengkak)/ },
+    { key: "LBP", tier: 3, pattern: /(?:tulang\s+ekor|tulang\s+duduk)\s+(?:\w+\s+)?(?:sakit|nyeri)|(?:sakit|nyeri)\s+(?:di\s+)?tulang\s+ekor/ },
+    { key: "ASMA", tier: 3, pattern: /na[fp]as\s+(?:\w+\s+)?(?:pendek|berat|ngos[\s-]*ngosan)|ngos[\s-]*ngosan/ },
+    { key: "HEMOROID", tier: 3, pattern: /(?:anus|dubur|pantat|anal)\s+(?:\w+\s+)?(?:nyeri|sakit|perih|berdarah)|(?:nyeri|sakit|perih)\s+(?:di\s+)?(?:anus|dubur)/ },
+    { key: "OBESITAS", tier: 3, pattern: /perut\s+(?:\w+\s+)?buncit|buncit/ },
+    { key: "FARINGITIS", tier: 3, pattern: /(?:sakit|nyeri)\s+(?:saat|waktu|kalau)\s+menelan|menelan\s+(?:\w+\s+)?sakit/ },
+    { key: "ROKOK", tier: 2, pattern: /berhenti\s+merokok|(?:kecanduan|ketergantungan|candu)\s+(?:rokok|merokok|nikotin|vape)|(?:ingin|mau|pengen)\s+(?:berhenti|stop)\s+(?:rokok|merokok|vape|ngerokok)|konseling\s+(?:berhenti\s+)?rokok/ },
+  ];
+  for (const e of COMPLAINT_PATTERNS_V07) {
+    const entry = { key: e.key, tier: e.tier, pattern: e.pattern };
+    const at = e.before ? DIAGNOSIS_FROM_COMPLAINT.findIndex((d) => d.key === e.before) : -1;
+    if (at >= 0) DIAGNOSIS_FROM_COMPLAINT.splice(at, 0, entry);
+    else DIAGNOSIS_FROM_COMPLAINT.push(entry);
+  }
+
+  // ---- Banyak diagnosis + diagnosis banding ----
+  // Keluarga: dari satu keluarga hanya satu diagnosis yang diisi; sisanya jadi banding.
+  const DX_FAMILY = {};
+  for (const [fam, keys] of Object.entries({
+    napas: "ISPA FARINGITIS TONSILITIS SINUSITIS RINITIS_ALERGI ASMA BRONKITIS PNEUMONIA TB_SUSPEK PPOK LARINGITIS HEMOPTISIS SESAK_BERAT",
+    cerna: "GEA DISPEPSIA GASTRITIS GERD KONSTIPASI NYERI_PERUT DISENTRI KERACUNAN_MAKANAN AKUT_ABDOMEN PERDARAHAN_GI MUAL_HAMIL",
+    anus: "HEMOROID FISURA_ANI",
+    kepala: "CEPHALGIA TTH MIGREN SAKIT_KEPALA_HEBAT VERTIGO",
+    kulit: "DERMATITIS URTIKARIA MILIARIA RUAM_KULIT GIGITAN_SERANGGA ALERGI_OBAT",
+    kulitLepuh: "VARICELLA ZOSTER HFMD IMPETIGO DERMATITIS_VENENATA HERPES_LABIALIS",
+    kulitPutih: "PANU PITIRIASIS_ALBA VITILIGO KUSTA",
+    kulitLipat: "TINEA INTERTRIGO KANDIDIASIS_KULIT RUAM_POPOK",
+    demam: "FEVER DENGUE TIFOID MALARIA CHIKUNGUNYA LEPTOSPIROSIS CAMPAK",
+    mata: "KONJUNGTIVITIS HORDEOLUM KALAZION BLEFARITIS KELILIPAN MATA_KERING CEDERA_MATA PERDARAHAN_SUBKONJ",
+    telinga: "OMA OTITIS_EKSTERNA SERUMEN TINITUS",
+    mulut: "STOMATITIS GINGIVITIS PULPITIS KANDIDIASIS_ORAL HALITOSIS TUMBUH_GIGI KEILITIS HERPES_LABIALIS",
+    kemih: "ISK URETRITIS UROLITIASIS BPH RETENSI_URIN",
+    haid: "GANGGUAN_HAID MENORAGIA DISMENORE AMENORE",
+    leher: "LIMFADENOPATI STRUMA PAROTITIS",
+    bayi: "GUMOH KOLIK_BAYI",
+  }))
+    for (const k of keys.split(" ")) DX_FAMILY[k] = fam;
+  // Gejala umum: tidak diisi sebagai diagnosis tambahan (hanya bila satu-satunya).
+  const DX_SYMPTOM_ONLY = new Set(["FEVER", "MALAISE", "ANOREKSIA", "MYALGIA", "BB_TURUN", "BENJOLAN", "RUAM_KULIT"]);
+  // Diagnosis banding yang lazim di FKTP (dipilih/ditambah dokter, tidak otomatis).
+  const DX_BANDING_RAW = {
+    ISPA: "FARINGITIS RINITIS_ALERGI SINUSITIS BRONKITIS PNEUMONIA",
+    FARINGITIS: "TONSILITIS ISPA LARINGITIS",
+    TONSILITIS: "FARINGITIS ISPA LIMFADENOPATI",
+    LARINGITIS: "FARINGITIS ISPA",
+    BRONKITIS: "ISPA PNEUMONIA ASMA TB_SUSPEK",
+    PNEUMONIA: "BRONKITIS TB_SUSPEK ASMA",
+    TB_SUSPEK: "BRONKITIS PNEUMONIA PPOK",
+    ASMA: "PPOK BRONKITIS GAGAL_JANTUNG",
+    RINITIS_ALERGI: "ISPA SINUSITIS",
+    SINUSITIS: "RINITIS_ALERGI ISPA CEPHALGIA",
+    GEA: "DISENTRI KERACUNAN_MAKANAN TIFOID HELMINTHIASIS",
+    DISENTRI: "GEA HEMOROID",
+    KERACUNAN_MAKANAN: "GEA DISPEPSIA",
+    DISPEPSIA: "GASTRITIS GERD NYERI_DADA",
+    GASTRITIS: "DISPEPSIA GERD",
+    GERD: "DISPEPSIA GASTRITIS NYERI_DADA",
+    NYERI_PERUT: "DISPEPSIA GEA ISK AKUT_ABDOMEN DISMENORE",
+    KONSTIPASI: "HEMOROID NYERI_PERUT",
+    HEMOROID: "FISURA_ANI KONSTIPASI",
+    FEVER: "ISPA DENGUE TIFOID ISK MALARIA",
+    DENGUE: "FEVER TIFOID CHIKUNGUNYA LEPTOSPIROSIS",
+    TIFOID: "DENGUE GEA FEVER MALARIA",
+    CHIKUNGUNYA: "DENGUE ARTRALGIA",
+    CEPHALGIA: "TTH MIGREN HT VERTIGO SINUSITIS",
+    TTH: "CEPHALGIA MIGREN HT",
+    MIGREN: "TTH CEPHALGIA",
+    VERTIGO: "CEPHALGIA HT HIPOTENSI ANEMIA",
+    MYALGIA: "FEVER DENGUE CHIKUNGUNYA ARTRALGIA",
+    LBP: "HNP UROLITIASIS ISK MYALGIA",
+    HNP: "LBP",
+    NYERI_LEHER: "TTH HT MYALGIA",
+    OA_GENU: "GOUT ARTRALGIA HIPERURISEMIA",
+    GOUT: "OA_GENU ARTRALGIA SELULITIS",
+    ARTRALGIA: "OA_GENU GOUT CHIKUNGUNYA",
+    DERMATITIS: "URTIKARIA TINEA SKABIES MILIARIA GIGITAN_SERANGGA PSORIASIS",
+    URTIKARIA: "DERMATITIS GIGITAN_SERANGGA ALERGI_OBAT ANAFILAKSIS",
+    TINEA: "DERMATITIS KANDIDIASIS_KULIT PSORIASIS PITIRIASIS_ROSEA INTERTRIGO",
+    PANU: "PITIRIASIS_ALBA VITILIGO TINEA KUSTA",
+    SKABIES: "DERMATITIS GIGITAN_SERANGGA IMPETIGO",
+    MILIARIA: "DERMATITIS FOLIKULITIS KANDIDIASIS_KULIT",
+    RUAM_KULIT: "DERMATITIS URTIKARIA MILIARIA GIGITAN_SERANGGA ALERGI_OBAT CAMPAK DENGUE",
+    VARICELLA: "ZOSTER HFMD IMPETIGO GIGITAN_SERANGGA DERMATITIS_VENENATA",
+    ZOSTER: "VARICELLA DERMATITIS_VENENATA HERPES_LABIALIS",
+    HERPES_LABIALIS: "ZOSTER STOMATITIS IMPETIGO KEILITIS",
+    IMPETIGO: "VARICELLA FOLIKULITIS DERMATITIS HERPES_LABIALIS",
+    FOLIKULITIS: "AKNE IMPETIGO MILIARIA ABSES",
+    ABSES: "FOLIKULITIS SELULITIS",
+    SELULITIS: "ABSES GIGITAN_SERANGGA GOUT",
+    GIGITAN_SERANGGA: "URTIKARIA DERMATITIS_VENENATA SKABIES DERMATITIS",
+    DERMATITIS_VENENATA: "ZOSTER COMBUSTIO DERMATITIS IMPETIGO",
+    HFMD: "VARICELLA STOMATITIS CAMPAK",
+    CAMPAK: "DENGUE RUAM_KULIT ALERGI_OBAT",
+    PITIRIASIS_ROSEA: "TINEA PSORIASIS PANU",
+    PITIRIASIS_ALBA: "PANU VITILIGO",
+    VITILIGO: "PANU PITIRIASIS_ALBA KUSTA",
+    MOLUSKUM: "KUTIL FOLIKULITIS AKNE",
+    KUTIL: "MOLUSKUM",
+    PSORIASIS: "DERMATITIS TINEA SEBOROIK",
+    SEBOROIK: "PSORIASIS TINEA DERMATITIS",
+    KANDIDIASIS_KULIT: "TINEA INTERTRIGO RUAM_POPOK",
+    INTERTRIGO: "KANDIDIASIS_KULIT TINEA",
+    RUAM_POPOK: "KANDIDIASIS_KULIT MILIARIA",
+    ALERGI_OBAT: "URTIKARIA CAMPAK RUAM_KULIT",
+    AKNE: "FOLIKULITIS MILIARIA",
+    KONJUNGTIVITIS: "KELILIPAN HORDEOLUM MATA_KERING PERDARAHAN_SUBKONJ BLEFARITIS",
+    HORDEOLUM: "KALAZION BLEFARITIS",
+    BLEFARITIS: "HORDEOLUM KONJUNGTIVITIS KALAZION URTIKARIA",
+    OMA: "OTITIS_EKSTERNA SERUMEN",
+    OTITIS_EKSTERNA: "OMA SERUMEN",
+    SERUMEN: "OMA OTITIS_EKSTERNA BENDA_ASING",
+    ISK: "URETRITIS UROLITIASIS FLUOR_ALBUS",
+    UROLITIASIS: "ISK LBP",
+    FLUOR_ALBUS: "ISK URETRITIS",
+    DISMENORE: "NYERI_PERUT GANGGUAN_HAID",
+    GANGGUAN_HAID: "AMENORE ANC",
+    AMENORE: "ANC GANGGUAN_HAID",
+    STOMATITIS: "KANDIDIASIS_ORAL HFMD HERPES_LABIALIS",
+    PULPITIS: "GINGIVITIS ABSES",
+    GINGIVITIS: "PULPITIS STOMATITIS",
+    KEILITIS: "HERPES_LABIALIS STOMATITIS",
+    PALPITASI: "ANSIETAS ANEMIA HT",
+    INSOMNIA: "ANSIETAS DEPRESI",
+    ANSIETAS: "DEPRESI INSOMNIA PALPITASI",
+    MALAISE: "ANEMIA DM FEVER HIPOTENSI",
+    ANOREKSIA: "DISPEPSIA HELMINTHIASIS GIZI_KURANG",
+    PARESTESIA: "DM CTS HNP",
+    EDEMA: "GAGAL_JANTUNG VARISES SELULITIS",
+    LIMFADENOPATI: "TONSILITIS PAROTITIS STRUMA TB_SUSPEK",
+    BENJOLAN: "LIMFADENOPATI ABSES",
+    TREMOR: "ANSIETAS HIPOGLIKEMIA",
+    ROKOK: "PPOK",
+    XEROSIS: "DERMATITIS PSORIASIS TINEA",
+    KALUS: "KUTIL",
+    KELOID: "BENJOLAN",
+    NEVUS: "KUTIL BENJOLAN",
+    HIPERHIDROSIS: "ANSIETAS DM",
+    BAU_BADAN: "HIPERHIDROSIS",
+    GUMOH: "KOLIK_BAYI GEA",
+    ENURESIS: "ISK DM",
+    TALI_PUSAT: "SELULITIS",
+    MENYUSUI: "MASTITIS",
+    DISPAREUNIA: "FLUOR_ALBUS ISK",
+    DISFAGIA: "FARINGITIS GERD TONSILITIS",
+    HEMATURIA: "ISK UROLITIASIS",
+    PELUPA: "ANSIETAS DEPRESI HT",
+    TUMBUH_KEMBANG: "GIZI_KURANG",
+    STRABISMUS: "REFRAKSI",
+    KUSTA: "PANU VITILIGO",
+  };
+  // Diagnosis yang tercakup diagnosis lain bila keduanya ada (mis. mimisan pada DBD).
+  const DX_SUBSUMED_BY = {
+    EPISTAKSIS: ["DENGUE"],
+    NYERI_PERUT: ["GEA", "DISENTRI", "DISMENORE", "UROLITIASIS", "AKUT_ABDOMEN", "ISK", "KONSTIPASI", "HELMINTHIASIS"],
+    DISPEPSIA: ["GEA", "KERACUNAN_MAKANAN", "MUAL_HAMIL", "TIFOID"],
+    CEPHALGIA: ["DENGUE", "TIFOID", "MALARIA", "SINUSITIS", "HT"],
+    RUAM_KULIT: ["DENGUE", "CAMPAK", "HFMD", "VARICELLA"],
+    PARESTESIA: ["DM"],
+  };
+  // Kata umum yang hanya menerangkan keluhan di sebelahnya ("keputihan gatal").
+  const DX_MODIFIER_WORD = /^(?:gatal(?:[\s-]*gatal)?|perih|nyeri|sakit|bengkak|merah|panas)$/;
+  const DX_BANDING = Object.fromEntries(Object.entries(DX_BANDING_RAW).map(([k, v]) => [k, v.split(" ")]));
+
+  // Keluhan -> daftar diagnosis (maks `max`, yang pertama = primer) + diagnosis banding.
+  // Diagnosis tambahan diambil dari keluhan LAIN (kata kunci tidak tumpang tindih, keluarga
+  // berbeda, bukan sekadar gejala umum). TTV saja tidak menambah diagnosis. (pure, diuji)
+  function detectDiagnoses(rawText, vitals, { max = 3 } = {}) {
+    const found = detectDiagnosisFromComplaint(rawText, { vitals });
+    if (!found) return { list: [], banding: [] };
+    const all0 = found.all || [{ key: found.key, keyword: found.keyword, pos: 0 }];
+    const subsumed = all0.filter((f) => (DX_SUBSUMED_BY[f.key] || []).some((k) => all0.some((g) => g.key === k)));
+    const all = all0.filter((f) => !subsumed.includes(f));
+    const has = (k) => DIAGNOSIS_TEMPLATES.some((d) => d.key === k);
+    const list = [all[0]];
+    const extra = [];
+    const span = (f) => [f.pos, f.pos + String(f.keyword || "").length];
+    const overlaps = (a, b) => {
+      if (!Number.isFinite(a.pos) || !Number.isFinite(b.pos)) return false;
+      const [a0, a1] = span(a);
+      const [b0, b1] = span(b);
+      if (a0 < b1 && b0 < a1) return true;
+      // Kata umum tepat di sebelah keluhan lain = keterangan keluhan itu, bukan keluhan baru.
+      const text = String(rawText || "").toLowerCase();
+      const gap = a1 <= b0 ? text.slice(a1, b0) : text.slice(b1, a0);
+      const word = (a1 <= b0 ? b : a).keyword;
+      return /^\s*$/.test(gap) && DX_MODIFIER_WORD.test(String(word || "").trim());
+    };
+    for (const f of all.slice(1)) {
+      const fromVitals = !Number.isFinite(f.pos);
+      const sameFamily = DX_FAMILY[f.key] && list.some((x) => DX_FAMILY[x.key] === DX_FAMILY[f.key]);
+      if (
+        list.length >= max ||
+        fromVitals ||
+        DX_SYMPTOM_ONLY.has(f.key) ||
+        sameFamily ||
+        list.some((x) => overlaps(x, f))
+      ) {
+        extra.push(f.key);
+        continue;
+      }
+      list.push(f);
+    }
+    const chosen = new Set(list.map((f) => f.key));
+    const banding = [];
+    const addB = (k) => k && has(k) && !chosen.has(k) && !banding.includes(k) && banding.push(k);
+    for (const f of list) for (const k of DX_BANDING[f.key] || []) addB(k);
+    for (const k of extra) if (!DX_SYMPTOM_ONLY.has(k)) addB(k);
+    for (const f of subsumed) if (!DX_SYMPTOM_ONLY.has(f.key)) addB(f.key);
+    return { list: list.map((f) => ({ key: f.key, keyword: f.keyword })), banding: banding.slice(0, 6) };
+  }
+
   // Tanda bahaya / hati-hati dari keluhan + TTV. (pure, diuji)
   // Hasil: [{ key, level: "bahaya"|"hati", label, advice, keyword, noAuto }]
   function detectRedFlags(rawText, vitals) {
@@ -2225,7 +2571,13 @@
     // Tier kecil dulu; tier 2 (HT/DM) menurut posisi tulisan, tier lain menurut urutan daftar.
     found.sort((a, b) => a.tier - b.tier || (a.tier === 2 ? a.pos - b.pos : a.order - b.order));
     const { key, keyword } = found[0];
-    return { key, keyword, others: found.slice(1).map((f) => f.key) };
+    return {
+      key,
+      keyword,
+      others: found.slice(1).map((f) => f.key),
+      // v0.7.0: semua yang cocok (untuk banyak diagnosis & banding)
+      all: found.map((f) => ({ key: f.key, keyword: f.keyword, tier: f.tier, pos: f.pos })),
+    };
   }
 
   // Jika obat `when` disarankan, obat `drop` tidak disarankan (isi tumpang tindih).
@@ -2563,18 +2915,25 @@
 
   // Keluhan diubah di Paket Resep -> diagnosa ikut diperbarui. Baris yang dulu diisi
   // script (belum disimpan) diganti; diagnosa dokter / yang sudah tersimpan dibiarkan.
+  // v0.7.0: keluhan diubah -> SEMUA diagnosis dari keluhan diperbarui. Baris yang dulu
+  // diisi script (belum disimpan) dan tidak dipakai lagi dikosongkan; diagnosa dokter /
+  // yang sudah tersimpan dibiarkan. TIDAK menyimpan.
   async function updateDiagnosisFromComplaint(complaint) {
     const vitals = assessVitals(readVitalsFromPage(), getPatientAgeFromIdentity()?.ageYears ?? null);
-    const found = detectDiagnosisFromComplaint(complaint, { vitals });
-    const dx = found && DIAGNOSIS_TEMPLATES.find((d) => d.key === found.key);
-    if (!dx) return { dx: null, note: "diagnosis tidak dikenali dari keluhan; Diagnosa tidak diubah" };
+    const dxs = detectDiagnoses(complaint, vitals)
+      .list.map((f) => DIAGNOSIS_TEMPLATES.find((d) => d.key === f.key))
+      .filter(Boolean);
+    if (!dxs.length) return { dx: null, dxs: [], note: "diagnosis tidak dikenali dari keluhan; Diagnosa tidak diubah" };
     const page = selectedIcdEntries();
-    if (dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)))) return { dx, note: `${dx.label} sudah terisi` };
+    const isOn = (dx) => dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)));
+    if (dxs.every(isOn)) return { dx: dxs[0], dxs, note: `${dxs.map((d) => d.label).join(", ")} sudah terisi` };
     const dg = needVm("Diagnosa", "Diagnosa");
     const auto = autoDxForPage();
     const saved = new Set((Array.isArray(dg.data) ? dg.data : []).map(savedIcdCode));
     const doctorIcd = page.filter((e) => !auto.codes.has(e.code) || saved.has(e.code));
+    const wanted = (code) => dxs.some((d) => d.icd.some((c) => icdCodeMatches(c, code)));
     for (const code of [...auto.codes]) {
+      if (wanted(code)) continue;
       const row = (dg.input_icdx || []).find((r) => r.val && icdOptionCode(r.val) === code);
       if (row && !saved.has(code)) {
         row.val = null;
@@ -2582,13 +2941,72 @@
       }
       auto.codes.delete(code);
     }
-    const r = await fillDiagnosis(dx);
+    const r = await fillDiagnoses(dxs);
+    if (!r.filled.length && r.failed.length) throw r.failed[0].error;
     return {
-      dx,
+      dx: dxs[0],
+      dxs,
       note:
-        `${dx.label} (ICD ${r.icdCode})` +
+        r.filled.map((x) => `${x.dx.label} (ICD ${x.icdCode})`).join(", ") +
+        (r.failed.length ? ` · gagal diisi: ${r.failed.map((x) => x.dx.label).join(", ")}` : "") +
         (doctorIcd.length ? ` · diagnosa lain dibiarkan: ${doctorIcd.map((e) => e.code).join(", ")}` : ""),
     };
+  }
+
+  // v0.7.0: isi beberapa diagnosis berurutan (yang pertama = primer). TIDAK menyimpan.
+  async function fillDiagnoses(dxList) {
+    const filled = [];
+    const failed = [];
+    for (const dx of dxList) {
+      try {
+        filled.push({ dx, ...(await fillDiagnosis(dx)) });
+      } catch (e) {
+        failed.push({ dx, error: e });
+      }
+    }
+    return { filled, failed };
+  }
+
+  // Template diagnosis untuk ICD yang terisi di halaman (urut Primer, Sekunder).
+  function pageDiagnosisTemplates() {
+    return selectedIcdEntries()
+      .map((e) => DIAGNOSIS_TEMPLATES.find((d) => d.icd.some((c) => icdCodeMatches(c, e.code))))
+      .filter((d, i, a) => d && a.indexOf(d) === i);
+  }
+
+  function savedIcdCodesOnPage() {
+    const dg = pasienAktif() ? findVm("Diagnosa") : null;
+    return new Set((Array.isArray(dg?.data) ? dg.data : []).map(savedIcdCode));
+  }
+
+  // Hapus satu diagnosa yang BELUM tersimpan dari baris input Diagnosa (permintaan dokter).
+  // Diagnosa yang sudah tersimpan TIDAK dihapus script (hapus lewat ikon Medisin sendiri).
+  function removeUnsavedDiagnosis(code) {
+    const dg = needVm("Diagnosa", "Diagnosa");
+    const saved = new Set((Array.isArray(dg.data) ? dg.data : []).map(savedIcdCode));
+    if (saved.has(code)) return { code, removed: false, saved: true };
+    const rows = dg.input_icdx || [];
+    const row = rows.find((r) => r.val && icdOptionCode(r.val) === code);
+    if (!row) return { code, removed: false };
+    if (rows.length > 1 && typeof dg.removeColom === "function") dg.removeColom(row);
+    else {
+      row.val = null;
+      row.kasus = null;
+      row.tacc = "-1";
+    }
+    autoDxForPage().codes.delete(code);
+    LOG(`Diagnosa ${code} dihapus dari isian (belum disimpan)`);
+    return { code, removed: true };
+  }
+
+  // Tambah diagnosis pilihan dokter (banding/pencarian) TANPA mengganti yang sudah ada.
+  // Tidak dihitung "isian script", jadi tidak diganti otomatis saat keluhan diubah.
+  async function addDiagnosisChoice(dx) {
+    const page = selectedIcdEntries();
+    if (dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)))) return { dx, added: false, note: `${dx.label} sudah terisi` };
+    const r = await fillDiagnosis(dx);
+    autoDxForPage().codes.delete(r.icdCode);
+    return { dx, added: true, note: `${dx.label} (ICD ${r.icdCode}) ditambahkan` };
   }
 
   // Template ISPA lama (tidak ada di menu; dipertahankan untuk runTemplate("ispa")).
@@ -3644,11 +4062,13 @@
   function suggestMedicationsFromAnamnesis(rawText, group, options = {}) {
     const result = { keys: [], actionKeys: [], matches: [], notes: [] };
     const lower = String(rawText || "").toLowerCase().replace(/ /g, " ");
-    const dx = options.diagnosis || null;
+    // v0.7.0: options.diagnoses = semua diagnosis terisi; obat tiap diagnosis ikut disarankan.
+    const dxs = (options.diagnoses || [options.diagnosis]).filter((d, i, a) => d && a.indexOf(d) === i);
+    const dx = dxs[0] || null;
     const vit = options.vitals || null; // hasil assessVitals()
     if ((!lower.trim() && !dx && !vit?.fever) || (group !== "adult" && group !== "child")) return result;
 
-    if (dx) {
+    for (const dx of dxs) {
       const keys = dx[group] || [];
       const actions = dx.actions || [];
       result.matches.push({ label: `Diagnosis ${dx.label}`, keyword: dx.icd[0], keys: [...keys], actions: [...actions] });
@@ -4385,14 +4805,22 @@
         ? `<b>TTV:</b> ${escapePreviewHtml(summary)}${flagsHtml ? `<div>${flagsHtml}</div>` : ""}`
         : '<span class="akm-hint">TTV kunjungan ini belum terbaca.</span>';
     }
+    // v0.7.0: obat mengikuti SEMUA diagnosis terisi (+ diagnosis dari keluhan).
+    const medDiagnoses = () => [presetDiagnosis, ...pageDiagnosisTemplates()].filter((d, i, a) => d && a.indexOf(d) === i);
     const renderDx = (icdList, diagText) => {
+      const savedCodes = savedIcdCodesOnPage();
       const rows = icdList.map(
         (e) =>
-          `<div class="akm-dx-row"><b>${escapePreviewHtml(e.code)}</b> <span class="akm-dx-role">${e.role}</span> ${escapePreviewHtml(e.name)}</div>`,
+          `<div class="akm-dx-row"><span><b>${escapePreviewHtml(e.code)}</b> <span class="akm-dx-role">${e.role}</span> ${escapePreviewHtml(e.name)}</span>` +
+          (savedCodes.has(e.code)
+            ? '<span class="akm-dx-saved" title="Sudah tersimpan; hapus lewat ikon hapus di bagian Diagnosa Medisin">tersimpan</span>'
+            : `<button type="button" class="akm-dx-del" data-dx-del="${escapePreviewHtml(e.code)}" title="Hapus diagnosa ini (belum disimpan)" aria-label="Hapus ${escapePreviewHtml(e.code)}">✕</button>`) +
+          `</div>`,
       );
       if (diagText) rows.push(`<div class="akm-hint">Diagnosa: ${escapePreviewHtml(diagText)}</div>`);
-      if (presetDiagnosis)
-        rows.push(`<div class="akm-hint">Obat ikut: <b>${escapePreviewHtml(presetDiagnosis.label)}</b></div>`);
+      const meds = medDiagnoses();
+      if (meds.length)
+        rows.push(`<div class="akm-hint">Obat ikut: <b>${escapePreviewHtml(meds.map((d) => d.label).join(" + "))}</b></div>`);
       shade.querySelector("#ak-medgroup-dx").innerHTML = rows.length
         ? rows.join("")
         : '<span class="akm-hint akm-missing">Belum ada diagnosa.</span>';
@@ -4422,11 +4850,11 @@
       }
       const page = selectedIcdEntries();
       const filled = dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)));
-      const others = (found.others || []).map(dxLabelOf);
+      const others = detectDiagnoses(t, vitalsAssessment).list.slice(1).map((f) => dxLabelOf(f.key));
       el.innerHTML =
         `<div class="akm-dxp"><div class="akm-dxp-head">🔎 Dari keluhan<span class="akm-dxp-tag${filled ? " ok" : ""}">${filled ? "sudah terisi" : "akan dipilih"}</span></div>` +
         `<div><b>${escapePreviewHtml(dx.icd[0])}</b> ${escapePreviewHtml(dx.label)} <small>(dari "${escapePreviewHtml(found.keyword)}")</small></div>` +
-        (others.length ? `<small>Juga cocok: ${escapePreviewHtml(others.join(", "))}</small>` : "") +
+        (others.length ? `<small>+ diagnosis tambahan: ${escapePreviewHtml(others.join(", "))}</small>` : "") +
         `</div>`;
     };
     renderDxPreview();
@@ -4474,7 +4902,7 @@
       for (const k of autoAdded) selectedMedicationKeys.delete(k);
       autoAdded.clear();
       if (reset) dismissed.clear();
-      const s = suggestMedicationsFromAnamnesis(anamnesisEl.value, group, { diagnosis: presetDiagnosis, vitals: vitalsAssessment });
+      const s = suggestMedicationsFromAnamnesis(anamnesisEl.value, group, { diagnoses: medDiagnoses(), vitals: vitalsAssessment });
       suggestedKeys = new Set(s.keys);
       // v0.5.0: tanda bahaya / hamil / alergi obat -> obat tidak dicentang otomatis.
       const akFlags = detectRedFlags(anamnesisEl.value, vitalsAssessment);
@@ -4664,22 +5092,28 @@
     };
     const renderDxChoices = () => {
       if (!dxChoicesEl) return;
-      const list = diagnosisCandidates(String(anamnesisEl.value || ""), vitalsAssessment);
-      dxChoicesEl.innerHTML = list.length
-        ? `<div class="akm-dxc-title">PILIHAN DIAGNOSIS</div><div class="akm-dxc-list">${list.map(dxBtn).join("")}</div>`
-        : "";
+      // v0.7.0: diagnosis dari keluhan + DIAGNOSIS BANDING (ketuk = tambah, ✕ di atas = hapus).
+      const det = detectDiagnoses(String(anamnesisEl.value || ""), vitalsAssessment);
+      const tpl = (k) => DIAGNOSIS_TEMPLATES.find((d) => d.key === k);
+      const main = det.list.map((f) => tpl(f.key)).filter(Boolean);
+      const band = det.banding.map(tpl).filter(Boolean);
+      dxChoicesEl.innerHTML =
+        (main.length ? `<div class="akm-dxc-title">DARI KELUHAN</div><div class="akm-dxc-list">${main.map(dxBtn).join("")}</div>` : "") +
+        (band.length
+          ? `<div class="akm-dxc-title">DIAGNOSIS BANDING · ketuk untuk menambah</div><div class="akm-dxc-list">${band.map(dxBtn).join("")}</div>`
+          : "");
     };
     const chooseDx = (d) =>
       runTask("PILIH DIAGNOSIS", async () => {
         if (syncStatusEl) syncStatusEl.textContent = `⏳ Memilih ${d.label}…`;
         let r;
         try {
-          r = await applyDiagnosisChoice(d);
+          r = await addDiagnosisChoice(d);
         } catch (e) {
           if (syncStatusEl) syncStatusEl.textContent = `✕ ${d.label} belum terisi: ${e?.message || e}. Isi manual di bagian Diagnosa.`;
           throw e;
         }
-        presetDiagnosis = d;
+        if (!presetDiagnosis) presetDiagnosis = d;
         dxSyncedText = String(anamnesisEl.value || "").trim();
         if (syncStatusEl) syncStatusEl.textContent = `✓ Diagnosis: ${r.note}`;
         renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
@@ -4731,9 +5165,32 @@
       }
     });
     shade.querySelector(".akm-diagnosis")?.addEventListener("click", (ev) => {
-      const b = ev.target.closest?.("button[data-dx-key],button[data-icd-i]");
+      const b = ev.target.closest?.("button[data-dx-key],button[data-icd-i],button[data-dx-del]");
       if (!b) return;
       ev.preventDefault();
+      if (b.dataset.dxDel) {
+        // v0.7.0: hapus diagnosa yang kurang cocok (hanya yang belum tersimpan).
+        const code = b.dataset.dxDel;
+        let r;
+        try {
+          r = removeUnsavedDiagnosis(code);
+        } catch (e) {
+          notify(`Hapus diagnosa gagal: ${e?.message || e}`, "error", 8000);
+          return;
+        }
+        if (presetDiagnosis?.icd.some((c) => icdCodeMatches(c, code))) presetDiagnosis = pageDiagnosisTemplates()[0] || null;
+        if (syncStatusEl)
+          syncStatusEl.textContent = r.removed
+            ? `✓ Diagnosa ${code} dihapus (belum disimpan).`
+            : r.saved
+              ? `${code} sudah TERSIMPAN: hapus lewat ikon hapus di bagian Diagnosa Medisin.`
+              : `${code} tidak ditemukan di isian Diagnosa.`;
+        renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
+        renderDxPreview();
+        renderDxChoices();
+        resuggest();
+        return;
+      }
       if (b.dataset.dxKey) {
         const d = DIAGNOSIS_TEMPLATES.find((x) => x.key === b.dataset.dxKey);
         if (d) chooseDx(d).then(() => dxSearchEl?.value && renderDxSearch());
@@ -4837,6 +5294,8 @@
     let dxResult = null;
     let dxDetected = null;
     let dxError = null;
+    const dxExtra = [];
+    const dxExtraFail = [];
     // v10.0.5: tiap langkah RESUME berdiri sendiri. Dulu satu langkah gagal (mis.
     // Layanan) menghentikan semuanya: Status Pulang kosong, Paket Resep tidak terbuka.
     const failed = [];
@@ -4876,6 +5335,11 @@
         const vitals = assessVitals(readVitalsFromPage(), getPatientAgeFromIdentity()?.ageYears ?? null);
         dxDetected = detectDiagnosisFromComplaint(readChiefComplaintFromPage().text, { vitals });
         const dx = dxDetected && DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key);
+        // v0.7.0: keluhan lain yang berbeda -> diagnosis tambahan (sekunder).
+        const dxMore = detectDiagnoses(readChiefComplaintFromPage().text, vitals)
+          .list.slice(1)
+          .map((f) => DIAGNOSIS_TEMPLATES.find((d) => d.key === f.key))
+          .filter(Boolean);
         // v10.0.5: ICD yang sudah diisi dokter dihormati; tidak ditambah diagnosis lain.
         const existingIcd = selectedIcdEntries();
         if (existingIcd.length) {
@@ -4892,6 +5356,14 @@
             console.warn("RESUME + DIAGNOSIS: diagnosis gagal", e);
           }
           if (dxResult) LOG(`Diagnosis dari Keluhan Utama ("${dxDetected.keyword}") -> ${dx.label} ${dxResult.icdCode}`);
+          if (dxResult)
+            for (const d2 of dxMore) {
+              try {
+                dxExtra.push({ dx: d2, icdCode: (await fillDiagnosis(d2)).icdCode });
+              } catch (e) {
+                dxExtraFail.push(d2.label);
+              }
+            }
         } else {
           LOG("Diagnosis tidak dikenali dari Keluhan Utama -> dilewati");
         }
@@ -4939,9 +5411,9 @@
         } else if (dxResult) {
           notify(
             `RESUME + DIAGNOSIS selesai. Diagnosis: ${dxLabel(dxDetected.key)} (ICD ${dxResult.icdCode}), dari kata "${dxDetected.keyword}".` +
-              (dxDetected.others.length
-                ? ` Juga cocok: ${dxDetected.others.map(dxLabel).join(", ")} — isi manual bila perlu.`
-                : "") +
+              (dxExtra.length ? ` Diagnosis tambahan: ${dxExtra.map((x) => `${x.dx.label} (ICD ${x.icdCode})`).join(", ")}.` : "") +
+              (dxExtraFail.length ? ` Gagal diisi: ${dxExtraFail.join(", ")}.` : "") +
+              " Di Paket Resep: ✕ untuk menghapus diagnosis yang kurang cocok, atau tambah DIAGNOSIS BANDING." +
               " Paket Resep dibuka: periksa obat lalu INPUT RESEP." +
               failNote,
             failed.length ? "warn" : "success",
@@ -4966,7 +5438,8 @@
       const dxNote = !isResume
         ? ""
         : dxResult
-          ? ` Diagnosa: ${DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key)?.label || dxDetected.key} (ICD ${dxResult.icdCode}), dari "${dxDetected.keyword}".`
+          ? ` Diagnosa: ${DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key)?.label || dxDetected.key} (ICD ${dxResult.icdCode}), dari "${dxDetected.keyword}".` +
+            (dxExtra.length ? ` Tambahan: ${dxExtra.map((x) => `${x.dx.label} (ICD ${x.icdCode})`).join(", ")}.` : "")
           : dxError?.existing
             ? ` Diagnosa sudah terisi (${dxError.existing.map((e) => e.code).join(", ")}).`
             : dxError
@@ -5309,7 +5782,10 @@
     .ak-rp-label{margin-bottom:6px!important;font:800 11px/1.3 ${AK_FONT}!important;color:#64748b!important;letter-spacing:.4px!important;}
 
     /* ---------- Paket Resep: isi ---------- */
-    .akm-dx-row{font:500 12.5px/1.5 ${AK_FONT}!important;color:#334155!important;}
+    .akm-dx-row{font:500 12.5px/1.5 ${AK_FONT}!important;color:#334155!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;padding:2px 0!important;}
+    .akm-dx-del{flex:none!important;width:28px!important;height:28px!important;border:1px solid #fecaca!important;border-radius:999px!important;background:#fff1f2!important;color:#dc2626!important;font:700 13px/1 ${AK_FONT}!important;cursor:pointer!important;padding:0!important;}
+    .akm-dx-del:hover{background:#dc2626!important;color:#fff!important;}
+    .akm-dx-saved{flex:none!important;font:600 10.5px/1.4 ${AK_FONT}!important;color:#64748b!important;background:#f1f5f9!important;border-radius:999px!important;padding:2px 8px!important;}
     .akm-dx-row b{color:#0f172a!important;}
     .akm-dx-role{font:700 10px/1.4 ${AK_FONT}!important;color:#0369a1!important;background:#f0f9ff!important;border:1px solid #bae6fd!important;
       border-radius:999px!important;padding:0 6px!important;margin-right:4px!important;}
@@ -6673,6 +7149,13 @@
       ANAMNESIS_SUGGESTION_RULES,
       DIAGNOSIS_TEMPLATES,
       DIAGNOSIS_FROM_COMPLAINT,
+      detectDiagnoses,
+      DX_BANDING,
+      DX_FAMILY,
+      fillDiagnoses,
+      pageDiagnosisTemplates,
+      removeUnsavedDiagnosis,
+      addDiagnosisChoice,
       parseLockText,
       lockEffective,
       clampLauncherPos,

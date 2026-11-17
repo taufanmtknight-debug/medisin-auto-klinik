@@ -49,7 +49,7 @@ const CASES = {
   "tidak bisa kencing sejak pagi": "RETENSI_URIN",
   "sering haus dan sering kencing": "DM",
   "keputihan berbau gatal": "FLUOR_ALBUS",
-  "telat haid 2 bulan": "GANGGUAN_HAID",
+  "telat haid 2 bulan": "AMENORE",
   "haid banyak sekali 10 hari": "MENORAGIA",
   "payudara bengkak merah saat menyusui": "MASTITIS",
   "mau suntik kb": "KB",

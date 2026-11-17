@@ -1,0 +1,7246 @@
+// ==UserScript==
+// @name         Medisin - AUTO KLINIK
+// @namespace    medisin-auto-klinik
+// @version      0.7.0
+// @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
+// @author       taufanmtknight-debug
+// @match        https://app.medisin.id/*
+// @run-at       document-start
+// @noframes
+// @inject-into  page
+// @grant        GM_addStyle
+// @homepageURL  https://github.com/taufanmtknight-debug/medisin-auto-klinik
+// @updateURL    https://raw.githubusercontent.com/taufanmtknight-debug/medisin-auto-klinik/claude/project-thread-cg0a4l/Medisin_AUTO_KLINIK.user.js
+// @downloadURL  https://raw.githubusercontent.com/taufanmtknight-debug/medisin-auto-klinik/claude/project-thread-cg0a4l/Medisin_AUTO_KLINIK.user.js
+// ==/UserScript==
+
+// PENTING: @name dan @namespace JANGAN diubah setelah script dipasang. Violentmonkey
+// mengenali script dari pasangan keduanya; bila berubah, script dianggap baru.
+// @inject-into HARUS "page": script membaca state Vue milik halaman Medisin.
+//
+// Aturan tetap: script hanya MENGISI. Tidak pernah menekan/memanggil SIMPAN, SUBMIT,
+// SUBMIT BPJS, SUBMIT SATUSEHAT, PROSES KASIR. Isian dokter tidak ditimpa.
+//
+// Susunan file:
+//   1. KONFIGURASI & DATA     — master obat, template resep/racikan, Paket Golongan
+//   2. JEMBATAN MEDISIN       — akses Vue 2 / Vuex, pasien aktif
+//   3. FORM PELAYANAN         — kesadaran, prognosa, status pulang, anamnesa, diagnosa
+//   4. RESEP & RACIKAN        — pemetaan nama obat, isi resep & racikan
+//   5. DATA PASIEN            — umur, BB, TTV, keluhan (dari store Medisin)
+//   6. PAKET RESEP GOLONGAN   — audit, resolver, preview, eksekusi, picker
+//   7. MENU                   — RESUME, RESUME + DIAGNOSIS + RESEP
+//   8. UI & BOOT              — notifikasi, kunci proses, launcher, CSS
+
+
+(function () {
+  "use strict";
+
+  // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
+  // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
+  const SCRIPT_VERSION_FALLBACK = "0.7.0";
+  const VERSION =
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
+    SCRIPT_VERSION_FALLBACK;
+
+  // Violentmonkey/Chrome compatibility: keep styling functional even if
+  // GM_addStyle is unavailable in the selected injection context.
+  const addStyle =
+    typeof GM_addStyle === "function"
+      ? GM_addStyle
+      : (css) => {
+          const style = document.createElement("style");
+          style.textContent = css;
+          (document.head || document.documentElement).appendChild(style);
+        };
+
+  // ============================================================
+  // 1. KONFIGURASI & DATA
+  // ============================================================
+
+  // MASTER ITEM DATABASE - NAMA TARGET KLINIK PINTAR
+  // Keyword sengaja sama dengan nama target agar pencarian spesifik.
+  // Semua resep/racikan WAJIB merujuk ke key di sini (diaudit otomatis).
+  const ITEMS = {
+    ZINC_20: { keyword: "BPJS -- ZINC 20 MG", target: "BPJS -- ZINC 20 MG", unit: "tablet" },
+    ORALIT: { keyword: "BPJS -- ORALIT", target: "BPJS -- ORALIT", unit: "sachet" },
+    AKITA: { keyword: "BPJS -- AKITA", target: "BPJS -- AKITA", unit: "tablet" },
+    LODIA: { keyword: "BPJS -- LODIA", target: "BPJS -- LODIA", unit: "tablet" },
+    BETAMETHASONE_SALEP: {
+      keyword: "BPJS -- BETAMETHASONE 5GR SALEP",
+      target: "BPJS -- BETAMETHASONE 5GR SALEP",
+      unit: "tube",
+      usageUnit: "OLES",
+    },
+    GENTAMICIN_SALEP: {
+      keyword: "BPJS -- GENTAMICIN CR 5GR",
+      target: "BPJS -- GENTAMICIN CR 5GR",
+      unit: "tube",
+      usageUnit: "OLES",
+    },
+    // v0.3.0 (Medisin): tetes mata/telinga pilihan dokter. Satuan minidose = 1 ampul tetes.
+    CENDO_XITROL: { keyword: "BPJS -- CENDO XITROL MINIDOSE", target: "BPJS -- CENDO XITROL MINIDOSE", unit: "minidose", usageUnit: "TETES" },
+    CENDO_LYTEERS: { keyword: "BPJS -- CENDO LYTEERS MINIDOSE", target: "BPJS -- CENDO LYTEERS MINIDOSE", unit: "minidose", usageUnit: "TETES" },
+    RECO_TETES_TELINGA: { keyword: "BPJS -- RECO TETES TELINGA", target: "BPJS -- RECO TETES TELINGA", unit: "botol", usageUnit: "TETES" },
+    RECO_SALEP_MATA: { keyword: "BPJS -- RECO SALEP MATA", target: "BPJS -- RECO SALEP MATA", unit: "tube", usageUnit: "OLES" },
+    MICONAZOLE_SALEP: { keyword: "BPJS -- MICONAZOLE 10GR SALEP", target: "BPJS -- MICONAZOLE 10GR SALEP", unit: "tube", usageUnit: "OLES" },
+    ACYCLOVIR_SALEP: { keyword: "BPJS -- ACYCLOVIR 5GR SALEP", target: "BPJS -- ACYCLOVIR 5GR SALEP", unit: "tube", usageUnit: "OLES" },
+    BEDAK_SALICYL: { keyword: "BPJS -- BEDAK SALICYL", target: "BPJS -- BEDAK SALICYL", unit: "pcs", usageUnit: "TABUR" },
+    ACYCLOVIR_400: { keyword: "BPJS -- ACYCLOVIR 400 MG", target: "BPJS -- ACYCLOVIR 400 MG", unit: "tablet" },
+    SCOPMA: { keyword: "BPJS -- SCOPMA", target: "BPJS -- SCOPMA", unit: "tablet" },
+    TABLET_TAMBAH_DARAH: { keyword: "BPJS -- TABLET TAMBAH DARAH", target: "BPJS -- TABLET TAMBAH DARAH", unit: "tablet" },
+    MECOBALAMIN_500: { keyword: "BPJS -- MECOBALAMIN 500 MG", target: "BPJS -- MECOBALAMIN 500 MG", unit: "tablet" },
+    SUPERHOID_SUPP: { keyword: "BPJS -- SUPERHOID SUPP", target: "BPJS -- SUPERHOID SUPP", unit: "suppositoria", usageUnit: "SUPP" },
+    POT_PLASTIK: { keyword: "BPJS -- POT PLASTIK 30 CC", target: "BPJS -- POT PLASTIK 30 CC", unit: "pcs" },
+    CETIRIZINE_10: { keyword: "BPJS -- CETIRIZINE HCL 10 MG", target: "BPJS -- CETIRIZINE HCL 10 MG", unit: "tablet" },
+    ANTASIDA_TABLET: { keyword: "BPJS -- ANTASIDA DOEN TABLET", target: "BPJS -- ANTASIDA DOEN TABLET", unit: "tablet" },
+    PARACETAMOL_500: { keyword: "BPJS -- PARACETAMOL 500 MG", target: "BPJS -- PARACETAMOL 500 MG", unit: "tablet" },
+    DICLOFENAC_50: { keyword: "BPJS -- NATRIUM DICLOFENAC 50 MG", target: "BPJS -- NATRIUM DICLOFENAC 50 MG", unit: "tablet" },
+    DEXAMETHASONE_05: { keyword: "BPJS -- DEXAMETHASONE 0,5 MG", target: "BPJS -- DEXAMETHASONE 0,5 MG", unit: "tablet" },
+    CALCIUM_500: { keyword: "BPJS -- CALCIUM 500 MG", target: "BPJS -- CALCIUM 500 MG", unit: "tablet" },
+    AMLODIPINE_5: { keyword: "BPJS -- AMLODIPINE 5 MG", target: "BPJS -- AMLODIPINE 5 MG", unit: "tablet" },
+    AMLODIPINE_10: { keyword: "BPJS -- AMLODIPINE 10 MG", target: "BPJS -- AMLODIPINE 10 MG", unit: "tablet" },
+    CAPTOPRIL_12_5: { keyword: "BPJS -- CAPTOPRIL 12,5 MG", target: "BPJS -- CAPTOPRIL 12,5 MG", unit: "tablet" },
+    CAPTOPRIL_25: { keyword: "BPJS -- CAPTOPRIL 25 MG", target: "BPJS -- CAPTOPRIL 25 MG", unit: "tablet" },
+    METFORMIN_500: { keyword: "BPJS -- METFORMIN HCL 500 MG", target: "BPJS -- METFORMIN HCL 500 MG", unit: "tablet" },
+    GLIMEPIRIDE_1: { keyword: "BPJS -- GLIMEPIRIDE 1 MG", target: "BPJS -- GLIMEPIRIDE 1 MG", unit: "tablet" },
+    GLIMEPIRIDE_2: { keyword: "BPJS -- GLIMEPIRIDE 2 MG", target: "BPJS -- GLIMEPIRIDE 2 MG", unit: "tablet" },
+    SIMVASTATIN_10: { keyword: "BPJS -- SIMVASTATIN 10 MG", target: "BPJS -- SIMVASTATIN 10 MG", unit: "tablet" },
+    ALLOPURINOL_100: { keyword: "BPJS -- ALLOPURINOL 100 MG", target: "BPJS -- ALLOPURINOL 100 MG", unit: "tablet" },
+
+    // Pengecualian strip: item reguler/non-BPJS.
+    STRIP_KOLESTEROL: { keyword: "STRIP KOLESTEROL", target: "STRIP KOLESTEROL", unit: "pcs", regularOnly: true },
+    STRIP_ASAM_URAT: { keyword: "STRIP ASAM URAT", target: "STRIP ASAM URAT", unit: "pcs", regularOnly: true },
+
+    STRIP_GULA: { keyword: "BPJS -- STRIP GULA DARAH", target: "BPJS -- STRIP GULA DARAH", unit: "pcs" },
+    ALKOHOL_SWAB: { keyword: "BPJS -- ALKOHOL SWAB", target: "BPJS -- ALKOHOL SWAB", unit: "pcs" },
+    BLOOD_LANCET_26G: { keyword: "BPJS -- BLOOD LANCET 26G", target: "BPJS -- BLOOD LANCET 26G", unit: "pcs" },
+    SPUIT_1CC: { keyword: "BPJS -- SPUIT 1 CC", target: "BPJS -- SPUIT 1 CC", unit: "pcs" },
+    SPUIT_5CC: { keyword: "BPJS -- SPUIT 5 CC", target: "BPJS -- SPUIT 5 CC", unit: "pcs" },
+    HANDSCOON_S: { keyword: "BPJS -- HANDSCOON S", target: "BPJS -- HANDSCOON S", unit: "pcs" },
+    VITAMIN_B_COMPLEX: { keyword: "BPJS -- VITAMIN B COMPLEX", target: "BPJS -- VITAMIN B COMPLEX", unit: "tablet" },
+    GUAIFENESIN_100: { keyword: "BPJS -- GUAIFENESIN 100 MG", target: "BPJS -- GUAIFENESIN 100 MG", unit: "kaplet" },
+    CTM_4: { keyword: "BPJS -- CTM 4 MG", target: "BPJS -- CTM 4 MG", unit: "tablet" },
+    ALPARA: { keyword: "BPJS -- ALPARA", target: "BPJS -- ALPARA", unit: "tablet" },
+    AMOXICILLIN_500: { keyword: "BPJS -- AMOXICILLIN 500 MG", target: "BPJS -- AMOXICILLIN 500 MG", unit: "tablet" },
+    DOMPERIDONE_10: { keyword: "BPJS -- DOMPERIDONE 10 MG", target: "BPJS -- DOMPERIDONE 10 MG", unit: "tablet" },
+    DOMPERIDONE_SYRUP: {
+      keyword: "BPJS -- DOMPERIDONE 5 MG/5ML SYRUP",
+      target: "BPJS -- DOMPERIDONE 5 MG/5ML SYRUP",
+      unit: "bottle",
+    },
+    AMOXICILLIN_SYRUP: {
+      keyword: "BPJS -- AMOXICILLIN TRIHYDRATE 125 MG/5ML SYRUP",
+      target: "BPJS -- AMOXICILLIN TRIHYDRATE 125 MG/5ML SYRUP",
+      unit: "bottle",
+    },
+    CEFADROXIL_500: {
+      keyword: "BPJS -- CEFADROXIL MONOHYDRATE 500 MG",
+      target: "BPJS -- CEFADROXIL MONOHYDRATE 500 MG",
+      unit: "kapsul",
+    },
+    CEFADROXIL_SYRUP: {
+      keyword: "BPJS -- CEFADROXIL 125 MG/5 ML SYR",
+      target: "BPJS -- CEFADROXIL 125 MG/5 ML SYR",
+      unit: "bottle",
+    },
+    RANITIDINE_HCL: { keyword: "BPJS -- RANITIDINE HCL", target: "BPJS -- RANITIDINE HCL", unit: "tablet" },
+    AMBROXOL_30: { keyword: "BPJS -- AMBROXOL 30 MG", target: "BPJS -- AMBROXOL 30 MG", unit: "tablet" },
+    IBUPROFEN_400: { keyword: "BPJS -- IBUPROFEN 400 MG", target: "BPJS -- IBUPROFEN 400 MG", unit: "tablet" },
+
+    // v10: obat standar FKTP, nama persis sudah dicocokkan dengan daftar "Cari Obat"
+    // Klinik Pintar. Obat baru yang belum dicocokkan diberi verify: true (test
+    // mencegah rilis selama masih ada).
+    // Di Klinik Pintar tertulis tanpa kekuatan ("BPJS -- BETAHISTINE MESILATE" = 6 mg).
+    BETAHISTIN_6: { keyword: "BPJS -- BETAHISTINE MESILATE", target: "BPJS -- BETAHISTINE MESILATE", unit: "tablet" },
+    OMEPRAZOLE_20: { keyword: "BPJS -- OMEPRAZOLE 20 MG", target: "BPJS -- OMEPRAZOLE 20 MG", unit: "kapsul" },
+    ASAM_MEFENAMAT_500: { keyword: "BPJS -- ASAM MEFENAMAT 500 MG", target: "BPJS -- ASAM MEFENAMAT 500 MG", unit: "tablet" },
+    METHYLPREDNISOLONE_4: { keyword: "BPJS -- METHYLPREDNISOLONE 4 MG", target: "BPJS -- METHYLPREDNISOLONE 4 MG", unit: "tablet" },
+    LORATADINE_10: { keyword: "BPJS -- LORATADINE 10 MG", target: "BPJS -- LORATADINE 10 MG", unit: "tablet" },
+    CIPROFLOXACIN_500: { keyword: "BPJS -- CIPROFLOXACIN 500 MG", target: "BPJS -- CIPROFLOXACIN 500 MG", unit: "tablet" },
+    METRONIDAZOLE_500: { keyword: "BPJS -- METRONIDAZOLE 500 MG", target: "BPJS -- METRONIDAZOLE 500 MG", unit: "tablet" },
+  };
+
+  // Template rekam medis ISPA DEWASA (menu PENYAKIT dan tombol ISPA di Resep Manual).
+  // v9: obat memakai format master ITEMS yang sama dengan semua resep lain.
+  const TEMPLATE = {
+    name: "ISPA DEWASA",
+    consciousness: "Compos Mentis",
+    diagnosisText:
+      "Acute upper respiratory infections of multiple and unspecified sites (Spesialis)",
+    diagnosisShort:
+      "Acute upper respiratory infections of multiple and unspecified sites",
+    prognosis: "Bonam (baik)",
+    icd10: "J06",
+    service: "BPJS - Dokter Umum Jasa Konsultasi",
+    discharge: "Berobat Jalan",
+    medicines: [
+      { item: "DEXAMETHASONE_05", freq: "3", dose: "1", days: "3", total: "9", instruction: "SETELAH MAKAN" },
+      { item: "VITAMIN_B_COMPLEX", freq: "1", dose: "1", days: "5", total: "5", instruction: "SETELAH MAKAN" },
+      { item: "ALPARA", freq: "3", dose: "1", days: "3", total: "10", instruction: "SETELAH MAKAN" },
+    ],
+  };
+
+  // TEMPLATE RESEP NON-RACIKAN
+  // Hanya memasukkan regimen/aturan yang diberikan pengguna.
+  const RECIPE_TEMPLATES = {
+    DIARE_ANAK_KURANG_6_BULAN: {
+      title: "DIARE ANAK <6 BULAN",
+      medicines: [
+        { item: "ZINC_20", freq: "1", dose: "0.5", days: "10", total: "5", instruction: "SETELAH MAKAN" },
+        { item: "ORALIT", freq: "1", dose: "1", days: "1", total: "4", instruction: "SETIAP BAB CAIR" },
+      ],
+    },
+    DIARE_ANAK_6_BULAN_PLUS: {
+      title: "DIARE ANAK >6 BULAN",
+      medicines: [
+        { item: "ZINC_20", freq: "1", dose: "1", days: "10", total: "10", instruction: "SETELAH MAKAN" },
+        { item: "ORALIT", freq: "1", dose: "1", days: "1", total: "4", instruction: "SETIAP BAB CAIR" },
+      ],
+    },
+    GEA: {
+      title: "GEA",
+      medicines: [
+        { item: "AKITA", freq: "1", dose: "2", days: "5", total: "10", instruction: "TIAP SELESAI BAB CAIR" },
+      ],
+    },
+    DERMATITIS: {
+      title: "DERMATITIS",
+      medicines: [
+        { item: "BETAMETHASONE_SALEP", freq: "2", dose: "1", days: "1", total: "1", instruction: "2 X 1 OLES" },
+        { item: "GENTAMICIN_SALEP", freq: "2", dose: "1", days: "1", total: "1", instruction: "2 X 1 OLES" },
+        { item: "POT_PLASTIK", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 POT" },
+        { item: "CETIRIZINE_10", freq: "1", dose: "1", days: "5", total: "5", instruction: "SESUAI ATURAN PAKAI" },
+      ],
+    },
+    DYSPEPSIA: {
+      title: "DYSPEPSIA",
+      medicines: [
+        { item: "ANTASIDA_TABLET", freq: "3", dose: "1", days: "3", total: "10", instruction: "SEBELUM MAKAN" },
+        { item: "PARACETAMOL_500", freq: "3", dose: "1", days: "3", total: "10", instruction: "KP NYERI; DAPAT DIULANG TIAP 4 JAM" },
+      ],
+    },
+    DEMAM_DEWASA: {
+      title: "DEMAM DEWASA",
+      medicines: [
+        { item: "PARACETAMOL_500", freq: "3", dose: "1", days: "3", total: "10", instruction: "JIKA DEMAM ATAU PUSING" },
+      ],
+    },
+    LBP: {
+      title: "LBP",
+      medicines: [
+        { item: "DICLOFENAC_50", freq: "3", dose: "1", days: "3", total: "10", instruction: "KP NYERI" },
+        { item: "DEXAMETHASONE_05", freq: "3", dose: "1", days: "3", total: "10", instruction: "SETELAH MAKAN" },
+      ],
+    },
+    OA_GENU: {
+      title: "OA GENU",
+      medicines: [
+        { item: "DICLOFENAC_50", freq: "3", dose: "1", days: "3", total: "10", instruction: "KP NYERI" },
+        { item: "DEXAMETHASONE_05", freq: "3", dose: "1", days: "3", total: "10", instruction: "SETELAH MAKAN" },
+        { item: "CALCIUM_500", freq: "1", dose: "1", days: "5", total: "5", instruction: "SETELAH MAKAN" },
+      ],
+    },
+    MYALGIA: {
+      title: "MYALGIA",
+      medicines: [
+        { item: "PARACETAMOL_500", freq: "3", dose: "1", days: "3", total: "10", instruction: "KP NYERI" },
+        { item: "VITAMIN_B_COMPLEX", freq: "1", dose: "1", days: "5", total: "5", instruction: "SETELAH MAKAN" },
+      ],
+    },
+
+    // HT: setiap pilihan hanya satu obat, tidak dikombinasikan.
+    HT_AMLODIPINE_5: {
+      title: "HT - AMLODIPINE 5 MG",
+      medicines: [{ item: "AMLODIPINE_5", freq: "1", dose: "1", days: "15", total: "15", instruction: "SESUAI ATURAN PAKAI" }],
+    },
+    HT_AMLODIPINE_10: {
+      title: "HT - AMLODIPINE 10 MG",
+      medicines: [{ item: "AMLODIPINE_10", freq: "1", dose: "1", days: "15", total: "15", instruction: "SESUAI ATURAN PAKAI" }],
+    },
+    HT_CAPTOPRIL_12_5: {
+      title: "HT - CAPTOPRIL 12,5 MG",
+      medicines: [{ item: "CAPTOPRIL_12_5", freq: "2", dose: "1", days: "15", total: "30", instruction: "SESUAI ATURAN PAKAI" }],
+    },
+    HT_CAPTOPRIL_25: {
+      title: "HT - CAPTOPRIL 25 MG",
+      medicines: [{ item: "CAPTOPRIL_25", freq: "2", dose: "1", days: "15", total: "30", instruction: "SESUAI ATURAN PAKAI" }],
+    },
+
+    // DM: setiap pilihan hanya satu obat, tidak dikombinasikan.
+    DM_METFORMIN: {
+      title: "DM - METFORMIN 500 MG",
+      medicines: [{ item: "METFORMIN_500", freq: "3", dose: "1", days: "15", total: "45", instruction: "SESUAI ATURAN PAKAI" }],
+    },
+    DM_GLIMEPIRIDE_1: {
+      title: "DM - GLIMEPIRIDE 1 MG",
+      medicines: [{ item: "GLIMEPIRIDE_1", freq: "1", dose: "1", days: "15", total: "15", instruction: "SESUAI ATURAN PAKAI" }],
+    },
+    DM_GLIMEPIRIDE_2: {
+      title: "DM - GLIMEPIRIDE 2 MG",
+      medicines: [{ item: "GLIMEPIRIDE_2", freq: "1", dose: "1", days: "15", total: "15", instruction: "SESUAI ATURAN PAKAI" }],
+    },
+
+    CEK_GULA: {
+      title: "CEK GULA DARAH",
+      medicines: [
+        { item: "STRIP_GULA", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PEMERIKSAAN" },
+        { item: "ALKOHOL_SWAB", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+        { item: "BLOOD_LANCET_26G", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+      ],
+    },
+    ASAM_URAT: {
+      title: "ASAM URAT",
+      medicines: [{ item: "ALLOPURINOL_100", freq: "1", dose: "1", days: "10", total: "10", instruction: "SETELAH MAKAN" }],
+    },
+    KOLESTEROL: {
+      title: "KOLESTEROL",
+      medicines: [{ item: "SIMVASTATIN_10", freq: "1", dose: "1", days: "10", total: "10", instruction: "MALAM HARI" }],
+    },
+    CEK_ASAM_URAT: {
+      title: "CEK ASAM URAT",
+      medicines: [
+        { item: "STRIP_ASAM_URAT", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PEMERIKSAAN" },
+        { item: "ALKOHOL_SWAB", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+        { item: "BLOOD_LANCET_26G", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+      ],
+    },
+    CEK_KOLESTEROL: {
+      title: "CEK KOLESTEROL",
+      medicines: [
+        { item: "STRIP_KOLESTEROL", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PEMERIKSAAN" },
+        { item: "ALKOHOL_SWAB", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+        { item: "BLOOD_LANCET_26G", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+      ],
+    },
+    IMUNISASI: {
+      title: "IMUNISASI",
+      medicines: [
+        { item: "SPUIT_1CC", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+        { item: "HANDSCOON_S", freq: "1", dose: "2", days: "1", total: "2", instruction: "2 PCS" },
+        { item: "ALKOHOL_SWAB", freq: "1", dose: "1", days: "1", total: "1", instruction: "1 PCS" },
+      ],
+    },
+  };
+
+  // ------------------------------------------------------------
+  // RENTANG BERAT BADAN (BB)
+  // Rentang selalu BERSAMBUNG: rentang pertama [1, step] kg, berikutnya
+  // (batas sebelumnya, batas + step] kg. Dosis/jumlah tablet = nomor rentang.
+  //   step 5   : 1-5 kg, >5-10 kg, >10-15 kg, ...
+  //   step 2,5 : 1-2,5 kg, >2,5-5 kg, >5-7,5 kg, ...
+  // v9: sebelumnya rentang berikutnya dimulai dari "batas + 1" (6-10, 11-15)
+  // atau "+2,5" (3,5-5) sehingga BB seperti 6, 11, 16 kg atau 3 kg tidak
+  // mendapat template sama sekali. Untuk BB yang dulu sudah tercakup,
+  // dosis/jumlah tablet TIDAK berubah.
+  // ------------------------------------------------------------
+  function weightBands(step, maxKg) {
+    const bands = [];
+    for (let i = 1; i * step <= maxKg + 1e-9; i++) {
+      bands.push({ index: i, minKg: i === 1 ? 1 : (i - 1) * step, maxKg: i * step });
+    }
+    return bands;
+  }
+
+  function formatKg(kg) {
+    return String(kg).replace(".", ",");
+  }
+
+  function bandLabel(band) {
+    const min = band.index === 1 ? formatKg(band.minKg) : `>${formatKg(band.minKg)}`;
+    return `${min}-${formatKg(band.maxKg)} KG`;
+  }
+
+  function bandKey(band) {
+    const k = (n) => String(n).replace(".", "_");
+    return `${k(band.minKg)}_${k(band.maxKg)}KG`;
+  }
+
+  function isWeightInBand(band, weightKg) {
+    if (!band || !Number.isFinite(weightKg)) return false;
+    return band.index === 1
+      ? weightKg >= band.minKg && weightKg <= band.maxKg
+      : weightKg > band.minKg && weightKg <= band.maxKg;
+  }
+
+  // Syrup anak (non-racikan) berbasis BB. dose = nomor rentang (ml).
+  // days/total kosong = sengaja tidak diisi agar dokter menentukan sendiri.
+  const CHILD_SYRUP_SERIES = [
+    // Domperidone syrup: tiap 5 kg -> +1 ml, 3x sehari sebelum makan, 3 hari, 1 botol.
+    { prefix: "MUAL_MUNTAH_SYRUP_ANAK_", title: "MUAL MUNTAH SYRUP", step: 5, maxKg: 50, item: "DOMPERIDONE_SYRUP", freq: "3", days: "3", total: "1", instruction: "SEBELUM MAKAN" },
+    // Amoxicillin syrup: tiap 2,5 kg -> +1 ml, 3x sehari setelah makan, 1 botol (v10.0.6).
+    { prefix: "ANTIBIOTIK_SYRUP_ANAK_", title: "ANTIBIOTIK SYRUP", step: 2.5, maxKg: 50, item: "AMOXICILLIN_SYRUP", freq: "3", days: "", total: "1", instruction: "SETELAH MAKAN" },
+    // Cefadroxil syrup: pola dosis sama dengan Amoxicillin syrup, tetapi 2x sehari.
+    { prefix: "CEFADROXIL_SYRUP_ANAK_", title: "CEFADROXIL SYRUP", step: 2.5, maxKg: 50, item: "CEFADROXIL_SYRUP", freq: "2", days: "", total: "1", instruction: "SETELAH MAKAN" },
+  ];
+
+  for (const s of CHILD_SYRUP_SERIES) {
+    for (const band of weightBands(s.step, s.maxKg)) {
+      RECIPE_TEMPLATES[s.prefix + bandKey(band)] = {
+        title: `${s.title} ${bandLabel(band)}`,
+        band,
+        medicines: [
+          { item: s.item, freq: s.freq, dose: String(band.index), days: s.days, total: s.total, instruction: s.instruction },
+        ],
+      };
+    }
+  }
+
+  // Racikan (puyer) anak berbasis BB: tiap 5 kg -> +1 tablet tiap bahan.
+  // Semua: dosis 1 bungkus, satuan Pulvis, instruksi racikan "buat 10".
+  // v9.3: semua kolom racikan wajib terisi. Durasi = 10 bungkus / frekuensi per hari
+  // (3x -> 3 hari, 2x -> 5 hari, 1x -> 10 hari), sama dengan pola Racikan ISPA.
+  const CHILD_PUYER_SERIES = [
+    { prefix: "ISPA_ANAK_", title: "RACIKAN ISPA", name: "puyer batuk", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["GUAIFENESIN_100", "CTM_4", "DEXAMETHASONE_05"] },
+    { prefix: "DEMAM_ANAK_", title: "DEMAM ANAK", name: "puyer demam", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["PARACETAMOL_500"] },
+    // v10.0.9 (permintaan dokter): Ibuprofen 400 mg, tiap 7 kg -> +1 tablet, buat 10 puyer, 3x sehari.
+    { prefix: "IBUPROFEN_ANAK_", title: "IBUPROFEN ANAK", name: "puyer ibuprofen", step: 7, maxKg: 49, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["IBUPROFEN_400"] },
+    { prefix: "ANTIBIOTIK_ANAK_", title: "ANTIBIOTIK ANAK", name: "puyer antibiotik", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
+    { prefix: "MUAL_MUNTAH_ANAK_", title: "MUAL MUNTAH ANAK", name: "puyer mual muntah", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DOMPERIDONE_10"] },
+    // Cefadroxil puyer: pola jumlah tablet sama seperti Amoxicillin, tetapi 2x sehari.
+    { prefix: "CEFADROXIL_ANAK_", title: "CEFADROXIL", name: "cefadroxil", maxKg: 40, duration: "5", doseFreq: "2", instruction: "setelah makan", items: ["CEFADROXIL_500"] },
+    // v7.4.2: racikan "baru" (BB <= 40 kg). Dosis/instruksi mengikuti input pengguna.
+    // v0.5.2 (permintaan dokter): ranitidin 1,5 mg/kg/dosis 2x sehari = 1/2 tablet 150 mg per 5 kg dalam 10 bungkus (5 hari).
+    { prefix: "BARU_LAMBUNG_MUAL_", title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
+    { prefix: "BARU_MUAL_MUNTAH_", title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
+    { prefix: "BARU_AMOXICILLIN_", title: "AMOXICILLIN", name: "amoxicillin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
+    { prefix: "BARU_CETIRIZINE_", title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },
+    { prefix: "BARU_BAPIL2_", title: "BAPIL 2", name: "batuk pilek 2", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DEXAMETHASONE_05", "CTM_4", "AMBROXOL_30"] },
+  ];
+
+  const RACIKAN_TEMPLATES = {};
+  for (const s of CHILD_PUYER_SERIES) {
+    for (const band of weightBands(s.step || 5, s.maxKg)) {
+      RACIKAN_TEMPLATES[s.prefix + bandKey(band)] = {
+        title: `${s.title} ${bandLabel(band)}`,
+        band,
+        name: s.name,
+        duration: s.duration,
+        doseFreq: s.doseFreq,
+        doseAmount: "1",
+        unit: "Pulvis",
+        instruction: s.instruction,
+        compoundInstruction: "buat 10",
+        ingredients: s.items.map((it) => (typeof it === "string" ? { item: it, quantity: String(band.index) } : { item: it.item, quantity: String(band.index * it.perBand) })),
+      };
+    }
+  }
+
+  const SALEP_RACIKAN = {
+    title: "SALEP RACIKAN",
+    name: "salep racikan",
+    duration: "5",
+    doseFreq: "2",
+    doseAmount: "1",
+    unit: "Oles",
+    instruction: "oles di lesi",
+    compoundInstruction: "mf ungt",
+    ingredients: [
+      { item: "BETAMETHASONE_SALEP", quantity: "1" },
+      { item: "GENTAMICIN_SALEP", quantity: "1" },
+      { item: "POT_PLASTIK", quantity: "1" },
+    ],
+  };
+
+  // Resep anak berbasis UMUR (dibuat saat dipakai).
+  function makeNyeriUluHatiAnakRecipe(ageYears) {
+    if (ageYears >= 4 && ageYears <= 10) {
+      return {
+        title: "NYERI ULU HATI ANAK 4-10 TAHUN",
+        medicines: [{ item: "ANTASIDA_TABLET", freq: "3", dose: "0.5", days: "3", total: "5", instruction: "SESUAI ATURAN PAKAI" }],
+      };
+    }
+    if (ageYears > 10) {
+      return {
+        title: "NYERI ULU HATI ANAK >10 TAHUN",
+        medicines: [{ item: "ANTASIDA_TABLET", freq: "3", dose: "1", days: "1", total: "5", instruction: "SESUAI ATURAN PAKAI" }],
+      };
+    }
+    return null;
+  }
+
+  function makeZincChildRecipe(ageYears) {
+    if (ageYears == null) return null;
+    if (ageYears < 0.5) {
+      return {
+        title: "ZINC 20 MG ANAK <6 BULAN",
+        medicines: [{ item: "ZINC_20", freq: "1", dose: "0.5", days: "10", total: "5", instruction: "SETELAH MAKAN" }],
+      };
+    }
+    return {
+      title: "ZINC 20 MG ANAK ≥6 BULAN",
+      medicines: [{ item: "ZINC_20", freq: "1", dose: "1", days: "10", total: "10", instruction: "SETELAH MAKAN" }],
+    };
+  }
+
+  // Resep tindakan yang bisa ditambahkan ke Paket Resep Golongan.
+  const PACKAGE_ACTIONS = [
+    { key: "CEK_GULA", label: "Cek Gula Darah" },
+    { key: "CEK_ASAM_URAT", label: "Cek Asam Urat" },
+    { key: "CEK_KOLESTEROL", label: "Cek Kolesterol" },
+    { key: "IMUNISASI", label: "Imunisasi" },
+  ];
+
+  // ============================================================
+  // v7.5.1: Paket Resep Golongan memakai target ITEM yang sudah ada di master database.
+  // CTM 4 mg menggunakan ITEMS.CTM_4 dan Alpara menggunakan ITEMS.ALPARA;
+  // tidak membuat target obat baru/duplikat. Population filter tetap ketat adult/child/all.
+  // Kategori pasien ditentukan lebih dulu:
+  //   - umur >17 tahun => DEWASA, BB tidak diperlukan
+  //   - umur <=17 tahun / umur tidak terdeteksi => BB wajib;
+  //     BB >40 kg => DEWASA, BB <=40 kg => ANAK
+  // Setelah kategori diketahui, semua pilihan obat ditampilkan langsung
+  // tanpa pengelompokan golongan obat. ISPA Dewasa tidak lagi menjadi satu paket;
+  // obat dewasa ditampilkan sebagai pilihan obat terpisah.
+  // Satu racikan = satu pilihan; satu obat non-racikan = satu pilihan.
+  // Sebelum input, selalu tampilkan PREVIEW obat/racikan yang akan diinput.
+  // ============================================================
+  const MEDICATION_GROUP_PACKAGES = [
+    {
+      key: "ANALGESIK_ANTIPIRETIK",
+      label: "Analgesik / Antipiretik",
+      items: [
+        {
+          key: "PARACETAMOL_DEWASA",
+          label: "Paracetamol 500 mg",
+          type: "recipe",
+          recipeKey: "DEMAM_DEWASA",
+          population: "adult",
+        },
+        {
+          key: "PARACETAMOL_ANAK",
+          label: "Racikan Demam — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "DEMAM_ANAK_",
+          title: "RACIKAN DEMAM ANAK",
+          population: "child",
+        },
+      ],
+    },
+    {
+      key: "NSAID",
+      label: "NSAID",
+      items: [
+        {
+          key: "IBUPROFEN_400",
+          label: "Ibuprofen 400 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "IBUPROFEN_400",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+        {
+          key: "IBUPROFEN_ANAK",
+          label: "Racikan Ibuprofen — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "IBUPROFEN_ANAK_",
+          title: "RACIKAN IBUPROFEN ANAK",
+          population: "child",
+        },
+        {
+          key: "DICLOFENAC_50",
+          label: "Natrium Diclofenac 50 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "DICLOFENAC_50",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "KP NYERI",
+          },
+        },
+      ],
+    },
+    {
+      key: "KORTIKOSTEROID",
+      label: "Kortikosteroid",
+      items: [
+        {
+          key: "DEXAMETHASONE_05",
+          label: "Dexamethasone 0,5 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "DEXAMETHASONE_05",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+      ],
+    },
+    {
+      key: "ANTIHISTAMIN",
+      label: "Antihistamin",
+      items: [
+        {
+          key: "CETIRIZINE_10_DEWASA",
+          label: "Cetirizine 10 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "CETIRIZINE_10",
+            freq: "1",
+            dose: "1",
+            days: "5",
+            total: "5",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+        {
+          key: "CETIRIZINE_RACIKAN_BARU",
+          label: "Racikan Cetirizine — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_CETIRIZINE_",
+          title: "RACIKAN CETIRIZINE",
+          population: "child",
+        },
+      ],
+    },
+    {
+      key: "RESPIRATORI",
+      label: "Respiratori / Batuk-Pilek",
+      items: [
+        {
+          key: "ISPA_ANAK",
+          label: "Racikan ISPA Anak (BB)",
+          type: "weight-racikan",
+          prefix: "ISPA_ANAK_",
+          title: "RACIKAN ISPA ANAK",
+          population: "child",
+        },
+        {
+          key: "BAPIL_2_ANAK",
+          label: "Racikan Bapil 2 — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_BAPIL2_",
+          title: "RACIKAN BAPIL 2",
+          population: "child",
+        },
+        {
+          key: "AMBROXOL_30_DEWASA",
+          label: "Ambroxol 30 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "AMBROXOL_30",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+        {
+          key: "GUAIFENESIN_100_DEWASA",
+          label: "Guaifenesin 100 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "GUAIFENESIN_100",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+        {
+          key: "CTM_4_DEWASA",
+          label: "CTM 4 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "CTM_4",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+        {
+          key: "ALPARA_DEWASA",
+          label: "Alpara",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "ALPARA",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+      ],
+    },
+    {
+      key: "GASTROINTESTINAL",
+      label: "Gastrointestinal",
+      items: [
+        {
+          key: "ANTASIDA_DEWASA",
+          label: "Antasida DOEN",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "ANTASIDA_TABLET",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SEBELUM MAKAN",
+          },
+        },
+        {
+          key: "ANTASIDA_ANAK",
+          label: "Antasida DOEN — Anak (umur)",
+          type: "age-antacid",
+          population: "child",
+        },
+        {
+          key: "AKITA",
+          label: "Akita",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "AKITA",
+            freq: "1",
+            dose: "2",
+            days: "5",
+            total: "10",
+            instruction: "TIAP SELESAI BAB CAIR",
+          },
+        },
+        {
+          key: "ZINC_ANAK",
+          label: "Zinc 20 mg — Anak (umur)",
+          type: "age-zinc",
+          population: "child",
+        },
+        {
+          key: "ORALIT_ANAK",
+          label: "Oralit — Anak",
+          type: "recipe-inline",
+          population: "child",
+          medicine: {
+            item: "ORALIT",
+            freq: "1",
+            dose: "1",
+            days: "1",
+            total: "4",
+            instruction: "SETIAP BAB CAIR",
+          },
+        },
+        {
+          key: "DOMPERIDONE_SYRUP",
+          label: "Domperidone syrup — Anak (BB)",
+          type: "weight-syrup",
+          prefix: "MUAL_MUNTAH_SYRUP_ANAK_",
+          title: "DOMPERIDONE SYRUP ANAK",
+          population: "child",
+        },
+        {
+          key: "DOMPERIDONE_10_DEWASA",
+          label: "Domperidone 10 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "DOMPERIDONE_10",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SEBELUM MAKAN",
+          },
+        },
+        {
+          key: "LAMBUNG_MUAL_RACIKAN_BARU",
+          label: "Racikan Lambung + Mual — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_LAMBUNG_MUAL_",
+          title: "RACIKAN LAMBUNG + MUAL",
+          population: "child",
+        },
+        {
+          key: "MUAL_MUNTAH_RACIKAN_BARU",
+          label: "Racikan Mual Muntah — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_MUAL_MUNTAH_",
+          title: "RACIKAN MUAL MUNTAH",
+          population: "child",
+        },
+      ],
+    },
+    {
+      key: "ANTIBIOTIK",
+      label: "Antibiotik",
+      items: [
+        {
+          key: "AMOXICILLIN_SYRUP",
+          label: "Amoxicillin 125 mg/5 mL syrup — Anak (BB)",
+          type: "weight-syrup",
+          prefix: "ANTIBIOTIK_SYRUP_ANAK_",
+          title: "AMOXICILLIN SYRUP ANAK",
+          population: "child",
+        },
+        {
+          key: "AMOXICILLIN_500_DEWASA",
+          label: "Amoxicillin 500 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "AMOXICILLIN_500",
+            freq: "3",
+            dose: "1",
+            days: "3",
+            total: "10",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+        {
+          key: "AMOXICILLIN_500_RACIKAN_BARU",
+          label: "Racikan Amoxicillin — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_AMOXICILLIN_",
+          title: "RACIKAN AMOXICILLIN",
+          population: "child",
+        },
+        {
+          key: "CEFADROXIL_SYRUP",
+          label: "Cefadroxil 125 mg/5 mL syrup — Anak (BB)",
+          type: "weight-syrup",
+          prefix: "CEFADROXIL_SYRUP_ANAK_",
+          title: "CEFADROXIL SYRUP ANAK",
+          population: "child",
+        },
+        {
+          key: "CEFADROXIL_PUYER_ANAK",
+          label: "Racikan Cefadroxil — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "CEFADROXIL_ANAK_",
+          title: "RACIKAN CEFADROXIL",
+          population: "child",
+        },
+        {
+          key: "CEFADROXIL_500_DEWASA",
+          label: "Cefadroxil monohydrate 500 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "CEFADROXIL_500",
+            freq: "2",
+            dose: "1",
+            days: "3",
+            total: "6",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+      ],
+    },
+    // v10: obat standar FKTP tambahan (regimen dewasa; mohon dievaluasi dokter).
+    {
+      key: "LAIN_LAIN_V10",
+      label: "Obat Lain (FKTP)",
+      items: [
+        {
+          key: "BETAHISTIN_6_DEWASA",
+          label: "Betahistin 6 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: { item: "BETAHISTIN_6", freq: "3", dose: "1", days: "3", total: "10", instruction: "SETELAH MAKAN" },
+        },
+        {
+          key: "OMEPRAZOLE_20_DEWASA",
+          label: "Omeprazole 20 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: { item: "OMEPRAZOLE_20", freq: "1", dose: "1", days: "7", total: "7", instruction: "SEBELUM MAKAN" },
+        },
+        {
+          key: "ASAM_MEFENAMAT_500_DEWASA",
+          label: "Asam Mefenamat 500 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: { item: "ASAM_MEFENAMAT_500", freq: "3", dose: "1", days: "3", total: "10", instruction: "SETELAH MAKAN" },
+        },
+        {
+          key: "METHYLPREDNISOLONE_4_DEWASA",
+          label: "Methylprednisolone 4 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: { item: "METHYLPREDNISOLONE_4", freq: "3", dose: "1", days: "3", total: "10", instruction: "SETELAH MAKAN" },
+        },
+        {
+          key: "LORATADINE_10_DEWASA",
+          label: "Loratadine 10 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: { item: "LORATADINE_10", freq: "1", dose: "1", days: "5", total: "5", instruction: "SETELAH MAKAN" },
+        },
+        {
+          key: "CIPROFLOXACIN_500_DEWASA",
+          label: "Ciprofloxacin 500 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: { item: "CIPROFLOXACIN_500", freq: "2", dose: "1", days: "3", total: "6", instruction: "SETELAH MAKAN" },
+        },
+        {
+          key: "METRONIDAZOLE_500_DEWASA",
+          label: "Metronidazole 500 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: { item: "METRONIDAZOLE_500", freq: "3", dose: "1", days: "3", total: "9", instruction: "SETELAH MAKAN" },
+        },
+      ],
+    },
+    {
+      key: "VITAMIN_SUPLEMEN",
+      label: "Vitamin / Suplemen",
+      items: [
+        {
+          key: "VITAMIN_B_COMPLEX",
+          label: "Vitamin B Complex",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "VITAMIN_B_COMPLEX",
+            freq: "1",
+            dose: "1",
+            days: "5",
+            total: "5",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+        {
+          key: "CALCIUM_500",
+          label: "Calcium 500 mg",
+          type: "recipe-inline",
+          population: "adult",
+          medicine: {
+            item: "CALCIUM_500",
+            freq: "1",
+            dose: "1",
+            days: "5",
+            total: "5",
+            instruction: "SETELAH MAKAN",
+          },
+        },
+      ],
+    },
+    {
+      key: "MATA_TELINGA",
+      label: "Tetes Mata / Telinga",
+      items: [
+        {
+          key: "CENDO_XITROL_TETES",
+          label: "Cendo Xitrol (tetes mata antibiotik)",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "CENDO_XITROL", freq: "4", dose: "1", days: "1", total: "1", instruction: "PADA MATA YANG SAKIT" },
+        },
+        {
+          key: "CENDO_LYTEERS_TETES",
+          label: "Cendo Lyteers (tetes mata non-infeksi)",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "CENDO_LYTEERS", freq: "4", dose: "1", days: "1", total: "1", instruction: "PADA MATA YANG SAKIT" },
+        },
+        {
+          key: "RECO_TETES_TELINGA",
+          label: "Reco tetes telinga",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "RECO_TETES_TELINGA", freq: "3", dose: "3", days: "7", total: "1", instruction: "PADA TELINGA YANG SAKIT" },
+        },
+        {
+          key: "RECO_SALEP_MATA",
+          label: "Reco salep mata",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "RECO_SALEP_MATA", freq: "3", dose: "1", days: "5", total: "1", instruction: "PADA MATA YANG SAKIT" },
+        },
+      ],
+    },
+    {
+      key: "TAMBAHAN_MEDISIN",
+      label: "Obat Lain (tambahan)",
+      items: [
+        { key: "MICONAZOLE_SALEP", label: "Miconazole salep (jamur)", type: "recipe-inline", population: "all",
+          medicine: { item: "MICONAZOLE_SALEP", freq: "2", dose: "1", days: "14", total: "1", instruction: "DI LESI" } },
+        { key: "ACYCLOVIR_SALEP", label: "Acyclovir salep", type: "recipe-inline", population: "all",
+          medicine: { item: "ACYCLOVIR_SALEP", freq: "5", dose: "1", days: "5", total: "1", instruction: "DI LESI" } },
+        { key: "ACYCLOVIR_400_DEWASA", label: "Acyclovir 400 mg (zoster)", type: "recipe-inline", population: "adult",
+          medicine: { item: "ACYCLOVIR_400", freq: "5", dose: "2", days: "3", total: "30", instruction: "" } },
+        { key: "BEDAK_SALICYL", label: "Bedak salicyl", type: "recipe-inline", population: "all",
+          medicine: { item: "BEDAK_SALICYL", freq: "2", dose: "1", days: "7", total: "1", instruction: "DI KULIT YANG GATAL" } },
+        { key: "SCOPMA_DEWASA", label: "Scopma (kolik/kram perut)", type: "recipe-inline", population: "adult",
+          medicine: { item: "SCOPMA", freq: "3", dose: "1", days: "3", total: "9", instruction: "JIKA NYERI PERUT" } },
+        { key: "TABLET_TAMBAH_DARAH", label: "Tablet tambah darah", type: "recipe-inline", population: "adult",
+          medicine: { item: "TABLET_TAMBAH_DARAH", freq: "1", dose: "1", days: "5", total: "5", instruction: "SETELAH MAKAN" } },
+        { key: "MECOBALAMIN_500_DEWASA", label: "Mecobalamin (kesemutan)", type: "recipe-inline", population: "adult",
+          medicine: { item: "MECOBALAMIN_500", freq: "3", dose: "1", days: "2", total: "6", instruction: "SETELAH MAKAN" } },
+        { key: "SUPERHOID_SUPP", label: "Superhoid supp (wasir)", type: "recipe-inline", population: "adult",
+          medicine: { item: "SUPERHOID_SUPP", freq: "1", dose: "1", days: "1", total: "1", instruction: "DI ANUS" } },
+      ],
+    },
+    {
+      key: "TOPIKAL",
+      label: "Topikal / Salep",
+      items: [
+        {
+          key: "SALEP_RACIKAN_BARU",
+          label: "Salep Racikan",
+          type: "racikan-static",
+          population: "all",
+          tpl: SALEP_RACIKAN,
+        },
+      ],
+    },
+    {
+      key: "ANTIHIPERTENSI",
+      label: "Antihipertensi",
+      items: [
+        {
+          key: "AMLODIPINE_5",
+          label: "Amlodipine 5 mg",
+          type: "recipe",
+          recipeKey: "HT_AMLODIPINE_5",
+          population: "adult",
+        },
+        {
+          key: "AMLODIPINE_10",
+          label: "Amlodipine 10 mg",
+          type: "recipe",
+          recipeKey: "HT_AMLODIPINE_10",
+          population: "adult",
+        },
+        {
+          key: "CAPTOPRIL_12_5",
+          label: "Captopril 12,5 mg",
+          type: "recipe",
+          recipeKey: "HT_CAPTOPRIL_12_5",
+          population: "adult",
+        },
+        {
+          key: "CAPTOPRIL_25",
+          label: "Captopril 25 mg",
+          type: "recipe",
+          recipeKey: "HT_CAPTOPRIL_25",
+          population: "adult",
+        },
+      ],
+    },
+    {
+      key: "ANTIDIABETES",
+      label: "Antidiabetes",
+      items: [
+        {
+          key: "METFORMIN_500",
+          label: "Metformin 500 mg",
+          type: "recipe",
+          recipeKey: "DM_METFORMIN",
+          population: "adult",
+        },
+        {
+          key: "GLIMEPIRIDE_1",
+          label: "Glimepiride 1 mg",
+          type: "recipe",
+          recipeKey: "DM_GLIMEPIRIDE_1",
+          population: "adult",
+        },
+        {
+          key: "GLIMEPIRIDE_2",
+          label: "Glimepiride 2 mg",
+          type: "recipe",
+          recipeKey: "DM_GLIMEPIRIDE_2",
+          population: "adult",
+        },
+      ],
+    },
+    {
+      key: "DISLIPIDEMIA",
+      label: "Antihiperlipidemia",
+      items: [
+        {
+          key: "SIMVASTATIN_10",
+          label: "Simvastatin 10 mg",
+          type: "recipe",
+          recipeKey: "KOLESTEROL",
+          population: "adult",
+        },
+      ],
+    },
+    {
+      key: "ASAM_URAT",
+      label: "Penurun Asam Urat",
+      items: [
+        {
+          key: "ALLOPURINOL_100",
+          label: "Allopurinol 100 mg",
+          type: "recipe",
+          recipeKey: "ASAM_URAT",
+          population: "adult",
+        },
+      ],
+    },
+  ];
+
+  // v0.4.4 (permintaan dokter): golongan diringkas. Obat (kunci & dosis) sama; hanya
+  // kelompok tampilannya digabung. Obat yang belum terdaftar di sini masuk "Lain-lain".
+  {
+    const REGROUP = [
+      ["NYERI_DEMAM", "Analgesik / NSAID", ["PARACETAMOL_DEWASA", "PARACETAMOL_ANAK", "IBUPROFEN_400", "IBUPROFEN_ANAK", "DICLOFENAC_50", "ASAM_MEFENAMAT_500_DEWASA"]],
+      ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
+      ["ALERGI_STEROID", "Antihistamin / Kortikosteroid", ["CETIRIZINE_10_DEWASA", "CETIRIZINE_RACIKAN_BARU", "LORATADINE_10_DEWASA", "CTM_4_DEWASA", "DEXAMETHASONE_05", "METHYLPREDNISOLONE_4_DEWASA"]],
+      ["ANTIINFEKSI", "Antibiotik / Antivirus", ["AMOXICILLIN_500_DEWASA", "AMOXICILLIN_SYRUP", "AMOXICILLIN_500_RACIKAN_BARU", "CEFADROXIL_500_DEWASA", "CEFADROXIL_SYRUP", "CEFADROXIL_PUYER_ANAK", "CIPROFLOXACIN_500_DEWASA", "METRONIDAZOLE_500_DEWASA", "ACYCLOVIR_400_DEWASA"]],
+      ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
+      ["KRONIS", "Obat Kronis (HT, DM, Kolesterol, Asam Urat)", ["AMLODIPINE_5", "AMLODIPINE_10", "CAPTOPRIL_12_5", "CAPTOPRIL_25", "METFORMIN_500", "GLIMEPIRIDE_1", "GLIMEPIRIDE_2", "SIMVASTATIN_10", "ALLOPURINOL_100"]],
+      ["VITAMIN_SARAF", "Vitamin / Saraf", ["VITAMIN_B_COMPLEX", "CALCIUM_500", "TABLET_TAMBAH_DARAH", "MECOBALAMIN_500_DEWASA", "BETAHISTIN_6_DEWASA"]],
+      ["MATA_TELINGA", "Mata / Telinga", ["CENDO_XITROL_TETES", "CENDO_LYTEERS_TETES", "RECO_SALEP_MATA", "RECO_TETES_TELINGA"]],
+      ["KULIT_TOPIKAL", "Kulit / Topikal", ["MICONAZOLE_SALEP", "ACYCLOVIR_SALEP", "BEDAK_SALICYL", "SALEP_RACIKAN_BARU"]],
+    ];
+    const all = MEDICATION_GROUP_PACKAGES.flatMap((g) => g.items);
+    const used = new Set();
+    const groups = REGROUP.map(([key, label, keys]) => ({
+      key,
+      label,
+      items: keys
+        .map((k) => all.find((i) => i.key === k))
+        .filter((i) => i && !used.has(i.key) && used.add(i.key)),
+    })).filter((g) => g.items.length);
+    const rest = all.filter((i) => !used.has(i.key));
+    if (rest.length) groups.push({ key: "LAIN_LAIN", label: "Lain-lain", items: rest });
+    MEDICATION_GROUP_PACKAGES.splice(0, MEDICATION_GROUP_PACKAGES.length, ...groups);
+  }
+
+  // SARAN OBAT DARI KELUHAN UTAMA (Paket Resep Golongan)
+  // Kata kunci di Keluhan Utama (cadangan: Anamnesa) -> pilihan obat (key
+  // MEDICATION_GROUP_PACKAGES) yang dicentang otomatis. Hanya SARAN: dokter tetap
+  // mereview dan bisa menghapus centang. Kata kunci yang dinegasikan ("tidak demam",
+  // "batuk (-)", "mual disangkal") diabaikan. Urutan aturan = urutan obat di resep.
+  // Test memastikan setiap key ada dan cocok dengan kategorinya.
+  const ANAMNESIS_SUGGESTION_RULES = [
+    {
+      label: "Demam",
+      pattern: /demam|febris|meriang|sumeng|(?:badan|anak|suhu)\s+(?:terasa\s+)?panas|panas\s+(?:badan|tinggi|naik|sejak|\d)/,
+      adult: ["PARACETAMOL_DEWASA"],
+      child: ["PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Batuk / pilek",
+      pattern: /batuk|pilek|\bbat?pil\b|\bflu\b|influenza|bersin|hidung\s+(?:tersumbat|mampet|meler)|ingus|\bispa\b|common cold/,
+      // v10.0.9 (permintaan dokter): batuk dewasa = Paracetamol + Ambroxol + Cetirizine
+      // (bukan Alpara); anak = racikan Guaifenesin + CTM + Dexamethasone (ISPA Anak).
+      adult: ["PARACETAMOL_DEWASA", "AMBROXOL_30_DEWASA", "CETIRIZINE_10_DEWASA"], // = diagnosis ISPA
+      child: ["ISPA_ANAK"],
+    },
+    {
+      label: "Dahak",
+      pattern: /dahak|sputum|\briak\b/,
+      adult: ["AMBROXOL_30_DEWASA"],
+      child: ["BAPIL_2_ANAK"],
+    },
+    {
+      // v9.5: nyeri tenggorok biasa = paket ISPA (sesuai resep dokter di klinik:
+      // "tenggorokan nyeri" -> Dexamethasone + Alpara), tanpa antibiotik. v10.0.4: Vit B
+      // Complex tidak dicentang otomatis (dokter yang memilih).
+      label: "Nyeri tenggorok",
+      pattern: /(?:nyeri|sakit|perih|gatal)\s+(?:saat\s+)?(?:menelan|telan|tenggorok\w*)|tenggorok\w*\s+(?:sakit|nyeri|perih|gatal)|\bfaring\w*/,
+      adult: ["ALPARA_DEWASA", "DEXAMETHASONE_05"],
+      child: ["ISPA_ANAK"],
+    },
+    {
+      // Amandel/tonsil meradang -> antibiotik + dexamethasone.
+      label: "Radang amandel",
+      // v9.4: "radang" saja tidak dipakai lagi ("radang sendi" dulu memicu antibiotik).
+      pattern: /radang\s+(?:tenggorok\w*|amandel|tonsil)|tonsil\w*|amandel/,
+      adult: ["AMOXICILLIN_500_DEWASA", "DEXAMETHASONE_05"],
+      child: ["AMOXICILLIN_500_RACIKAN_BARU"],
+    },
+    {
+      label: "Sakit telinga",
+      pattern: /(?:sakit|nyeri)\s+telinga|telinga\b[^.,;\n]{0,15}?(?:sakit|nyeri|berair|bernanah|cairan)|otitis|congek|kopok/,
+      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA", "RECO_TETES_TELINGA"],
+      child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK", "RECO_TETES_TELINGA"],
+    },
+    {
+      // v0.3.0: mata merah/belekan (infeksi) -> Cendo Xitrol.
+      label: "Mata merah / belekan",
+      pattern: /mata\s+(?:\w+\s+)?(?:merah|belek\w*|bernanah)|belekan|\bbelek\b|konjungtiv\w*/,
+      adult: ["CENDO_XITROL_TETES"],
+      child: ["CENDO_XITROL_TETES"],
+    },
+    {
+      // v0.3.0: mata kering/perih/lelah/kelilipan tanpa tanda infeksi -> Cendo Lyteers.
+      label: "Mata kering / perih",
+      pattern: /mata\s+(?:\w+\s+)?(?:kering|perih|lelah|capek|kemasukan|kelilipan)|kelilipan|iritasi\s+mata/,
+      adult: ["CENDO_LYTEERS_TETES"],
+      child: ["CENDO_LYTEERS_TETES"],
+    },
+    {
+      // v0.3.1: bintitan -> Reco salep mata.
+      label: "Bintitan",
+      pattern: /bintit\w*|timbil|hordeol\w*|kelopak\s+mata\s+(?:bengkak|benjol\w*)|benjolan\s+(?:di\s+)?kelopak/,
+      adult: ["RECO_SALEP_MATA"],
+      child: ["RECO_SALEP_MATA"],
+    },
+    {
+      label: "Wasir",
+      pattern: /wasir|ambei?y?en|hemoroid\w*|haemoroid\w*|benjolan\s+(?:di\s+)?(?:anus|dubur)/,
+      adult: ["SUPERHOID_SUPP"],
+      child: [],
+    },
+    {
+      label: "Disentri (BAB berlendir/berdarah)",
+      pattern: /disentri|(?:bab|berak|diare|mencret)\s+(?:\w+\s+)?(?:berlendir|lendir|berdarah|darah)/,
+      adult: ["METRONIDAZOLE_500_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Tifoid",
+      pattern: /tifus|tipes|tifoid|typhoid|thypoid|demam\s+tifoid/,
+      adult: ["CIPROFLOXACIN_500_DEWASA", "PARACETAMOL_DEWASA"],
+      child: ["PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Kram / kolik perut",
+      pattern: /melilit|kolik|kram\s+perut|perut\s+(?:kram|mules|melilit)/,
+      adult: ["SCOPMA_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Asam urat kambuh (gout)",
+      pattern: /\bgout\b|pirai|asam\s+urat\s+(?:kambuh|nyeri|sakit|bengkak)|jempol\s+kaki\s+(?:bengkak|nyeri|sakit|merah)/,
+      adult: ["DICLOFENAC_50"],
+      child: [],
+    },
+    {
+      label: "Kurap / panu / jamur",
+      pattern: /kurap|kadas|tinea|jamur|kutu\s+air|\bpanu\b|versikolor|gatal\s+selangkangan/,
+      adult: ["MICONAZOLE_SALEP"],
+      child: ["MICONAZOLE_SALEP"],
+    },
+    {
+      label: "Herpes zoster",
+      pattern: /herpes\s+zoster|\bzoster\b|cacar\s+(?:ular|api)|dompo/,
+      adult: ["ACYCLOVIR_400_DEWASA", "PARACETAMOL_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Herpes bibir",
+      pattern: /herpes\s+(?:bibir|labial\w*)|lepuh\w*\s+(?:di\s+)?bibir|bibir\s+(?:melepuh|lepuh)/,
+      adult: ["ACYCLOVIR_SALEP"],
+      child: ["ACYCLOVIR_SALEP"],
+    },
+    {
+      label: "Biang keringat",
+      pattern: /biang\s+keringat|keringat\s+buntet|miliaria/,
+      adult: ["BEDAK_SALICYL"],
+      child: ["BEDAK_SALICYL"],
+    },
+    {
+      label: "Anemia",
+      pattern: /anemi\w*|kurang\s+darah|\bhb\s+(?:rendah|turun)/,
+      adult: ["TABLET_TAMBAH_DARAH"],
+      child: [],
+    },
+    {
+      label: "Kesemutan / kebas",
+      pattern: /kesemutan|kebas|\bbaal\b|mati\s+rasa|neuropati\w*/,
+      adult: ["MECOBALAMIN_500_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Sinusitis",
+      pattern: /sinusitis|\bsinus\b|(?:nyeri|sakit)\s+(?:di\s+)?(?:wajah|pipi|dahi)/,
+      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA"],
+      child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Sakit gigi",
+      pattern: /(?:sakit|nyeri|ngilu)\s+gigi|gigi\s+(?:sakit|nyeri|ngilu|bengkak|berlubang|goyang)|pulpitis|abses\s+gigi|gusi\s+bengkak/,
+      adult: ["IBUPROFEN_400", "AMOXICILLIN_500_DEWASA"],
+      child: ["PARACETAMOL_ANAK", "AMOXICILLIN_500_RACIKAN_BARU"],
+    },
+    {
+      label: "Infeksi saluran kemih",
+      pattern: /anyang|disuria|\bisk\b|infeksi\s+saluran\s+kemih|(?:nyeri|sakit|perih|panas)\s+(?:saat\s+)?(?:bak|kencing|berkemih|pipis)|(?:bak|kencing|pipis)\s+(?:perih|panas|sakit|nyeri)/,
+      adult: ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"],
+      child: ["CEFADROXIL_PUYER_ANAK", "PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Infeksi kulit (bisul/abses)",
+      pattern: /bisul|(?<!gigi\s)abses(?!\s+gigi)|bernanah|nanah|furunkel|impetigo|selulitis|luka\b[^.;\n]{0,40}?(?:infeksi|meradang|radang|bernanah|berair|bengkak|kemerahan)|infeksi\s+kulit/,
+      adult: ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"],
+      child: ["CEFADROXIL_PUYER_ANAK", "PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Sakit kepala",
+      pattern: /(?:sakit|nyeri)\s+kepala|pusing|cekot|ce[fp]h?algia|migr[ae]i?n/,
+      adult: ["PARACETAMOL_DEWASA"],
+      child: ["PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Nyeri haid",
+      pattern: /(?:nyeri|sakit)\s+(?:saat\s+)?(?:haid|mens\w*)|(?:haid|mens\w*)\s+(?:nyeri|sakit)|dismenore\w*|kram\s+(?:perut\s+)?(?:saat\s+)?haid/,
+      adult: ["ASAM_MEFENAMAT_500_DEWASA"],
+      child: ["PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Nyeri otot / sendi",
+      pattern: /(?:nyeri|sakit)\s+(?:otot|sendi|pinggang|punggung|bahu|leher|badan)|pegal|pegel|linu|keseleo|terkilir|encok|m[iy]algia|art?h?ralgia|low back pain|\blbp\b/,
+      adult: ["DICLOFENAC_50"],
+      child: ["PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Nyeri lutut / pengapuran",
+      pattern: /(?:nyeri|sakit|ngilu)\s+(?:di\s+)?lutut|lutut\s+(?:nyeri|sakit|kaku|bengkak|ngilu)|osteoart\w*|pengapuran|\boa\s+genu\b/,
+      adult: ["DICLOFENAC_50", "CALCIUM_500"],
+      child: ["PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Gatal / alergi",
+      pattern: /gatal|alergi|biduran|kaligata|urtikaria|bentol|\bbidur|digigit\s+serangga/,
+      adult: ["CETIRIZINE_10_DEWASA"],
+      child: ["CETIRIZINE_RACIKAN_BARU"],
+    },
+    {
+      label: "Eksim / dermatitis",
+      // v9.4: jamur/panu/kurap DIHAPUS — salep racikan berisi steroid (betamethasone)
+      // memperburuk infeksi jamur. "Lecet" juga dihapus.
+      pattern: /ruam|eksim|eksema|dermatitis/,
+      adult: ["SALEP_RACIKAN_BARU"],
+      child: ["SALEP_RACIKAN_BARU"],
+    },
+    {
+      label: "Cacar / campak (simptomatik)",
+      pattern: /cacar|varisela|campak|morbili/,
+      adult: ["PARACETAMOL_DEWASA", "CETIRIZINE_10_DEWASA"],
+      child: ["PARACETAMOL_ANAK", "CETIRIZINE_RACIKAN_BARU"],
+    },
+    {
+      label: "Maag / ulu hati",
+      // v9.4: "perih" saja tidak dipakai lagi ("kencing perih" dulu memicu antasida).
+      pattern: /\bmaa?g\b|ulu\s+hati|epigastri\w*|perih\s+(?:di\s+)?(?:ulu\s+hati|lambung|perut)|perut\s+perih|kembung|begah|sebah|dispepsia|gastritis|lambung|\bgerd\b|heartburn/,
+      adult: ["ANTASIDA_DEWASA"],
+      child: ["ANTASIDA_ANAK"],
+    },
+    {
+      label: "Mual / muntah",
+      pattern: /mual|muntah|nausea|vomit|\beneg\b/,
+      adult: ["DOMPERIDONE_10_DEWASA"],
+      child: ["MUAL_MUNTAH_RACIKAN_BARU"],
+    },
+    {
+      label: "Diare",
+      pattern: /diare|mencret|(?:bab|berak|buang air besar)\s+(?:cair|encer)|gastroenteritis|\bgea\b/,
+      adult: ["AKITA"],
+      child: ["ZINC_ANAK", "ORALIT_ANAK"],
+    },
+    {
+      label: "Hipertensi",
+      pattern: /hipertensi|darah\s+tinggi|tensi\s+tinggi|\bht\b|\bhtn\b/,
+      adult: ["AMLODIPINE_5"],
+      child: [],
+    },
+    {
+      label: "Diabetes",
+      pattern: /diabetes|kencing\s+manis|gula\s+(?:darah\s+)?(?:tinggi|naik)|\bdm\b/,
+      adult: ["METFORMIN_500"],
+      child: [],
+    },
+    {
+      label: "Kolesterol",
+      pattern: /kolesterol|dislipid\w*|lemak\s+darah/,
+      adult: ["SIMVASTATIN_10"],
+      child: [],
+    },
+    {
+      label: "Asam urat",
+      pattern: /asam\s+urat|\bgout\b|hiperurisemi\w*/,
+      adult: ["ALLOPURINOL_100"],
+      child: [],
+    },
+    // v10: keluhan untuk obat standar FKTP tambahan.
+    {
+      label: "Vertigo",
+      pattern: /vertigo|pusing\s+berputar|kliyengan|(?:ruangan|sekitar)\s+berputar/,
+      adult: ["BETAHISTIN_6_DEWASA"],
+      child: [],
+    },
+    // v9.6: keluhan yang mengarah ke TINDAKAN (resep tindakan dicentang otomatis).
+    // Hanya tindakan, tanpa obat: permintaan cek lab belum berarti perlu obat.
+    // v9.7: cek lab HANYA bila tertulis "cek/periksa/tes ..." (keluhan DM, asam urat,
+    // kolesterol, sering haus, dsb. TIDAK otomatis mencentang cek lab).
+    {
+      label: "Cek gula darah",
+      pattern: /(?:cek|periksa|tes)\s+(?:gula|gds|gdp|gd2pp|kadar\s+gula)/,
+      adult: [],
+      child: [],
+      actions: ["CEK_GULA"],
+    },
+    {
+      label: "Cek kolesterol",
+      pattern: /(?:cek|periksa|tes)\s+kolesterol/,
+      adult: [],
+      child: [],
+      actions: ["CEK_KOLESTEROL"],
+    },
+    {
+      label: "Cek asam urat",
+      pattern: /(?:cek|periksa|tes)\s+(?:asam\s+urat|au\b)/,
+      adult: [],
+      child: [],
+      actions: ["CEK_ASAM_URAT"],
+    },
+    {
+      label: "Imunisasi",
+      pattern: /imunisasi|vaksin\w*|\bbcg\b|\bdpt\w*|\bpolio\b|\bopv\b|\bipv\b|\bpcv\b|\brota\w*|campak\s+rubel\w*|\bmr\b|hepatitis\s+b\s+0|\bhb[\s-]?0\b|\btt\b|\btd\b|suntik\s+(?:tetanus|imunisasi)/,
+      adult: [],
+      child: [],
+      actions: ["IMUNISASI"],
+    },
+  ];
+
+  // MENU DIAGNOSIS (v9.6): hanya mengisi kolom Diagnosa dan ICD 10 (2010).
+  // icd   = kode yang dipilih, urut prioritas (kode pertama yang ada di daftar
+  //         Klinik Pintar dipakai; ICD-10 versi 2010 bisa memakai subkode).
+  // query = teks yang diketik di kolom Diagnosa untuk memunculkan pilihannya.
+  // adult/child/actions = obat & tindakan yang dicentang di Paket Resep setelah
+  // RESUME + DIAGNOSIS (key MEDICATION_GROUP_PACKAGES / PACKAGE_ACTIONS; diaudit).
+  // Isinya mengikuti template resep klinik yang sudah ada (ISPA Dewasa, GEA,
+  // Dyspepsia, Myalgia, LBP, Dermatitis, dst.).
+  const DIAGNOSIS_TEMPLATES = [
+    { key: "ISPA", label: "ISPA", icd: ["J06"], query: "Acute upper respiratory infections of multiple and unspecified sites",
+      adult: ["PARACETAMOL_DEWASA", "AMBROXOL_30_DEWASA", "CETIRIZINE_10_DEWASA"], child: ["ISPA_ANAK"] },
+    { key: "FARINGITIS", label: "Faringitis akut", icd: ["J02.9", "J02"], query: "acute pharyngitis",
+      adult: ["ALPARA_DEWASA", "DEXAMETHASONE_05"], child: ["ISPA_ANAK"] },
+    { key: "TONSILITIS", label: "Tonsilitis akut", icd: ["J03.9", "J03"], query: "acute tonsillitis",
+      adult: ["AMOXICILLIN_500_DEWASA", "DEXAMETHASONE_05"], child: ["AMOXICILLIN_500_RACIKAN_BARU"] },
+    { key: "GEA", label: "GEA (Gastroenteritis akut)", icd: ["A09", "A09.9", "A09.0"], query: "gastroenteritis",
+      adult: ["AKITA"], child: ["ZINC_ANAK", "ORALIT_ANAK"] },
+    { key: "DISPEPSIA", label: "Dispepsia", icd: ["K30"], query: "dyspepsia",
+      adult: ["ANTASIDA_DEWASA"], child: ["ANTASIDA_ANAK"] },
+    { key: "FEVER", label: "Fever / Demam", icd: ["R50.9", "R50"], query: "fever",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"] },
+    { key: "MYALGIA", label: "Myalgia", icd: ["M79.1"], query: "myalgia",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"] },
+    { key: "LBP", label: "Low back pain (LBP)", icd: ["M54.5"], query: "low back pain",
+      adult: ["DICLOFENAC_50", "DEXAMETHASONE_05"], child: ["PARACETAMOL_ANAK"] },
+    { key: "CEPHALGIA", label: "Cephalgia / Sakit kepala", icd: ["R51"], query: "headache",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"] },
+    // Betahistin 6 mg 3x1, 10 tablet (sesuai dokter klinik).
+    { key: "VERTIGO", label: "Vertigo / Pusing", icd: ["R42"], query: "dizziness",
+      adult: ["BETAHISTIN_6_DEWASA"], child: [] },
+    { key: "DERMATITIS", label: "Dermatitis", icd: ["L30.9", "L30"], query: "dermatitis",
+      adult: ["SALEP_RACIKAN_BARU", "CETIRIZINE_10_DEWASA"], child: ["SALEP_RACIKAN_BARU", "CETIRIZINE_RACIKAN_BARU"] },
+    { key: "URTIKARIA", label: "Urtikaria / Gatal", icd: ["L50.9", "L50"], query: "urticaria",
+      adult: ["CETIRIZINE_10_DEWASA"], child: ["CETIRIZINE_RACIKAN_BARU"] },
+    { key: "DM", label: "DM tipe 2", icd: ["E11.9", "E11"], query: "non-insulin-dependent diabetes",
+      adult: ["METFORMIN_500"], child: [] },
+    { key: "HT", label: "Hipertensi", icd: ["I10"], query: "hypertension",
+      adult: ["AMLODIPINE_5"], child: [] },
+    { key: "IMUNISASI", label: "Imunisasi", icd: ["Z27.9", "Z27.8", "Z23.8"], query: "need for immunization",
+      adult: [], child: [], actions: ["IMUNISASI"] },
+    // v10: diagnosis tambahan yang sering di klinik (ICD-10 2010; dicek di Klinik Pintar).
+    { key: "SINUSITIS", label: "Sinusitis akut", icd: ["J01.9", "J01"], query: "acute sinusitis",
+      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK"] },
+    { key: "OMA", label: "Otitis media akut", icd: ["H66.9", "H66.0", "H66"], query: "otitis media",
+      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA", "RECO_TETES_TELINGA"], child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK", "RECO_TETES_TELINGA"] },
+    { key: "RINITIS_ALERGI", label: "Rinitis alergi", icd: ["J30.4", "J30.3"], query: "allergic rhinitis",
+      adult: ["LORATADINE_10_DEWASA"], child: ["CETIRIZINE_RACIKAN_BARU"] },
+    { key: "ASMA", label: "Asma", icd: ["J45.9", "J45"], query: "asthma",
+      adult: ["METHYLPREDNISOLONE_4_DEWASA"], child: [] },
+    { key: "KONJUNGTIVITIS", label: "Konjungtivitis", icd: ["H10.9", "H10"], query: "conjunctivitis",
+      adult: ["CENDO_XITROL_TETES"], child: ["CENDO_XITROL_TETES"] },
+    { key: "GASTRITIS", label: "Gastritis", icd: ["K29.7", "K29"], query: "gastritis",
+      adult: ["OMEPRAZOLE_20_DEWASA", "ANTASIDA_DEWASA"], child: ["ANTASIDA_ANAK"] },
+    { key: "KONSTIPASI", label: "Konstipasi", icd: ["K59.0", "K59"], query: "constipation",
+      adult: [], child: [] },
+    { key: "NYERI_PERUT", label: "Nyeri perut / kolik", icd: ["R10.4", "R10"], query: "abdominal pain",
+      adult: ["SCOPMA_DEWASA"], child: [] },
+    { key: "HELMINTHIASIS", label: "Cacingan", icd: ["B82.0", "B82.9", "B83.9"], query: "helminthiasis",
+      adult: [], child: [] },
+    { key: "ISK", label: "Infeksi saluran kemih", icd: ["N39.0"], query: "urinary tract infection",
+      adult: ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["CEFADROXIL_PUYER_ANAK", "PARACETAMOL_ANAK"] },
+    { key: "DISMENORE", label: "Dismenore", icd: ["N94.6", "N94.4", "N94.5"], query: "dysmenorrh",
+      adult: ["ASAM_MEFENAMAT_500_DEWASA"], child: ["PARACETAMOL_ANAK"] },
+    { key: "PULPITIS", label: "Pulpitis / sakit gigi", icd: ["K04.0", "K02.9"], query: "pulpitis",
+      adult: ["IBUPROFEN_400", "AMOXICILLIN_500_DEWASA"], child: ["PARACETAMOL_ANAK", "AMOXICILLIN_500_RACIKAN_BARU"] },
+    { key: "ABSES", label: "Abses / bisul", icd: ["L02.9", "L02"], query: "cutaneous abscess",
+      adult: ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["CEFADROXIL_PUYER_ANAK", "PARACETAMOL_ANAK"] },
+    { key: "TINEA", label: "Tinea (kurap/jamur)", icd: ["B35.9", "B35.4"], query: "dermatophytosis",
+      adult: ["MICONAZOLE_SALEP", "CETIRIZINE_10_DEWASA"], child: ["MICONAZOLE_SALEP"] },
+    { key: "PANU", label: "Pitiriasis versikolor (panu)", icd: ["B36.0"], query: "pityriasis versicolor",
+      adult: ["MICONAZOLE_SALEP"], child: ["MICONAZOLE_SALEP"] },
+    { key: "VARICELLA", label: "Varisela (cacar air)", icd: ["B01.9", "B01"], query: "varicella",
+      adult: ["PARACETAMOL_DEWASA", "CETIRIZINE_10_DEWASA"], child: ["PARACETAMOL_ANAK", "CETIRIZINE_RACIKAN_BARU"] },
+    { key: "ZOSTER", label: "Herpes zoster", icd: ["B02.9", "B02"], query: "zoster",
+      adult: ["ACYCLOVIR_400_DEWASA", "PARACETAMOL_DEWASA"], child: [] },
+    { key: "STOMATITIS", label: "Stomatitis (sariawan)", icd: ["K12.0", "K12.1"], query: "stomatitis",
+      adult: [], child: [] },
+    { key: "OA_GENU", label: "Osteoartritis lutut", icd: ["M17.9", "M17"], query: "gonarthrosis",
+      adult: ["DICLOFENAC_50", "CALCIUM_500"], child: [] },
+    { key: "HIPERURISEMIA", label: "Hiperurisemia", icd: ["E79.0"], query: "hyperuricaemia",
+      adult: ["ALLOPURINOL_100"], child: [] },
+    { key: "DISLIPIDEMIA", label: "Dislipidemia", icd: ["E78.5", "E78.0"], query: "hyperlipidaemia",
+      adult: ["SIMVASTATIN_10"], child: [] },
+    // v0.3.1 (Medisin): diagnosis tambahan; obat hanya yang ada di stok BPJS klinik.
+    { key: "HORDEOLUM", label: "Hordeolum (bintitan)", icd: ["H00.0"], query: "hordeolum",
+      adult: ["RECO_SALEP_MATA"], child: ["RECO_SALEP_MATA"] },
+    { key: "HEMOROID", label: "Hemoroid (wasir)", icd: ["I84.9", "K64.9"], query: "haemorrhoids",
+      adult: ["SUPERHOID_SUPP"], child: [] },
+    { key: "DISENTRI", label: "Disentri", icd: ["A06.0", "A03.9"], query: "dysentery",
+      adult: ["METRONIDAZOLE_500_DEWASA"], child: ["ZINC_ANAK", "ORALIT_ANAK"] },
+    { key: "TIFOID", label: "Demam tifoid", icd: ["A01.0"], query: "typhoid",
+      adult: ["CIPROFLOXACIN_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"] },
+    { key: "GOUT", label: "Gout arthritis", icd: ["M10.9", "M10"], query: "gout",
+      adult: ["DICLOFENAC_50"], child: [] },
+    { key: "HERPES_LABIALIS", label: "Herpes labialis", icd: ["B00.1"], query: "herpesviral vesicular dermatitis",
+      adult: ["ACYCLOVIR_SALEP"], child: ["ACYCLOVIR_SALEP"] },
+    { key: "MILIARIA", label: "Miliaria (biang keringat)", icd: ["L74.3", "L74.0"], query: "miliaria",
+      adult: ["BEDAK_SALICYL"], child: ["BEDAK_SALICYL"] },
+    { key: "ANEMIA", label: "Anemia", icd: ["D64.9"], query: "anaemia",
+      adult: ["TABLET_TAMBAH_DARAH"], child: [] },
+    { key: "PARESTESIA", label: "Parestesia (kesemutan)", icd: ["R20.2"], query: "paraesthesia",
+      adult: ["MECOBALAMIN_500_DEWASA"], child: [] },
+  ];
+
+  // RESUME + DIAGNOSIS (uji coba): diagnosis dipilih dari Keluhan Utama.
+  // tier = prioritas bila beberapa cocok (angka kecil didahulukan):
+  //   1 keluhan akut spesifik (urutan daftar: tonsil > faring > ISPA > GEA > ...)
+  //   2 penyakit kronis HT / DM -> yang DITULIS DULUAN di Keluhan Utama
+  //   3 keluhan umum (vertigo > sakit kepala > pegal)
+  //   4 demam saja (demam + batuk = ISPA, demam + diare = GEA)
+  const DIAGNOSIS_FROM_COMPLAINT = [
+    { key: "TONSILITIS", tier: 1, pattern: /tonsil\w*|amandel/ },
+    { key: "FARINGITIS", tier: 1, pattern: /faring\w*/ },
+    { key: "SINUSITIS", tier: 1, pattern: /sinusitis|\bsinus\b/ },
+    { key: "OMA", tier: 1, pattern: /(?:sakit|nyeri)\s+telinga|telinga\b[^.,;\n]{0,15}?(?:sakit|nyeri|berair|bernanah|cairan)|otitis|congek|kopok/ },
+    { key: "ASMA", tier: 1, pattern: /\basma\b|asthma|mengi|\bsesak\b/ },
+    { key: "RINITIS_ALERGI", tier: 1, pattern: /rinitis|rhinitis|alergi\s+(?:debu|dingin|cuaca)|bersin[\s-]+bersin\s+(?:tiap|setiap|saat|kalau|jika)/ },
+    { key: "ISPA", tier: 1, pattern: /batuk|pilek|\bbat?pil\b|\bflu\b|influenza|bersin|hidung\s+(?:tersumbat|mampet|meler)|ingus|\bispa\b|common cold|tenggorok\w*\s+(?:sakit|nyeri|perih|gatal)|(?:nyeri|sakit|perih|gatal)\s+(?:saat\s+)?(?:menelan|telan|tenggorok\w*)|radang\s+tenggorok\w*/ },
+    { key: "HORDEOLUM", tier: 1, pattern: /bintit\w*|timbil|hordeol\w*|kelopak\s+mata\s+(?:bengkak|benjol\w*)|benjolan\s+(?:di\s+)?kelopak/ },
+    { key: "KONJUNGTIVITIS", tier: 1, pattern: /mata\s+(?:\w+\s+)?(?:merah|belek\w*|gatal|berair|sakit|nyeri)|(?:sakit|nyeri)\s+mata|belekan|konjungtiv\w*|\bbelek\b/ },
+    { key: "HEMOROID", tier: 1, pattern: /wasir|ambei?y?en|hemoroid\w*|haemoroid\w*|benjolan\s+(?:di\s+)?(?:anus|dubur)/ },
+    { key: "TIFOID", tier: 1, pattern: /tifus|tipes|tifoid|typhoid|thypoid/ },
+    { key: "DISENTRI", tier: 1, pattern: /disentri|(?:bab|berak|diare|mencret)\s+(?:\w+\s+)?(?:berlendir|lendir|berdarah|darah)/ },
+    { key: "GEA", tier: 1, pattern: /diare|mencret|muntaber|(?:bab|berak|buang air besar)\s+(?:cair|encer)|gastroenteritis|\bgea\b/ },
+    { key: "HELMINTHIASIS", tier: 1, pattern: /cacing\w*|kremi/ },
+    { key: "GASTRITIS", tier: 1, pattern: /gastritis/ },
+    { key: "DISPEPSIA", tier: 1, pattern: /\bmaa?g\b|ulu\s+hati|epigastri\w*|dispepsia|gastritis|kembung|begah|sebah|perih\s+(?:di\s+)?(?:ulu\s+hati|lambung|perut)|perut\s+perih|asam\s+lambung|\bgerd\b/ },
+    { key: "KONSTIPASI", tier: 1, pattern: /sembelit|konstipasi|susah\s+(?:bab|buang\s+air\s+besar)|(?:tidak|belum)\s+bab\s+\d|bab\s+keras/ },
+    { key: "NYERI_PERUT", tier: 1, pattern: /(?:sakit|nyeri)\s+perut|perut\s+(?:sakit|nyeri|melilit|mules)|melilit|kolik/ },
+    { key: "ISK", tier: 1, pattern: /anyang|disuria|\bisk\b|infeksi\s+saluran\s+kemih|(?:nyeri|sakit|perih|panas)\s+(?:saat\s+)?(?:bak|kencing|berkemih|pipis)|(?:bak|kencing|pipis)\s+(?:perih|panas|sakit|nyeri)/ },
+    { key: "DISMENORE", tier: 1, pattern: /(?:nyeri|sakit)\s+(?:saat\s+)?(?:haid|mens\w*)|(?:haid|mens\w*)\s+(?:nyeri|sakit)|dismenore\w*/ },
+    { key: "PULPITIS", tier: 1, pattern: /(?:sakit|nyeri|ngilu)\s+gigi|gigi\s+(?:sakit|nyeri|ngilu|bengkak|berlubang|goyang)|pulpitis|gusi\s+bengkak/ },
+    { key: "ABSES", tier: 1, pattern: /bisul|abses|bernanah|furunkel|luka\b[^.;\n]{0,40}?(?:infeksi|meradang|radang|bernanah|berair|bengkak)/ },
+    { key: "VARICELLA", tier: 1, pattern: /cacar\s+air|varisela|varicella|\bcacar\b(?!\s+(?:ular|api))/ },
+    { key: "ZOSTER", tier: 1, pattern: /herpes\s+zoster|\bzoster\b|cacar\s+(?:ular|api)|dompo/ },
+    { key: "TINEA", tier: 1, pattern: /kurap|kadas|tinea|jamur|kutu\s+air|\bgatal\s+selangkangan/ },
+    { key: "PANU", tier: 1, pattern: /\bpanu\b|versikolor|versicolor/ },
+    { key: "STOMATITIS", tier: 1, pattern: /sariawan|stomatitis|\baft\w*/ },
+    { key: "URTIKARIA", tier: 1, pattern: /biduran|kaligata|urtikaria|bentol|\bbidur/ },
+    { key: "HERPES_LABIALIS", tier: 1, pattern: /herpes\s+(?:bibir|labial\w*)|lepuh\w*\s+(?:di\s+)?bibir|bibir\s+(?:melepuh|lepuh)/ },
+    { key: "MILIARIA", tier: 1, pattern: /biang\s+keringat|keringat\s+buntet|miliaria/ },
+    { key: "DERMATITIS", tier: 1, pattern: /ruam|eksim|eksema|dermatitis|gatal/ },
+    { key: "IMUNISASI", tier: 1, pattern: /imunisasi|vaksin\w*|\bbcg\b|\bdpt\w*|\bpolio\b|\bopv\b|\bipv\b|\bpcv\b|campak\s+rubel\w*|\bmr\b|\bhb[\s-]?0\b/ },
+    { key: "GOUT", tier: 1, pattern: /\bgout\b|pirai|asam\s+urat\s+(?:kambuh|nyeri|sakit|bengkak)|jempol\s+kaki\s+(?:bengkak|nyeri|sakit|merah)/ },
+    { key: "OA_GENU", tier: 1, pattern: /(?:nyeri|sakit|ngilu)\s+(?:di\s+)?lutut|lutut\s+(?:nyeri|sakit|kaku|bengkak|ngilu)|osteoart\w*|pengapuran/ },
+    { key: "LBP", tier: 1, pattern: /(?:nyeri|sakit|pegal)\s+(?:di\s+)?(?:pinggang|punggung)|low back pain|\blbp\b|encok/ },
+    { key: "HT", tier: 2, pattern: /hipertensi|darah\s+tinggi|tensi\s+tinggi|\bht\b|\bhtn\b/ },
+    { key: "HIPERURISEMIA", tier: 2, pattern: /asam\s+urat\s+(?:tinggi|naik)|kontrol\s+asam\s+urat|hiperurisemi\w*/ },
+    { key: "DISLIPIDEMIA", tier: 2, pattern: /kolesterol\s+(?:tinggi|naik)|kontrol\s+kolesterol|dislipid\w*|hiperlipid\w*/ },
+    { key: "ANEMIA", tier: 2, pattern: /anemi\w*|kurang\s+darah|\bhb\s+(?:rendah|turun)/ },
+    { key: "PARESTESIA", tier: 2, pattern: /kesemutan|kebas|\bbaal\b|mati\s+rasa/ },
+    { key: "DM", tier: 2, pattern: /diabetes|kencing\s+manis|gula\s+(?:darah\s+)?(?:tinggi|naik)|\bdm\b/ },
+    // v10: vertigo khas (berputar) = keluhan utama, mengalahkan TD tinggi dari TTV.
+    { key: "VERTIGO", tier: 1, pattern: /vertigo|pusing\s+berputar|(?:ruangan|sekitar|kepala)\s+(?:terasa\s+)?berputar/ },
+    { key: "VERTIGO", tier: 3, pattern: /kliyengan|sempoyongan/ },
+    { key: "CEPHALGIA", tier: 3, pattern: /(?:sakit|nyeri)\s+kepala|pusing|cekot|ce[fp]h?algia|migr[ae]i?n/ },
+    // v10: mual/muntah saja = keluhan penyerta; kalah dari pusing, diare, dll.
+    { key: "DISPEPSIA", tier: 3, pattern: /mual|muntah/ },
+    { key: "MYALGIA", tier: 3, pattern: /pegal|pegel|linu|(?:nyeri|sakit)\s+(?:otot|badan)|m[iy]algia/ },
+    { key: "FEVER", tier: 4, pattern: /demam|febris|meriang|sumeng|(?:badan|suhu)\s+(?:terasa\s+)?panas|panas\s+(?:badan|tinggi|naik|sejak|\d)/ },
+  ];
+
+
+  // ============================================================
+  // v0.5.0: PENGETAHUAN KELUHAN → DIAGNOSIS DIPERLUAS
+  // - Diagnosis umum FKTP tambahan (ICD-10) dengan obat HANYA dari daftar Paket Resep.
+  //   Banyak diagnosis sengaja tanpa obat otomatis (dokter memilih sendiri).
+  // - Ratusan kata keluhan awam (Bahasa Indonesia sehari-hari) untuk deteksi.
+  // - TANDA BAHAYA (RED_FLAGS): diagnosis tier 0, peringatan merah & saran rujuk,
+  //   obat TIDAK dicentang otomatis.
+  // ============================================================
+  const DIAGNOSIS_TEMPLATES_V05 = [
+    // ---- tanda bahaya (tanpa obat otomatis) ----
+    { key: "NYERI_DADA", label: "Nyeri dada (curiga SKA)", icd: ["R07.4", "R07.3"], query: "chest pain", adult: [], child: [],
+      edu: "Nyeri dada perlu EKG/pemeriksaan segera. Ke IGD bila nyeri dada berat, menjalar, disertai keringat dingin atau sesak." },
+    { key: "SESAK_BERAT", label: "Sesak napas berat", icd: ["R06.0"], query: "dyspnoea", adult: [], child: [],
+      edu: "Segera ke IGD bila sesak bertambah berat, bibir kebiruan, atau sulit bicara." },
+    { key: "STROKE", label: "Curiga stroke", icd: ["I64"], query: "stroke", adult: [], child: [],
+      edu: "Curiga stroke: segera ke IGD rumah sakit, jangan menunggu di rumah (waktu emas penanganan)." },
+    { key: "KEJANG", label: "Kejang", icd: ["R56.8", "R56.0"], query: "convulsions", adult: [], child: [],
+      edu: "Saat kejang: miringkan badan, longgarkan pakaian, jangan masukkan benda ke mulut, segera ke IGD." },
+    { key: "SINKOP", label: "Sinkop / penurunan kesadaran", icd: ["R55"], query: "syncope and collapse", adult: [], child: [],
+      edu: "Bila pingsan berulang, nyeri dada, berdebar, atau kesadaran menurun segera ke IGD." },
+    { key: "PERDARAHAN_GI", label: "Perdarahan saluran cerna", icd: ["K92.2", "K92.0", "K92.1"], query: "gastrointestinal haemorrhage", adult: [], child: [],
+      edu: "Muntah darah atau BAB hitam perlu penanganan segera di IGD." },
+    { key: "HEMOPTISIS", label: "Batuk darah (hemoptisis)", icd: ["R04.2"], query: "haemoptysis", adult: [], child: [],
+      edu: "Batuk darah perlu pemeriksaan lanjut (rontgen, dahak TB). Ke IGD bila darah banyak atau sesak." },
+    { key: "AKUT_ABDOMEN", label: "Nyeri perut akut (curiga apendisitis/akut abdomen)", icd: ["R10.0", "K35.8"], query: "acute abdomen", adult: [], child: [],
+      edu: "Nyeri perut hebat/menetap perlu evaluasi bedah segera. Puasa dulu sampai diperiksa." },
+    { key: "KEHAMILAN_BAHAYA", label: "Kehamilan dengan tanda bahaya", icd: ["O26.9", "O20.9"], query: "pregnancy related condition", adult: [], child: [],
+      edu: "Perdarahan, keluar air ketuban, nyeri perut hebat, atau kejang saat hamil: segera ke bidan/IGD." },
+    { key: "DEHIDRASI", label: "Dehidrasi", icd: ["E86"], query: "volume depletion", adult: [], child: [],
+      edu: "Minum oralit sedikit-sedikit tapi sering. Segera kembali/ke IGD bila tidak bisa minum, sangat lemas, atau tidak kencing." },
+    { key: "ANAFILAKSIS", label: "Reaksi alergi berat / angioedema", icd: ["T78.3", "T78.2"], query: "angioneurotic oedema", adult: [], child: [],
+      edu: "Bengkak bibir/wajah atau sesak setelah makan/obat: hentikan pencetus, segera ke IGD." },
+    { key: "IDE_BUNUH_DIRI", label: "Ide bunuh diri", icd: ["R45.8"], query: "symptoms involving emotional state", adult: [], child: [],
+      edu: "Jangan biarkan pasien sendirian. Rujuk/konsultasi psikiater atau layanan kesehatan jiwa segera." },
+    { key: "CEDERA_KEPALA", label: "Cedera kepala", icd: ["S09.9", "S06.0"], query: "injury of head", adult: [], child: [],
+      edu: "Segera ke IGD bila muntah berulang, sakit kepala hebat, kejang, mengantuk terus, atau keluar darah dari telinga/hidung." },
+    { key: "FRAKTUR", label: "Curiga fraktur (patah tulang)", icd: ["T14.2"], query: "fracture", adult: [], child: [],
+      edu: "Jangan pijat/urut. Imobilisasi (bidai) dan rujuk untuk rontgen." },
+    { key: "HIPOGLIKEMIA", label: "Hipoglikemia", icd: ["E16.2"], query: "hypoglycaemia", adult: [], child: [],
+      edu: "Gula darah rendah: segera minum/makan manis. Bawa permen saat bepergian, jangan telat makan." },
+    { key: "TETANUS", label: "Curiga tetanus / difteri", icd: ["A35", "A36.9"], query: "tetanus", adult: [], child: [],
+      edu: "Kaku rahang/selaput putih di tenggorokan: rujuk segera ke rumah sakit." },
+    { key: "CEDERA_MATA", label: "Trauma / bahan kimia pada mata", icd: ["S05.9", "T26.9"], query: "injury of eye", adult: [], child: [],
+      edu: "Bahan kimia di mata: bilas air mengalir minimal 15 menit lalu rujuk ke dokter mata." },
+    { key: "RETENSI_URIN", label: "Retensi urin (tidak bisa kencing)", icd: ["R33"], query: "retention of urine", adult: [], child: [],
+      edu: "Tidak bisa kencing sama sekali perlu pemasangan kateter: segera ke IGD." },
+    { key: "KERACUNAN_BAHAN", label: "Keracunan bahan kimia / obat", icd: ["T65.9", "T50.9"], query: "toxic effect", adult: [], child: [],
+      edu: "Jangan dipancing muntah. Bawa kemasan bahan/obat dan segera ke IGD." },
+    { key: "SAKIT_KEPALA_HEBAT", label: "Sakit kepala hebat / kaku kuduk", icd: ["R51", "G03.9"], query: "headache", adult: [], child: [],
+      edu: "Sakit kepala terhebat, mendadak, atau disertai demam dan kaku kuduk: segera ke IGD." },
+
+    // ---- napas / THT ----
+    { key: "BRONKITIS", label: "Bronkitis akut", icd: ["J20.9", "J40"], query: "acute bronchitis",
+      adult: ["AMBROXOL_30_DEWASA", "PARACETAMOL_DEWASA"], child: ["ISPA_ANAK"],
+      edu: "Perbanyak minum air hangat, istirahat, hindari asap rokok. Kontrol bila batuk >2 minggu atau sesak." },
+    { key: "PNEUMONIA", label: "Pneumonia", icd: ["J18.9"], query: "pneumonia",
+      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["AMOXICILLIN_SYRUP", "PARACETAMOL_ANAK"],
+      edu: "Habiskan antibiotik, minum cukup. Segera ke IGD bila sesak, napas cepat, bibir biru, atau tidak mau minum." },
+    { key: "TB_SUSPEK", label: "Suspek TB paru", icd: ["A16.2", "Z03.0"], query: "tuberculosis of lung",
+      adult: [], child: [],
+      edu: "Periksa dahak (TCM) sesuai jadwal, pakai masker, buka jendela rumah. Bila TB, obat harus diminum rutin sampai tuntas." },
+    { key: "PPOK", label: "PPOK", icd: ["J44.9"], query: "chronic obstructive pulmonary disease", adult: [], child: [],
+      edu: "Berhenti merokok, hindari asap/debu. Segera ke IGD bila sesak memberat." },
+    { key: "GAGAL_JANTUNG", label: "Curiga gagal jantung", icd: ["I50.9"], query: "heart failure", adult: [], child: [],
+      edu: "Batasi garam dan cairan sesuai anjuran, timbang BB rutin. Ke IGD bila sesak saat berbaring/istirahat." },
+    { key: "LARINGITIS", label: "Laringitis akut (suara serak)", icd: ["J04.0"], query: "acute laryngitis",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Istirahatkan suara, minum air hangat, hindari rokok. Kontrol bila serak >2 minggu." },
+    { key: "EPISTAKSIS", label: "Epistaksis (mimisan)", icd: ["R04.0"], query: "epistaxis", adult: [], child: [],
+      edu: "Saat mimisan: duduk condong ke depan, pencet cuping hidung 10 menit. Jangan mengorek hidung." },
+    { key: "OTITIS_EKSTERNA", label: "Otitis eksterna", icd: ["H60.9"], query: "otitis externa",
+      adult: ["RECO_TETES_TELINGA", "PARACETAMOL_DEWASA"], child: ["RECO_TETES_TELINGA", "PARACETAMOL_ANAK"],
+      edu: "Jangan mengorek telinga, jaga telinga tetap kering saat mandi/berenang." },
+    { key: "SERUMEN", label: "Serumen (kotoran telinga)", icd: ["H61.2"], query: "impacted cerumen", adult: [], child: [],
+      edu: "Jangan membersihkan telinga dengan cotton bud terlalu dalam. Kotoran keras dilunakkan lalu dibersihkan tenaga kesehatan." },
+    { key: "TINITUS", label: "Tinitus (telinga berdenging)", icd: ["H93.1"], query: "tinnitus", adult: [], child: [],
+      edu: "Hindari suara keras, kurangi kopi. Kontrol bila disertai pendengaran turun atau pusing berputar." },
+    { key: "BENDA_ASING", label: "Benda asing telinga / hidung", icd: ["T16", "T17.1"], query: "foreign body in ear", adult: [], child: [],
+      edu: "Jangan mencoba mengambil sendiri dengan benda tajam. Kontrol bila keluar cairan atau nyeri." },
+
+    // ---- mata ----
+    { key: "KELILIPAN", label: "Benda asing mata (kelilipan)", icd: ["T15.9"], query: "foreign body on external eye",
+      adult: ["CENDO_LYTEERS_TETES"], child: ["CENDO_LYTEERS_TETES"],
+      edu: "Jangan mengucek mata. Bilas dengan air bersih. Kontrol bila mata tetap merah, nyeri, atau penglihatan kabur." },
+    { key: "MATA_KERING", label: "Mata kering", icd: ["H04.1"], query: "dry eye",
+      adult: ["CENDO_LYTEERS_TETES"], child: ["CENDO_LYTEERS_TETES"],
+      edu: "Istirahatkan mata tiap 20 menit saat memakai HP/komputer, sering berkedip, cukup tidur." },
+    { key: "REFRAKSI", label: "Gangguan refraksi / mata kabur", icd: ["H52.7", "H52.4"], query: "disorder of refraction", adult: [], child: [],
+      edu: "Periksa ketajaman penglihatan / kacamata. Segera kontrol bila kabur mendadak atau disertai nyeri." },
+    { key: "KATARAK", label: "Katarak", icd: ["H26.9"], query: "cataract", adult: [], child: [],
+      edu: "Katarak ditangani dengan operasi; dirujuk ke dokter mata sesuai jadwal." },
+    { key: "PTERIGIUM", label: "Pterigium", icd: ["H11.0"], query: "pterygium",
+      adult: ["CENDO_LYTEERS_TETES"], child: ["CENDO_LYTEERS_TETES"],
+      edu: "Lindungi mata dari debu, angin, dan sinar matahari (kacamata/topi)." },
+    { key: "PERDARAHAN_SUBKONJ", label: "Perdarahan subkonjungtiva", icd: ["H11.3"], query: "conjunctival haemorrhage", adult: [], child: [],
+      edu: "Biasanya hilang sendiri 1-2 minggu. Jangan mengucek mata; cek tekanan darah." },
+    { key: "KALAZION", label: "Kalazion", icd: ["H00.1"], query: "chalazion", adult: [], child: [],
+      edu: "Kompres hangat 3-4x sehari, jangan dipencet. Bila tidak mengecil, dirujuk untuk tindakan." },
+
+    // ---- saluran cerna / mulut ----
+    { key: "GERD", label: "GERD (refluks asam lambung)", icd: ["K21.9"], query: "gastro-oesophageal reflux disease",
+      adult: ["OMEPRAZOLE_20_DEWASA", "ANTASIDA_DEWASA"], child: ["ANTASIDA_ANAK"],
+      edu: "Makan porsi kecil tapi sering, jangan langsung berbaring setelah makan, kurangi kopi/pedas/asam, tinggikan kepala saat tidur." },
+    { key: "KERACUNAN_MAKANAN", label: "Keracunan makanan", icd: ["A05.9"], query: "bacterial foodborne intoxication",
+      adult: ["AKITA"], child: ["ZINC_ANAK", "ORALIT_ANAK"],
+      edu: "Minum oralit sedikit-sedikit tapi sering, makan lunak. Segera kembali bila lemas, muntah terus, atau tidak kencing." },
+    { key: "MUAL_HAMIL", label: "Emesis gravidarum (mual hamil)", icd: ["O21.0"], query: "mild hyperemesis gravidarum", adult: [], child: [],
+      edu: "Makan porsi kecil tapi sering, hindari bau pencetus. Segera kembali bila muntah terus dan tidak bisa makan/minum." },
+    { key: "HEPATITIS", label: "Ikterus / curiga hepatitis", icd: ["R17", "B15.9"], query: "jaundice", adult: [], child: [],
+      edu: "Istirahat, makan bergizi, jangan berbagi alat makan. Periksa fungsi hati sesuai anjuran." },
+    { key: "HERNIA", label: "Hernia", icd: ["K40.9", "K42.9"], query: "inguinal hernia", adult: [], child: [],
+      edu: "Hindari mengangkat beban berat dan mengejan. Segera ke IGD bila benjolan nyeri, tidak bisa masuk, atau muntah." },
+    { key: "FISURA_ANI", label: "Fisura ani", icd: ["K60.2"], query: "anal fissure", adult: [], child: [],
+      edu: "Perbanyak sayur, buah, dan air putih agar BAB lunak; duduk berendam air hangat." },
+    { key: "GINGIVITIS", label: "Gingivitis (radang gusi)", icd: ["K05.1", "K05.0"], query: "gingivitis", adult: [], child: [],
+      edu: "Sikat gigi 2x sehari dengan lembut, pakai benang gigi, periksa ke dokter gigi untuk pembersihan karang gigi." },
+    { key: "KANDIDIASIS_ORAL", label: "Kandidiasis oral", icd: ["B37.0"], query: "candidal stomatitis", adult: [], child: [],
+      edu: "Jaga kebersihan mulut, bersihkan dot/botol susu, kontrol bila tidak membaik." },
+    { key: "TUMBUH_GIGI", label: "Tumbuh gigi / gigi bungsu", icd: ["K00.7", "K01.1"], query: "teething syndrome",
+      adult: ["IBUPROFEN_400"], child: ["PARACETAMOL_ANAK"],
+      edu: "Kumur air garam hangat, makan makanan lunak. Gigi bungsu yang sering nyeri diperiksakan ke dokter gigi." },
+    { key: "HALITOSIS", label: "Halitosis (bau mulut)", icd: ["R19.6"], query: "halitosis", adult: [], child: [],
+      edu: "Sikat gigi dan lidah, cukup minum, periksa gigi/gusi ke dokter gigi." },
+    { key: "PAROTITIS", label: "Parotitis (gondongan)", icd: ["B26.9"], query: "mumps",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Istirahat di rumah sampai bengkak hilang (menular), makan lunak, kompres hangat/dingin." },
+    { key: "STRUMA", label: "Benjolan leher (struma / pembesaran kelenjar)", icd: ["E04.9", "R59.0"], query: "nontoxic goitre", adult: [], child: [],
+      edu: "Benjolan leher perlu pemeriksaan lanjut (lab/USG). Kontrol bila membesar cepat, sulit menelan, atau suara serak." },
+    { key: "CEGUKAN", label: "Cegukan (singultus)", icd: ["R06.6"], query: "hiccough", adult: [], child: [],
+      edu: "Minum air pelan-pelan, tahan napas sebentar. Kontrol bila cegukan lebih dari 2 hari." },
+    { key: "KOLIK_BAYI", label: "Bayi rewel / kolik infantil", icd: ["R68.1"], query: "excessive crying of infant", adult: [], child: [],
+      edu: "Sendawakan bayi setelah menyusu, gendong dan tenangkan. Segera kembali bila demam, muntah terus, atau tidak mau menyusu." },
+    { key: "IKTERUS_BAYI", label: "Ikterus neonatorum (bayi kuning)", icd: ["P59.9"], query: "neonatal jaundice", adult: [], child: [],
+      edu: "Susui lebih sering (8-12x sehari). Segera kembali bila kuning sampai telapak, bayi lemas, atau tidak mau menyusu." },
+
+    // ---- saluran kemih / kelamin / kebidanan ----
+    { key: "UROLITIASIS", label: "Urolitiasis (batu saluran kemih)", icd: ["N20.9", "N23"], query: "calculus of kidney",
+      adult: ["SCOPMA_DEWASA"], child: [],
+      edu: "Minum air putih 2-3 liter sehari. Segera kembali bila nyeri hebat, demam, atau tidak bisa kencing." },
+    { key: "BPH", label: "Pembesaran prostat (BPH)", icd: ["N40"], query: "hyperplasia of prostate", adult: [], child: [],
+      edu: "Kurangi minum menjelang tidur, jangan menahan kencing. Segera ke IGD bila tidak bisa kencing sama sekali." },
+    { key: "URETRITIS", label: "Uretritis / curiga IMS", icd: ["N34.1", "A54.9"], query: "urethritis", adult: [], child: [],
+      edu: "Hindari hubungan seksual sampai sembuh, pasangan juga perlu diperiksa, gunakan kondom." },
+    { key: "FLUOR_ALBUS", label: "Fluor albus (keputihan)", icd: ["N89.8", "N76.0"], query: "leukorrhoea", adult: [], child: [],
+      edu: "Jaga area kewanitaan tetap kering, cebok dari depan ke belakang, ganti pakaian dalam katun, hindari sabun pembersih kewanitaan." },
+    { key: "GANGGUAN_HAID", label: "Gangguan haid (tidak teratur / terlambat)", icd: ["N92.6", "N91.2"], query: "irregular menstruation", adult: [], child: [],
+      edu: "Catat tanggal haid. Bila terlambat haid, lakukan tes kehamilan. Jaga berat badan dan kelola stres." },
+    { key: "MENORAGIA", label: "Menoragia (haid banyak/lama)", icd: ["N92.0"], query: "excessive menstruation", adult: [], child: [],
+      edu: "Catat lama dan banyaknya darah haid. Segera kembali bila pusing, lemas, atau perdarahan sangat banyak." },
+    { key: "MASTITIS", label: "Mastitis", icd: ["N61"], query: "inflammatory disorders of breast",
+      adult: ["PARACETAMOL_DEWASA", "CEFADROXIL_500_DEWASA"], child: [],
+      edu: "Tetap susui/perah ASI sering dari payudara yang sakit, kompres hangat, habiskan antibiotik." },
+    { key: "BENJOLAN_PAYUDARA", label: "Benjolan payudara", icd: ["N63"], query: "unspecified lump in breast", adult: [], child: [],
+      edu: "Benjolan payudara perlu pemeriksaan lanjut (USG/dokter bedah). Lakukan SADARI tiap bulan." },
+    { key: "KB", label: "Konsultasi KB / kontrasepsi", icd: ["Z30.0", "Z30.4"], query: "contraceptive management", adult: [], child: [],
+      edu: "Gunakan kontrasepsi sesuai jadwal. Kontrol bila ada perdarahan banyak, nyeri, atau terlambat jadwal suntik." },
+    { key: "ANC", label: "Pemeriksaan kehamilan (ANC)", icd: ["Z34.9"], query: "supervision of normal pregnancy", adult: [], child: [],
+      edu: "Periksa hamil minimal 6x, minum tablet tambah darah, makan bergizi. Segera ke bidan/IGD bila perdarahan, ketuban pecah, kejang, atau gerak janin berkurang." },
+    { key: "SUNAT", label: "Sirkumsisi (sunat)", icd: ["Z41.2"], query: "routine and ritual circumcision", adult: [], child: [],
+      edu: "Jaga luka sunat tetap bersih dan kering, kontrol sesuai jadwal." },
+
+    // ---- otot / tulang / saraf ----
+    { key: "HNP", label: "Nyeri pinggang menjalar (iskialgia/HNP)", icd: ["M54.3", "M54.4", "M51.1"], query: "sciatica",
+      adult: ["DICLOFENAC_50", "MECOBALAMIN_500_DEWASA"], child: [],
+      edu: "Hindari mengangkat beban berat dan membungkuk; segera kembali bila kaki lemah atau sulit BAK/BAB." },
+    { key: "NYERI_LEHER", label: "Nyeri leher (cervicalgia)", icd: ["M54.2"], query: "cervicalgia",
+      adult: ["DICLOFENAC_50"], child: ["PARACETAMOL_ANAK"],
+      edu: "Kompres hangat, perbaiki posisi tidur/bantal dan posisi kerja, peregangan leher pelan-pelan." },
+    { key: "NYERI_BAHU", label: "Nyeri bahu / frozen shoulder", icd: ["M75.9", "M75.0"], query: "shoulder lesion",
+      adult: ["DICLOFENAC_50"], child: [],
+      edu: "Kompres hangat dan latihan gerak bahu pelan-pelan setiap hari; hindari beban berat." },
+    { key: "ARTRALGIA", label: "Artralgia / nyeri sendi", icd: ["M25.5", "M13.9"], query: "pain in joint",
+      adult: ["DICLOFENAC_50"], child: ["PARACETAMOL_ANAK"],
+      edu: "Kompres hangat, istirahatkan sendi, jaga berat badan. Kontrol bila sendi bengkak merah atau demam." },
+    { key: "SPRAIN", label: "Sprain / keseleo", icd: ["T14.3", "S93.4"], query: "sprain",
+      adult: ["IBUPROFEN_400"], child: ["IBUPROFEN_ANAK"],
+      edu: "Istirahatkan, kompres dingin 15 menit beberapa kali sehari, balut elastis, tinggikan bagian yang sakit. Jangan diurut." },
+    { key: "KONTUSIO", label: "Kontusio / memar", icd: ["T14.0"], query: "superficial injury",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Kompres dingin 1-2 hari pertama, lalu kompres hangat. Kontrol bila bengkak bertambah atau tidak bisa digerakkan." },
+    { key: "PERAWATAN_LUKA", label: "Perawatan luka / lepas jahitan", icd: ["Z48.0"], query: "attention to surgical dressings and sutures", adult: [], child: [],
+      edu: "Jaga luka tetap bersih dan kering, ganti perban sesuai jadwal. Kontrol bila luka merah, bengkak, atau bernanah." },
+    { key: "VULNUS", label: "Vulnus (luka)", icd: ["T14.1"], query: "open wound",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Jaga luka tetap bersih dan kering, ganti perban tiap hari. Kontrol bila merah, bengkak, bernanah, atau demam." },
+    { key: "GIGITAN_HEWAN", label: "Luka gigitan hewan (risiko rabies/bisa)", icd: ["T14.1", "T63.0"], query: "open wound", adult: [], child: [],
+      edu: "Cuci luka gigitan dengan sabun dan air mengalir 15 menit. Rujuk untuk vaksin anti rabies / serum anti bisa." },
+    { key: "COMBUSTIO", label: "Luka bakar (combustio)", icd: ["T30.0"], query: "burn",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Aliri air bersih (bukan es) 20 menit, jangan dioles pasta gigi/kecap/mentega, jangan pecahkan lepuhan." },
+    { key: "KRAM", label: "Kram otot", icd: ["R25.2"], query: "cramp and spasm", adult: [], child: [],
+      edu: "Regangkan otot pelan-pelan, cukup minum, kurangi aktivitas berat mendadak." },
+    { key: "CTS", label: "Carpal tunnel syndrome", icd: ["G56.0"], query: "carpal tunnel syndrome",
+      adult: ["MECOBALAMIN_500_DEWASA"], child: [],
+      edu: "Kurangi gerakan menekuk pergelangan berulang, istirahatkan tangan, kompres hangat." },
+    { key: "TRIGGER_FINGER", label: "Trigger finger", icd: ["M65.3"], query: "trigger finger",
+      adult: ["DICLOFENAC_50"], child: [],
+      edu: "Kurangi menggenggam kuat berulang, kompres hangat, latihan gerak jari." },
+    { key: "PLANTAR_FASCIITIS", label: "Nyeri tumit (plantar fasciitis)", icd: ["M72.2"], query: "plantar fascial fibromatosis",
+      adult: ["DICLOFENAC_50"], child: [],
+      edu: "Pakai alas kaki empuk, regangkan telapak dan betis pagi hari, kompres dingin, kurangi berdiri lama." },
+    { key: "MIGREN", label: "Migren", icd: ["G43.9"], query: "migraine",
+      adult: ["IBUPROFEN_400"], child: ["PARACETAMOL_ANAK"],
+      edu: "Istirahat di ruang gelap dan tenang, tidur cukup, hindari pencetus (telat makan, kurang tidur, stres)." },
+    { key: "TTH", label: "Tension type headache", icd: ["G44.2"], query: "tension-type headache",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Istirahat cukup, kelola stres, pijat ringan leher/bahu, perbaiki posisi kerja." },
+    { key: "BELLS_PALSY", label: "Bell's palsy", icd: ["G51.0"], query: "bell's palsy", adult: [], child: [],
+      edu: "Lindungi mata yang tidak bisa menutup (kacamata, tetes mata). Pastikan bukan stroke; kontrol sesuai jadwal." },
+    { key: "KUSTA", label: "Curiga kusta", icd: ["A30.9"], query: "leprosy", adult: [], child: [],
+      edu: "Kusta bisa disembuhkan dengan obat teratur; periksa ke program kusta puskesmas. Lindungi bagian yang mati rasa dari luka." },
+
+    // ---- kulit ----
+    { key: "SKABIES", label: "Skabies (kudis)", icd: ["B86"], query: "scabies", adult: [], child: [],
+      edu: "Semua anggota serumah diobati bersamaan. Cuci pakaian, sprei, handuk dengan air panas lalu jemur di bawah matahari." },
+    { key: "IMPETIGO", label: "Impetigo", icd: ["L01.0"], query: "impetigo",
+      adult: ["CEFADROXIL_500_DEWASA"], child: ["CEFADROXIL_SYRUP"],
+      edu: "Jangan digaruk, bersihkan dengan air dan sabun, potong kuku, handuk tidak dipakai bersama (menular)." },
+    { key: "SELULITIS", label: "Selulitis", icd: ["L03.9", "L03.1"], query: "cellulitis",
+      adult: ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["CEFADROXIL_PUYER_ANAK", "PARACETAMOL_ANAK"],
+      edu: "Habiskan antibiotik, tinggikan bagian yang bengkak. Segera kembali bila merah meluas cepat atau demam tinggi." },
+    { key: "PARONIKIA", label: "Paronikia / kuku cantengan", icd: ["L03.0", "L60.0"], query: "cellulitis of finger and toe",
+      adult: ["CEFADROXIL_500_DEWASA"], child: ["CEFADROXIL_PUYER_ANAK"],
+      edu: "Rendam air hangat 3-4x sehari, potong kuku lurus, jangan memakai sepatu sempit." },
+    { key: "AKNE", label: "Akne vulgaris (jerawat)", icd: ["L70.0"], query: "acne vulgaris", adult: [], child: [],
+      edu: "Cuci muka 2x sehari dengan sabun lembut, jangan memencet jerawat, hindari kosmetik berminyak." },
+    { key: "KUTIL", label: "Kutil / mata ikan", icd: ["B07", "L84"], query: "viral warts", adult: [], child: [],
+      edu: "Jangan digaruk/dicabut sendiri. Pakai alas kaki yang nyaman untuk mata ikan." },
+    { key: "PEDIKULOSIS", label: "Pedikulosis (kutu rambut)", icd: ["B85.0"], query: "pediculosis capitis", adult: [], child: [],
+      edu: "Sisir rambut dengan sisir serit, cuci sprei/sarung bantal, obati semua anggota keluarga yang berkutu." },
+    { key: "SEBOROIK", label: "Dermatitis seboroik (ketombe)", icd: ["L21.9", "L21.0"], query: "seborrhoeic dermatitis", adult: [], child: [],
+      edu: "Keramas teratur dengan sampo anti ketombe, jangan menggaruk kulit kepala." },
+    { key: "RUAM_POPOK", label: "Dermatitis popok", icd: ["L22"], query: "diaper dermatitis", adult: [], child: [],
+      edu: "Ganti popok lebih sering, bersihkan dengan air hangat, keringkan sebelum memakai popok baru, beri waktu tanpa popok." },
+    { key: "ALERGI_OBAT", label: "Alergi obat (erupsi obat)", icd: ["L27.0", "T88.7"], query: "generalized skin eruption due to drugs",
+      adult: ["CETIRIZINE_10_DEWASA"], child: ["CETIRIZINE_RACIKAN_BARU"],
+      edu: "Hentikan obat yang dicurigai, catat namanya dan sampaikan setiap berobat. Segera ke IGD bila bengkak bibir/wajah atau sesak." },
+    { key: "GIGITAN_SERANGGA", label: "Gigitan / sengatan serangga", icd: ["T63.4"], query: "venom of other arthropods",
+      adult: ["CETIRIZINE_10_DEWASA"], child: ["CETIRIZINE_RACIKAN_BARU"],
+      edu: "Cuci dengan sabun, kompres dingin, jangan digaruk. Segera ke IGD bila bengkak meluas atau sesak." },
+    { key: "ULKUS_DM", label: "Ulkus diabetikum (luka kaki DM)", icd: ["E11.5", "L97"], query: "diabetic foot ulcer", adult: [], child: [],
+      edu: "Rawat luka rutin, kontrol gula darah, periksa kaki setiap hari, jangan berjalan tanpa alas kaki." },
+    { key: "PSORIASIS", label: "Psoriasis", icd: ["L40.9"], query: "psoriasis", adult: [], child: [],
+      edu: "Jaga kulit tetap lembap, hindari menggaruk dan stres. Kontrol rutin." },
+    { key: "ALOPESIA", label: "Kerontokan rambut", icd: ["L65.9", "L63.9"], query: "nonscarring hair loss", adult: [], child: [],
+      edu: "Makan bergizi, kelola stres, hindari menarik/mengikat rambut terlalu kencang." },
+    { key: "BENJOLAN", label: "Benjolan kulit / bawah kulit", icd: ["R22.9", "D17.9"], query: "localized swelling, mass and lump", adult: [], child: [],
+      edu: "Kontrol bila benjolan membesar cepat, nyeri, merah, atau bernanah." },
+
+    // ---- infeksi tropis / anak ----
+    { key: "DENGUE", label: "Demam dengue / curiga DBD", icd: ["A90", "A91"], query: "dengue fever",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Minum banyak (air, jus, oralit), periksa darah sesuai anjuran. Segera ke IGD bila muntah terus, nyeri perut, perdarahan, lemas, atau tangan-kaki dingin." },
+    { key: "MALARIA", label: "Malaria", icd: ["B54"], query: "malaria", adult: [], child: [],
+      edu: "Periksa darah malaria (RDT/mikroskop). Bila positif, obat harus diminum sampai habis. Pakai kelambu." },
+    { key: "CHIKUNGUNYA", label: "Chikungunya", icd: ["A92.0"], query: "chikungunya virus disease",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Istirahat, minum banyak, kompres sendi. Berantas sarang nyamuk (3M plus)." },
+    { key: "CAMPAK", label: "Campak (morbili)", icd: ["B05.9"], query: "measles",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Istirahat di rumah (menular), minum cukup, makan bergizi. Segera kembali bila sesak, diare berat, atau kejang." },
+    { key: "HFMD", label: "Flu Singapura (HFMD)", icd: ["B08.4"], query: "enteroviral vesicular stomatitis with exanthem",
+      adult: ["PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"],
+      edu: "Istirahat di rumah sampai sembuh (menular), cuci tangan, makan/minum dingin dan lunak." },
+    { key: "LEPTOSPIROSIS", label: "Curiga leptospirosis", icd: ["A27.9"], query: "leptospirosis", adult: [], child: [],
+      edu: "Hindari genangan/banjir tanpa sepatu bot. Segera ke IGD bila kuning, kencing sedikit, atau perdarahan." },
+    { key: "GIZI_KURANG", label: "Gizi kurang / BB sulit naik", icd: ["E44.1", "R62.8"], query: "mild protein-energy malnutrition", adult: [], child: [],
+      edu: "Beri makan bergizi seimbang dengan protein hewani tiap hari, pantau BB di posyandu tiap bulan." },
+
+    // ---- umum / jiwa / jantung-pembuluh ----
+    { key: "INSOMNIA", label: "Insomnia", icd: ["G47.0", "F51.0"], query: "insomnia", adult: [], child: [],
+      edu: "Tidur dan bangun di jam yang sama, kurangi kopi/HP sebelum tidur, olahraga ringan pagi/sore." },
+    { key: "ANSIETAS", label: "Gangguan cemas (ansietas)", icd: ["F41.9", "F41.1"], query: "anxiety disorder", adult: [], child: [],
+      edu: "Latihan napas dalam, olahraga teratur, cerita ke orang terpercaya. Kontrol bila mengganggu aktivitas." },
+    { key: "DEPRESI", label: "Depresi", icd: ["F32.9"], query: "depressive episode", adult: [], child: [],
+      edu: "Jangan dipendam sendiri, libatkan keluarga, kontrol rutin. Segera minta bantuan bila muncul pikiran menyakiti diri." },
+    { key: "PALPITASI", label: "Palpitasi (berdebar)", icd: ["R00.2"], query: "palpitations", adult: [], child: [],
+      edu: "Kurangi kopi, rokok, dan minuman energi. Segera ke IGD bila berdebar disertai nyeri dada, sesak, atau pingsan." },
+    { key: "EDEMA", label: "Edema (bengkak kaki)", icd: ["R60.0"], query: "localized oedema", adult: [], child: [],
+      edu: "Tinggikan kaki saat istirahat, kurangi garam. Kontrol untuk cek jantung, ginjal, dan hati." },
+    { key: "VARISES", label: "Varises", icd: ["I83.9"], query: "varicose veins of lower extremities", adult: [], child: [],
+      edu: "Hindari berdiri/duduk terlalu lama, tinggikan kaki saat istirahat, olahraga jalan kaki." },
+    { key: "HIPOTENSI", label: "Hipotensi", icd: ["I95.9"], query: "hypotension", adult: [], child: [],
+      edu: "Cukup minum dan makan teratur, bangun dari duduk/tidur pelan-pelan." },
+    { key: "MALAISE", label: "Malaise / lemas", icd: ["R53"], query: "malaise and fatigue", adult: [], child: [],
+      edu: "Istirahat cukup, makan bergizi, minum air putih cukup. Kontrol bila lemas berlanjut atau memberat." },
+    { key: "ANOREKSIA", label: "Nafsu makan turun", icd: ["R63.0"], query: "anorexia", adult: [], child: [],
+      edu: "Makan porsi kecil tapi sering dengan menu yang disukai. Kontrol bila BB terus turun." },
+    { key: "BB_TURUN", label: "Penurunan berat badan", icd: ["R63.4"], query: "abnormal weight loss", adult: [], child: [],
+      edu: "Penurunan berat badan tanpa sebab perlu pemeriksaan lanjut (gula darah, TB, tiroid)." },
+    { key: "OBESITAS", label: "Obesitas", icd: ["E66.9"], query: "obesity", adult: [], child: [],
+      edu: "Kurangi gula, gorengan, dan porsi nasi; olahraga 30 menit 5x seminggu; timbang BB rutin." },
+    { key: "CHECKUP", label: "Pemeriksaan kesehatan umum", icd: ["Z00.0", "Z02.7"], query: "general medical examination", adult: [], child: [],
+      edu: "Jaga pola makan, olahraga teratur, periksa kesehatan berkala." },
+  ];
+  DIAGNOSIS_TEMPLATES.push(...DIAGNOSIS_TEMPLATES_V05);
+
+  // Tanda bahaya & hati-hati. level "bahaya" = kotak merah, obat tidak dicentang
+  // otomatis, `dx` dipakai sebagai diagnosis tier 0. level "hati" = kotak kuning;
+  // `noAuto: true` juga menahan centang otomatis (hamil, alergi obat).
+  const RED_FLAGS = [
+    { key: "NYERI_DADA", level: "bahaya", dx: "NYERI_DADA", label: "Nyeri dada",
+      pattern: /(?:nyeri|sakit|ngilu|perih|tertekan|tertindih)\s+(?:di\s+)?(?:\w+\s+)?dada|dada\s+(?:kiri\s+|kanan\s+|tengah\s+)?(?:terasa\s+)?(?:sakit|nyeri|berat|tertekan|ditekan|ditindih|tertindih|ditimpa|diremas|seperti\s+ditimpa|seperti\s+ditekan|sesak)|angina|serangan\s+jantung|jantung\s+(?:sakit|nyeri)|chest\s+pain/,
+      advice: "Pikirkan sindrom koroner akut: EKG segera, nilai TTV & SpO2; bila curiga, beri penanganan awal dan rujuk IGD." },
+    { key: "SESAK_BERAT", level: "bahaya", dx: "SESAK_BERAT", label: "Sesak berat",
+      pattern: /sesak\s+(?:napas\s+|nafas\s+)?(?:berat|sekali|hebat|parah|banget|terus[\s-]+menerus|makin\s+berat)|(?:sulit|susah|tidak\s+bisa|gak\s+bisa|ga\s+bisa)\s+(?:ber)?na[fp]as|na[fp]as\s+(?:\w+\s+)?(?:tersengal|megap|cuping\s+hidung)|tarikan\s+dinding\s+dada|bibir\s+(?:\w+\s+)?(?:biru|kebiruan)|(?:tidak\s+bisa|sulit|susah)\s+bicara\s+(?:karena\s+)?sesak/,
+      advice: "Nilai SpO2, laju napas, dan tanda distres. Beri oksigen bila ada; rujuk IGD bila tidak membaik." },
+    { key: "STROKE", level: "bahaya", dx: "STROKE", label: "Curiga stroke",
+      pattern: /stroke|lemah\s+(?:\w+\s+)?(?:separuh|sebelah|setengah)\s+(?:badan|tubuh)|(?:separuh|sebelah|setengah)\s+(?:badan|tubuh)\s+(?:\w+\s+)?(?:lemah|lumpuh|kebas|baal|mati\s+rasa)|(?:tangan|kaki|lengan|tungkai)\s+(?:kiri\s+|kanan\s+)?(?:\w+\s+)?(?:lumpuh|tiba[\s-]+tiba\s+lemah|mendadak\s+lemah|tidak\s+bisa\s+digerakkan)|\blumpuh\b|(?:mulut|bibir|wajah|muka)\s+(?:\w+\s+)?(?:mencong|merot|perot|miring|menceng)|bicara\s+(?:\w+\s+)?(?:pelo|cadel\s+mendadak|tidak\s+jelas\s+mendadak)|\bpelo\b/,
+      advice: "Nilai FAST (wajah, lengan, bicara) dan waktu awal gejala. Cek GDS & TD, rujuk IGD RS segera." },
+    { key: "KEJANG", level: "bahaya", dx: "KEJANG", label: "Kejang",
+      pattern: /kejang(?!\s+otot)|\bstep\b|\bstip\b|\bstuip\b|epilep\w*|\bayan\b|konvulsi/,
+      advice: "Amankan jalan napas. Kejang demam anak: nilai lama kejang & kesadaran. Kejang >5 menit, berulang, atau tidak sadar: rujuk IGD." },
+    { key: "SINKOP", level: "bahaya", dx: "SINKOP", label: "Pingsan / penurunan kesadaran",
+      pattern: /pingsan|semaput|tidak\s+sadar(?:kan\s+diri)?|hilang\s+kesadaran|penurunan\s+kesadaran|kesadaran\s+(?:\w+\s+)?menurun|sulit\s+dibangunkan|tidak\s+merespons?|linglung|bingung\s+mendadak|ngomong\s+ngelantur/,
+      advice: "Nilai GCS, TTV, GDS, dan EKG. Penurunan kesadaran: stabilkan dan rujuk IGD." },
+    { key: "PERDARAHAN_GI", level: "bahaya", dx: "PERDARAHAN_GI", label: "Perdarahan saluran cerna",
+      pattern: /muntah\s+(?:\w+\s+)?darah|muntah\s+(?:\w+\s+)?(?:seperti\s+)?(?:kopi|hitam)|(?:bab|berak|feses|tinja|kotoran)\s+(?:\w+\s+)?(?:hitam|seperti\s+aspal|seperti\s+kopi)|melena|hematemesis/,
+      advice: "Nilai tanda syok (TD, nadi, akral). Pasang akses IV bila ada dan rujuk IGD." },
+    { key: "HEMOPTISIS", level: "bahaya", dx: "HEMOPTISIS", label: "Batuk darah",
+      pattern: /batuk\s+(?:\w+\s+)?(?:berdarah|darah)|(?:dahak|riak)\s+(?:\w+\s+)?(?:berdarah|bercampur\s+darah|ada\s+darah)|hemoptisis|haemoptysis/,
+      advice: "Pikirkan TB, pneumonia, atau keganasan. Periksa dahak/rontgen; darah banyak atau sesak: rujuk IGD." },
+    { key: "AKUT_ABDOMEN", level: "bahaya", dx: "AKUT_ABDOMEN", label: "Nyeri perut akut",
+      pattern: /(?:nyeri|sakit)\s+perut\s+(?:\w+\s+)?(?:hebat|sekali|parah|luar\s+biasa|tidak\s+tertahan|melilit\s+hebat)|perut\s+(?:\w+\s+)?(?:keras|tegang)\s+(?:seperti\s+)?papan|usus\s+buntu|apendi[sc]\w*|appendi\w*|(?:nyeri|sakit)\s+(?:di\s+)?perut\s+kanan\s+bawah|perut\s+kanan\s+bawah\s+(?:\w+\s+)?(?:sakit|nyeri)|tidak\s+bisa\s+(?:kentut|buang\s+angin|flatus)/,
+      advice: "Periksa nyeri tekan/lepas, McBurney, defans. Curiga apendisitis/akut abdomen: puasakan dan rujuk." },
+    { key: "KEHAMILAN_BAHAYA", level: "bahaya", dx: "KEHAMILAN_BAHAYA", label: "Kehamilan dengan tanda bahaya",
+      pattern: /(?:hamil|kehamilan)[^.;\n]{0,40}?(?:flek|perdarahan|berdarah|keluar\s+darah|nyeri\s+perut\s+hebat|kejang|bengkak\s+(?:wajah|muka)|pandangan\s+kabur|ketuban)|(?:keluar\s+air\s+ketuban|ketuban\s+pecah|ketuban\s+rembes)|gerak(?:an)?\s+janin\s+(?:\w+\s+)?(?:berkurang|tidak\s+terasa|hilang)|janin\s+(?:tidak|tak)\s+bergerak|perdarahan\s+(?:dari\s+)?jalan\s+lahir/,
+      advice: "Tanda bahaya kehamilan: nilai TD, perdarahan, DJJ; rujuk ke PONEK/IGD kebidanan." },
+    { key: "DEHIDRASI", level: "bahaya", dx: "DEHIDRASI", label: "Dehidrasi / tidak bisa minum",
+      pattern: /(?:tidak|tak|gak|ga|nggak)\s+(?:mau|bisa)\s+(?:minum|menyusu|netek|nyusu)|mata\s+(?:\w+\s+)?cekung|ubun[\s-]+ubun\s+cekung|(?:tidak|tak|belum)\s+(?:kencing|bak|pipis)\s+(?:sejak|seharian|lebih\s+dari|\d)|lemas\s+(?:sekali|banget|lunglai)|sangat\s+lemas|muntah\s+(?:terus[\s-]*(?:menerus)?|setiap\s+(?:kali\s+)?(?:minum|makan)|tiap\s+(?:minum|makan))|turgor\s+(?:kulit\s+)?(?:menurun|lambat|jelek)|dehidrasi/,
+      advice: "Nilai derajat dehidrasi (kesadaran, mata, turgor, minum). Dehidrasi berat / tidak bisa minum: cairan IV dan rujuk." },
+    { key: "GIGITAN_HEWAN", level: "bahaya", dx: "GIGITAN_HEWAN", label: "Gigitan hewan",
+      pattern: /(?:digigit|gigitan|dicakar|cakaran|dipatuk|patukan)\s+(?:\w+\s+)?(?:anjing|kucing|monyet|kera|tikus|kelelawar|ular|musang|hewan|binatang)/,
+      advice: "Cuci luka dengan sabun air mengalir 15 menit. Nilai risiko rabies (VAR/SAR) atau bisa ular (imobilisasi, SABU); rujuk." },
+    { key: "ANAFILAKSIS", level: "bahaya", dx: "ANAFILAKSIS", label: "Reaksi alergi berat",
+      pattern: /(?:bibir|wajah|muka|lidah|tenggorok\w*)\s+(?:\w+\s+)?(?:bengkak|membengkak|tebal)|bengkak\s+(?:di\s+)?(?:bibir|wajah|muka|lidah)|anafila\w*|angioedema|sesak\s+(?:\w+\s+){0,2}?(?:setelah|habis|sesudah)\s+(?:makan|minum\s+obat|disuntik|disengat|digigit)/,
+      advice: "Nilai jalan napas, TD, dan sesak. Anafilaksis: epinefrin IM, oksigen, cairan, rujuk IGD." },
+    { key: "IDE_BUNUH_DIRI", level: "bahaya", dx: "IDE_BUNUH_DIRI", label: "Risiko bunuh diri",
+      pattern: /bunuh\s+diri|ingin\s+mati|pengen\s+mati|mau\s+mati\s+saja|menyakiti\s+diri|melukai\s+diri|(?:tidak|tak|gak)\s+(?:ingin|mau)\s+hidup\s+lagi|mengakhiri\s+hidup|self[\s-]+harm/,
+      advice: "Jangan tinggalkan pasien sendiri, jauhkan benda berbahaya. Konsultasi/rujuk psikiater atau layanan jiwa segera." },
+    { key: "CEDERA_KEPALA", level: "bahaya", dx: "CEDERA_KEPALA", label: "Cedera kepala",
+      pattern: /(?:kepala|pelipis|dahi)\s+(?:\w+\s+)?(?:terbentur|kebentur|terbentur|kejedot|terhantam|dipukul)|(?:terbentur|kebentur|jatuh|kejedot)\s+(?:\w+\s+){0,2}?kepala|cedera\s+kepala|trauma\s+kepala|(?:muntah|pingsan)\s+(?:\w+\s+){0,2}?(?:setelah|habis|sesudah)\s+(?:jatuh|kecelakaan|terbentur)/,
+      advice: "Nilai GCS, pupil, muntah, amnesia, dan sakit kepala. Ada tanda bahaya cedera kepala: rujuk untuk CT scan." },
+    { key: "FRAKTUR", level: "bahaya", dx: "FRAKTUR", label: "Curiga patah tulang",
+      pattern: /patah\s+tulang|tulang\s+(?:\w+\s+)?patah|(?:tangan|kaki|lengan|tungkai|jari)\s+(?:\w+\s+)?patah|fraktur|bengkak\s+(?:dan\s+)?(?:berubah\s+bentuk|bengkok)|(?:tidak\s+bisa|tak\s+bisa)\s+(?:berjalan|menapak|digerakkan)\s+(?:setelah|habis|sesudah)\s+(?:jatuh|kecelakaan|terbentur)/,
+      advice: "Bidai/imobilisasi, jangan diurut; rujuk untuk rontgen." },
+    { key: "HIPOGLIKEMIA", level: "bahaya", dx: "HIPOGLIKEMIA", label: "Curiga hipoglikemia",
+      pattern: /gula\s+(?:darah\s+)?(?:\w+\s+)?(?:rendah|drop|anjlok)|hipoglikemi\w*|(?:lemas|gemetar|pingsan)\s+(?:\w+\s+){0,2}?keringat\s+dingin\s+(?:\w+\s+){0,2}?(?:dm|diabetes|kencing\s+manis|insulin)/,
+      advice: "Cek GDS segera. Bila <70 mg/dL: beri gula oral/dekstrosa sesuai kesadaran." },
+    { key: "TETANUS", level: "bahaya", dx: "TETANUS", label: "Curiga tetanus / difteri",
+      pattern: /kaku\s+rahang|mulut\s+(?:\w+\s+)?(?:sulit|susah|tidak\s+bisa)\s+dibuka|trismus|tetanus|difteri|diphther\w*|selaput\s+(?:\w+\s+)?putih\s+(?:di\s+)?(?:tenggorok\w*|amandel)|bull\s+neck/,
+      advice: "Kaku rahang/opistotonus atau selaput putih tenggorokan: isolasi bila perlu, laporkan, rujuk RS segera." },
+    { key: "CEDERA_MATA", level: "bahaya", dx: "CEDERA_MATA", label: "Trauma / bahan kimia mata",
+      pattern: /mata\s+(?:\w+\s+){0,2}?(?:terkena|kena|kemasukan|kecipratan|terciprat)\s+(?:\w+\s+)?(?:bahan\s+kimia|cairan\s+kimia|kapur|air\s+aki|aki|soda|cairan\s+pembersih|pemutih|semen|cairan\s+panas)|(?:tertusuk|tertancap|terkena\s+benda\s+tajam|terkena\s+gram)\s+(?:\w+\s+){0,2}?mata|penglihatan\s+(?:\w+\s+)?(?:hilang|gelap)\s+(?:mendadak|tiba[\s-]+tiba)|(?:mendadak|tiba[\s-]+tiba)\s+(?:tidak\s+bisa\s+melihat|buta)|buta\s+mendadak/,
+      advice: "Bahan kimia: irigasi mata segera ≥15 menit. Trauma tembus/penglihatan hilang mendadak: rujuk dokter mata segera." },
+    { key: "RETENSI_URIN", level: "bahaya", dx: "RETENSI_URIN", label: "Tidak bisa kencing",
+      pattern: /(?:tidak|tak|gak|ga|nggak)\s+bisa\s+(?:kencing|bak|pipis|buang\s+air\s+kecil)|(?:kencing|air\s+kencing)\s+(?:tidak|tak)\s+(?:bisa\s+)?keluar|anuria|retensi\s+urin/,
+      advice: "Periksa kandung kemih penuh. Retensi urin: kateterisasi/rujuk." },
+    { key: "KERACUNAN_BAHAN", level: "bahaya", dx: "KERACUNAN_BAHAN", label: "Keracunan bahan/obat",
+      pattern: /(?:minum|menelan|tertelan|keminum|keracunan)\s+(?:\w+\s+)?(?:racun|baygon|pestisida|insektisida|obat\s+nyamuk|minyak\s+tanah|bensin|pembersih\s+lantai|pemutih|cairan\s+kimia|obat\s+(?:banyak|sekaligus|satu\s+strip|berlebihan))|overdosis|keracunan\s+(?:obat|bahan|zat|gas|jengkol|singkong|jamur)/,
+      advice: "Identifikasi bahan dan jumlah, jangan dipancing muntah (zat korosif/minyak). Stabilkan dan rujuk IGD." },
+    { key: "SAKIT_KEPALA_HEBAT", level: "bahaya", dx: "SAKIT_KEPALA_HEBAT", label: "Sakit kepala hebat",
+      pattern: /(?:sakit|nyeri)\s+kepala\s+(?:\w+\s+)?(?:hebat|terhebat|luar\s+biasa|sangat\s+berat|mendadak\s+hebat|seperti\s+(?:dipukul|disambar|meledak))|kaku\s+kuduk|(?:leher|tengkuk)\s+kaku\s+(?:\w+\s+)?(?:demam|panas)|(?:demam|panas)\s+(?:\w+\s+){0,3}?(?:leher|tengkuk)\s+kaku/,
+      advice: "Pikirkan perdarahan subaraknoid/meningitis/hipertensi emergensi: cek TD, tanda rangsang meningeal, neurologis; rujuk." },
+
+    // ---- hati-hati (kuning) ----
+    { key: "HAMIL", level: "hati", noAuto: true, label: "Hamil / curiga hamil",
+      pattern: /\bhamil\b|kehamilan|\bgravid\w*|\bbumil\b|\bg\d+\s*p\d+|(?:telat|terlambat)\s+(?:haid|mens\w*|datang\s+bulan)|test\s*pack\s+(?:\+|positif)|tespek\s+(?:\+|positif)/,
+      advice: "Obat TIDAK dicentang otomatis. Pilih obat yang aman untuk kehamilan (hindari NSAID, ciprofloxacin, dll)." },
+    { key: "MENYUSUI", level: "hati", label: "Ibu menyusui",
+      pattern: /menyusui|ibu\s+menyusu|\bbusui\b|sedang\s+(?:memberi\s+)?asi/,
+      advice: "Periksa keamanan obat untuk ASI." },
+    { key: "ALERGI_OBAT", level: "hati", noAuto: true, label: "Riwayat alergi obat",
+      pattern: /alergi\s+(?:\w+\s+)?(?:obat|antibiotik|amox\w*|penisilin|penicillin|parasetamol|paracetamol|ibuprofen|asam\s+mefenamat|mefenamat|sulfa|nsaid|antalgin|metamizol|cipro\w*|cefadroxil|sefalosporin|cephalosporin|dexamethason\w*|natrium\s+diklofenak|diclofenac)/,
+      advice: "Obat TIDAK dicentang otomatis. Cocokkan nama obat dengan riwayat alergi sebelum memilih." },
+    { key: "SESAK", level: "hati", unless: "SESAK_BERAT", label: "Sesak",
+      pattern: /\bsesak\b|ngos[\s-]*ngosan|napas\s+pendek|nafas\s+pendek|mengi|\bngik\b/,
+      advice: "Cek SpO2, laju napas, dan suara paru sebelum memberi obat." },
+    { key: "BATUK_LAMA", level: "hati", label: "Batuk lama (≥2 minggu)",
+      pattern: /batuk\s+(?:\w+\s+)?(?:sudah\s+|sejak\s+|selama\s+)?(?:lebih\s+dari\s+|>\s*)?(?:(?:1[4-9]|[2-9]\d)\s*(?:hari|hr)|(?:[2-9]|dua|tiga|empat)\s*minggu|(?:\d+|se|satu|dua|tiga)\s*bulan|sebulan)|batuk\s+(?:lama|menahun|berbulan[\s-]+bulan|berminggu[\s-]+minggu|(?:tidak|tak|gak|ga|nggak)\s+(?:sembuh[\s-]+sembuh|sembuh|hilang))|keringat\s+malam/,
+      advice: "Pikirkan TB: periksa dahak (TCM), tanyakan BB turun, keringat malam, kontak TB." },
+    { key: "DEMAM_LAMA", level: "hati", label: "Demam lama (≥5 hari)",
+      pattern: /demam\s+(?:\w+\s+)?(?:sudah\s+|sejak\s+|selama\s+)?(?:lebih\s+dari\s+|>\s*)?(?:(?:[5-9]|[1-9]\d)\s*(?:hari|hr)|lima\s+hari|enam\s+hari|tujuh\s+hari|seminggu|(?:\d+|se|satu|dua)\s*minggu)/,
+      advice: "Demam ≥5 hari: pikirkan tifoid, DBD, ISK, malaria, TB; pertimbangkan cek darah." },
+    { key: "DBD_CURIGA", level: "hati", label: "Curiga DBD",
+      pattern: /bintik[\s-]+(?:bintik\s+)?merah|petek\w*|ptek\w*|trombosit\s+(?:\w+\s+)?(?:turun|rendah|menurun)|demam\s+berdarah|\bdbd\b|\bdhf\b|gusi\s+berdarah\s+(?:\w+\s+){0,3}?demam|demam\s+(?:\w+\s+){0,3}?(?:mimisan|gusi\s+berdarah)/,
+      advice: "Cek darah (trombosit, hematokrit), uji tourniquet; nilai tanda bahaya DBD (nyeri perut, muntah terus, perdarahan, akral dingin)." },
+    { key: "KUNING", level: "hati", label: "Kuning (ikterus)",
+      pattern: /(?:mata|kulit|badan|bayi|wajah|muka)\s+(?:\w+\s+)?kuning|ikterus|ikterik|(?:kencing|air\s+kencing|bak|pipis|urin)\s+(?:\w+\s+)?(?:seperti\s+)?(?:teh|coklat\s+pekat|coklat\s+tua)/,
+      advice: "Pikirkan hepatitis/sumbatan empedu; cek bilirubin & SGOT/SGPT. Bayi kuning <24 jam atau sampai telapak: rujuk." },
+    { key: "BERDEBAR", level: "hati", label: "Berdebar",
+      pattern: /berdebar|deg[\s-]*degan|jantung\s+(?:\w+\s+)?(?:berdebar|cepat|kencang|tidak\s+teratur)|palpitasi/,
+      advice: "Hitung nadi dan iramanya, cek TD; pertimbangkan EKG." },
+    { key: "BB_TURUN", level: "hati", label: "Berat badan turun",
+      pattern: /(?:berat\s+badan|\bbb\b)\s+(?:\w+\s+)?(?:turun|menurun|berkurang|susut)\s+(?:\w+\s+)?(?:drastis|banyak|terus|tanpa\s+sebab|\d+\s*kg)|(?:makin|tambah|semakin)\s+kurus/,
+      advice: "BB turun tanpa sebab: pikirkan DM, TB, hipertiroid, keganasan." },
+    { key: "LUKA_TETANUS", level: "hati", label: "Luka kotor / tusuk",
+      pattern: /(?:tertusuk|kena|menginjak)\s+(?:\w+\s+)?(?:paku|seng|kawat|besi)|(?:paku|seng|besi|kawat)\s+(?:\w+\s+)?berkarat|luka\s+(?:\w+\s+)?(?:kotor|tusuk)|kena\s+tanah/,
+      advice: "Nilai status imunisasi tetanus; pertimbangkan TT/ATS dan cuci luka bersih." },
+    { key: "DM_LUKA", level: "hati", label: "Luka pada pasien DM",
+      pattern: /luka\s+(?:\w+\s+){0,3}?(?:dm|diabetes|kencing\s+manis|gula)|(?:dm|diabetes|kencing\s+manis)\s+(?:\w+\s+){0,3}?luka|ulkus\s+diabet\w*|kaki\s+diabet\w*|luka\s+(?:\w+\s+)?(?:tidak|tak|gak)\s+(?:kunjung\s+)?sembuh/,
+      advice: "Cek GDS, nilai infeksi/gangren; ulkus dalam atau berbau: rujuk." },
+  ];
+
+  // Tanda bahaya ber-`dx` = diagnosis tier 0 (mengalahkan semua keluhan & TTV).
+  DIAGNOSIS_FROM_COMPLAINT.splice(
+    0,
+    0,
+    ...RED_FLAGS.filter((f) => f.dx).map((f) => ({ key: f.dx, tier: 0, pattern: f.pattern })),
+  );
+
+  // Kata keluhan awam tambahan. `before`: disisipkan sebelum entri pertama kunci itu
+  // (urutan menentukan pemenang bila tier sama). Tanpa `before` = di akhir daftar.
+  const COMPLAINT_PATTERNS_V05 = [
+    // napas / THT
+    { key: "PPOK", tier: 1, before: "ASMA", pattern: /\bppok\b|\bcopd\b|bronkitis\s+kronis|emfisema|sesak\s+(?:\w+\s+){0,2}?(?:perokok|merokok\s+(?:lama|bertahun))/ },
+    { key: "GAGAL_JANTUNG", tier: 1, before: "ASMA", pattern: /gagal\s+jantung|\bchf\b|lemah\s+jantung|sesak\s+(?:\w+\s+){0,2}?(?:saat|bila|kalau|jika|waktu)\s+(?:berbaring|tidur\s+telentang|terlentang|tiduran|jalan\s+(?:sedikit|dekat)|naik\s+tangga)|tidur\s+(?:\w+\s+){0,2}?bantal\s+(?:tinggi|banyak|\d)|terbangun\s+(?:\w+\s+){0,2}?(?:karena\s+)?sesak/ },
+    { key: "ASMA", tier: 1, before: "ASMA", pattern: /bengek|mengi|ngik[\s-]*ngik|na[fp]as\s+(?:\w+\s+)?bunyi|asma\s+kambuh|sesak\s+(?:na[fp]as\s+)?kambuh|sesak\s+(?:na[fp]as\s+)?(?:kalau|saat|bila)\s+(?:dingin|debu|capek)/ },
+    { key: "TB_SUSPEK", tier: 1, before: "ISPA", pattern: /\btb\b|\btbc\b|tuberkulos\w*|flek\s+(?:di\s+)?paru|batuk\s+(?:\w+\s+)?(?:sudah\s+|sejak\s+|selama\s+)?(?:lebih\s+dari\s+|>\s*)?(?:(?:1[4-9]|[2-9]\d)\s*(?:hari|hr)|(?:[2-9]|dua|tiga|empat)\s*minggu|(?:\d+|se|satu|dua|tiga)\s*bulan|sebulan)|batuk\s+(?:lama|menahun|berbulan[\s-]+bulan|berminggu[\s-]+minggu)|batuk\s+(?:tidak|tak|gak|ga|nggak)\s+(?:sembuh[\s-]+sembuh|sembuh|hilang)|keringat\s+malam|kontak\s+(?:\w+\s+)?(?:tb|tbc|pasien\s+tb)/ },
+    { key: "PNEUMONIA", tier: 1, before: "ISPA", pattern: /pneumoni\w*|radang\s+paru|paru[\s-]+paru\s+basah|paru\s+basah|bronkopneumoni\w*|napas\s+cepat\s+(?:\w+\s+){0,2}?(?:demam|batuk)/ },
+    { key: "BRONKITIS", tier: 1, before: "ISPA", pattern: /bronkitis|bronchitis|batuk\s+(?:\w+\s+)?dahak\s+(?:\w+\s+)?(?:kental|kuning|hijau)|dahak\s+(?:\w+\s+)?(?:kuning|hijau|kental)|riak\s+(?:kuning|hijau|kental)|dada\s+(?:\w+\s+)?grok[\s-]*grok/ },
+    { key: "HFMD", tier: 1, before: "ISPA", pattern: /flu\s+singapura|\bhfmd\b|hand\s+foot|(?:ruam|bintil|lepuh|bintik|sariawan)\s+(?:\w+\s+){0,3}?(?:di\s+)?(?:telapak\s+)?tangan(?:,|\s+dan|\s+&)?\s+(?:telapak\s+)?kaki/ },
+    { key: "CAMPAK", tier: 1, before: "ISPA", pattern: /(?<!(?:imunisasi|vaksin\w*|suntik)\s+)campak(?!\s+rubel)|morbili|tampek|gabagen|measles/ },
+    { key: "EPISTAKSIS", tier: 1, before: "ISPA", pattern: /mimisan|epista\w*|hidung\s+(?:\w+\s+)?(?:berdarah|keluar\s+darah)|darah\s+(?:keluar\s+)?dari\s+hidung/ },
+    { key: "SINUSITIS", tier: 1, before: "ISPA", pattern: /(?:nyeri|sakit)\s+(?:di\s+)?(?:pipi|dahi|sekitar\s+hidung)\s+(?:\w+\s+){0,2}?(?:pilek|ingus|menunduk)|ingus\s+(?:\w+\s+)?(?:kental|kuning|hijau|berbau)\s+(?:\w+\s+){0,3}?(?:lama|minggu)|post\s*nasal\s+drip|lendir\s+(?:turun|mengalir)\s+(?:ke\s+)?tenggorok\w*/ },
+    { key: "TONSILITIS", tier: 1, before: "ISPA", pattern: /amandel\w*|tonsil\w*/ },
+    { key: "FARINGITIS", tier: 1, before: "ISPA", pattern: /tenggorok\w*\s+(?:\w+\s+)?(?:merah|meradang|bengkak|seperti\s+tertusuk)|radang\s+tenggorok\w*\s+(?:\w+\s+)?(?:demam|panas)/ },
+    { key: "ISPA", tier: 1, pattern: /batuk\s+(?:kering|berdahak|grok[\s-]*grok|ngikil|terus)|ingusan|meler|hidung\s+(?:\w+\s+)?(?:buntu|mampet|tersumbat|berair|meler)|selesma|salesma|pilek\s+(?:\w+\s+)?(?:terus|kambuh)|tenggorok\w*\s+(?:\w+\s+)?(?:gatal|kering|serak|tidak\s+enak|ganjal|nyeri|sakit|perih|panas)|serak\s+(?:\w+\s+)?batuk|bersin[\s-]*bersin|flu\s+(?:dan\s+)?batuk|\buhuk\b|grok[\s-]*grok|ngekel|\bwatuk\b|batuk[\s-]+batuk|\bsesek\b\s+(?:\w+\s+)?pilek/ },
+    { key: "LARINGITIS", tier: 1, pattern: /laringitis|suara\s+(?:\w+\s+)?(?:serak|parau|hilang|habis|tidak\s+keluar)|\bserak\b|\bparau\b/ },
+    { key: "BENDA_ASING", tier: 1, before: "OMA", pattern: /(?:kemasukan|kemasukkan|masuk)\s+(?:\w+\s+){0,3}?(?:ke\s+(?:dalam\s+)?|di\s+)?(?:lubang\s+)?(?:telinga|kuping|hidung)|(?:serangga|semut|kecoa|nyamuk|kacang|biji|manik[\s-]*manik|mainan|kapas|batu)\s+(?:\w+\s+){0,2}?(?:di|ke|dalam)\s+(?:lubang\s+)?(?:telinga|kuping|hidung)|benda\s+asing\s+(?:di\s+)?(?:telinga|kuping|hidung)/ },
+    { key: "OTITIS_EKSTERNA", tier: 1, before: "OMA", pattern: /otitis\s+eksterna|(?:liang|lubang|daun)\s+telinga\s+(?:\w+\s+)?(?:sakit|nyeri|gatal|bengkak|merah)|(?:telinga|kuping)\s+(?:\w+\s+)?gatal|(?:telinga|kuping)\s+(?:\w+\s+)?(?:sakit|nyeri)\s+(?:\w+\s+)?(?:habis|setelah|karena|sesudah)\s+(?:dikorek|korek|mengorek|berenang|cotton\s+bud)|(?:habis|setelah)\s+(?:dikorek|mengorek|korek)\s+(?:telinga|kuping)/ },
+    { key: "OMA", tier: 1, before: "OMA", pattern: /(?:sakit|nyeri)\s+kuping|kuping\s+(?:\w+\s+)?(?:sakit|nyeri|berair|bernanah|keluar\s+cairan|keluar\s+nanah)|telinga\s+(?:\w+\s+)?keluar\s+(?:nanah|cairan|air)|(?:anak\s+)?(?:menarik|memegang)\s+(?:\w+\s+)?telinga\s+(?:\w+\s+)?(?:rewel|menangis|nangis)/ },
+    { key: "SERUMEN", tier: 1, pattern: /serumen|kotoran\s+(?:telinga|kuping)|(?:telinga|kuping)\s+(?:\w+\s+)?(?:tersumbat|buntu|mampet|penuh|budeg|budek|tuli|kurang\s+dengar)|\bbude[gk]\b|pendengaran\s+(?:\w+\s+)?(?:berkurang|menurun|terganggu|kurang)|kurang\s+(?:dengar|mendengar|jelas\s+mendengar)/ },
+    { key: "TINITUS", tier: 1, pattern: /tinn?itus|(?:telinga|kuping)\s+(?:\w+\s+)?(?:berdenging|mendenging|berdengung|mendengung|berbunyi|bunyi\s+nging)|berdenging|mendenging|\bnging\b/ },
+    // mata
+    { key: "CEDERA_MATA", tier: 0, before: "KONJUNGTIVITIS", pattern: /mata\s+(?:\w+\s+)?(?:terkena|kena)\s+(?:bahan\s+kimia|air\s+aki|kapur|semen)/ },
+    { key: "KELILIPAN", tier: 1, before: "KONJUNGTIVITIS", pattern: /kelilipan|kelilipen|kemasukan\s+(?:\w+\s+){0,2}?(?:ke\s+|di\s+)?mata|mata\s+(?:\w+\s+)?kemasukan|(?:debu|pasir|serpihan|gram|geram|serangga|kotoran|bulu\s+mata|kayu|besi)\s+(?:\w+\s+){0,2}?(?:masuk\s+(?:ke\s+)?|di\s+)mata|benda\s+asing\s+(?:di\s+)?mata|mata\s+(?:\w+\s+)?(?:mengganjal|terasa\s+ada\s+yang\s+mengganjal|seperti\s+ada\s+pasir)/ },
+    { key: "PERDARAHAN_SUBKONJ", tier: 1, before: "KONJUNGTIVITIS", pattern: /(?:bercak|gumpalan|noda)\s+darah\s+(?:di\s+)?(?:putih\s+)?mata|mata\s+(?:\w+\s+)?(?:merah\s+darah|merah\s+seperti\s+darah|berdarah)|pembuluh\s+(?:darah\s+)?(?:di\s+)?mata\s+pecah|subkonjungtiva/ },
+    { key: "PTERIGIUM", tier: 1, before: "KONJUNGTIVITIS", pattern: /pter[iy]gi\w*|daging\s+(?:tumbuh\s+)?(?:di\s+)?mata|selaput\s+(?:\w+\s+)?(?:di\s+)?(?:pinggir|ujung|sudut|tepi)\s+mata/ },
+    { key: "KATARAK", tier: 1, before: "KONJUNGTIVITIS", pattern: /katarak|mata\s+(?:\w+\s+)?(?:berkabut|keruh|seperti\s+berasap|ada\s+putih[\s-]*putih)|selaput\s+putih\s+(?:di\s+)?(?:bola\s+|tengah\s+)?mata|(?:silau|berkabut)\s+(?:\w+\s+){0,2}?(?:malam|lampu)/ },
+    { key: "MATA_KERING", tier: 1, before: "KONJUNGTIVITIS", pattern: /mata\s+(?:\w+\s+)?(?:kering|sepet|pedes|cepat\s+lelah|lelah|capek|capai)|dry\s+eye|mata\s+(?:\w+\s+)?(?:perih|pedih)\s+(?:\w+\s+){0,2}?(?:hp|komputer|laptop|layar|gadget)/ },
+    { key: "KONJUNGTIVITIS", tier: 1, before: "KONJUNGTIVITIS", pattern: /mata\s+(?:\w+\s+)?(?:lengket|bengkak\s+merah|merah\s+berair|kemerahan|perih|pedih|silau)|belekan|blekan|kotoran\s+mata\s+(?:\w+\s+)?(?:banyak|kuning|hijau)|sakit\s+mata\s+(?:menular|belekan)/ },
+    { key: "REFRAKSI", tier: 1, pattern: /mata\s+(?:\w+\s+)?(?:kabur|buram|burem|rabun|tidak\s+jelas|kurang\s+jelas|minus|plus|silinder|berbayang|dobel)|penglihatan\s+(?:\w+\s+)?(?:kabur|buram|berkurang|menurun|berbayang|ganda)|rabun\s+(?:jauh|dekat|senja)|(?:ganti|minta|periksa|buat)\s+kacamata|kacamata\s+(?:\w+\s+)?(?:tidak\s+cocok|baru)|presbiop\w*|miop\w*|hipermetrop\w*|astigmat\w*|(?:susah|sulit)\s+(?:membaca|baca|melihat)\s+(?:dekat|jauh|tulisan)/ },
+    { key: "KALAZION", tier: 1, before: "HORDEOLUM", pattern: /kalazion|chalazion|benjolan\s+(?:\w+\s+)?keras\s+(?:\w+\s+)?(?:di\s+)?kelopak|benjolan\s+(?:di\s+)?kelopak\s+(?:\w+\s+)?(?:tidak\s+sakit|lama|berbulan)/ },
+    { key: "HORDEOLUM", tier: 1, before: "HORDEOLUM", pattern: /tembel|kelopak\s+(?:mata\s+)?(?:\w+\s+)?(?:merah|nyeri|sakit|bernanah)|bintil\s+(?:di\s+)?kelopak/ },
+    // saluran cerna
+    { key: "KERACUNAN_MAKANAN", tier: 1, before: "GEA", pattern: /keracunan\s+(?:makanan|makan)|(?:mual|muntah|diare|mencret|sakit\s+perut|mules)\s+(?:\w+\s+){0,3}?(?:setelah|habis|sesudah)\s+(?:makan|jajan|minum\s+es|kondangan|hajatan)|makanan\s+(?:basi|kedaluwarsa|kadaluarsa)|(?:serumah|sekeluarga|bersama)\s+(?:\w+\s+){0,2}?(?:muntah|mencret|diare)/ },
+    { key: "MUAL_HAMIL", tier: 1, before: "GEA", pattern: /(?:mual|muntah)\s+(?:\w+\s+){0,3}?(?:hamil|kehamilan)|(?:hamil|kehamilan)\s+(?:\w+\s+){0,4}?(?:mual|muntah)|morning\s+sickness|hiperemesis|emesis\s+gravidarum|ngidam/ },
+    { key: "GEA", tier: 1, before: "GEA", pattern: /(?:bab|berak|buang\s+air\s+besar|beol|eek|pup)\s+(?:\w+\s+)?(?:cair|encer|terus|terus[\s-]+menerus|lebih\s+dari\s+\d|\d+\s*(?:x|kali))|murus|mencret[\s-]+mencret|berak[\s-]+berak|bolak[\s-]+balik\s+(?:ke\s+)?(?:wc|kamar\s+mandi|toilet|jamban)|buang\s+air\s+terus|muntaber|muntah\s+(?:dan|\+)\s+(?:mencret|diare|berak)/ },
+    { key: "GERD", tier: 1, before: "DISPEPSIA", pattern: /\bgerd\b|refluks|reflux|asam\s+lambung\s+(?:\w+\s+)?(?:naik|tinggi|kambuh)|dada\s+(?:\w+\s+)?(?:terasa\s+)?(?:panas|terbakar|perih)|panas\s+(?:di\s+)?(?:dada|ulu\s+hati\s+sampai\s+dada)|(?:mulut|tenggorok\w*|lidah)\s+(?:\w+\s+)?(?:terasa\s+)?(?:asam|pahit)|(?:sering\s+)?sendawa\s+(?:asam|terus)|heartburn|nyesek\s+(?:ke\s+|di\s+)?dada\s+(?:\w+\s+){0,2}?(?:setelah|habis)\s+makan/ },
+    { key: "DISPEPSIA", tier: 1, before: "DISPEPSIA", pattern: /perut\s+(?:\w+\s+)?(?:begah|penuh|kembung|sebah|panas|perih|tidak\s+enak|kaya\s+ada\s+angin)|cepat\s+kenyang|sendawa|serdawa|(?:magh|mag|maag)\s+(?:\w+\s+)?(?:kambuh|kumat)|lambung\s+(?:\w+\s+)?(?:sakit|perih|nyeri|kumat)|banyak\s+angin|perut\s+(?:\w+\s+)?bunyi|ulu\s+hati/ },
+    { key: "FISURA_ANI", tier: 1, before: "HEMOROID", pattern: /fisura|fissura|fissure|(?:anus|dubur|pantat|lubang\s+pantat)\s+(?:\w+\s+)?(?:perih|sobek|robek|luka|lecet)|perih\s+(?:saat|waktu|ketika|kalau)\s+(?:bab|berak|beol)/ },
+    { key: "HEMOROID", tier: 1, before: "HEMOROID", pattern: /ambeien|ambeyen|wasir|(?:bab|berak|beol)\s+(?:\w+\s+)?(?:darah\s+segar|menetes\s+darah)|benjolan\s+(?:\w+\s+)?(?:keluar\s+)?(?:dari\s+)?(?:anus|dubur|pantat)|(?:anus|dubur)\s+(?:\w+\s+)?(?:benjol\w*|bengkak|keluar\s+daging)/ },
+    { key: "KONSTIPASI", tier: 1, before: "KONSTIPASI", pattern: /(?:susah|sulit|tidak\s+lancar|jarang|belum)\s+(?:bab|berak|beol|buang\s+air\s+besar|pup|eek)|(?:bab|berak|beol|feses|kotoran)\s+(?:\w+\s+)?(?:keras|seperti\s+kotoran\s+kambing|mampet)|(?:tidak|belum)\s+(?:bab|berak|beol)\s+(?:sejak|selama|\d+|beberapa)|sembelit|mengejan\s+(?:saat|waktu|kalau)\s+(?:bab|berak)/ },
+    { key: "UROLITIASIS", tier: 1, before: "NYERI_PERUT", pattern: /batu\s+(?:ginjal|saluran\s+kemih|kencing|ureter|kandung\s+kemih|buli)|kencing\s+batu|urolit\w*|nefrolit\w*|ureterolit\w*|kolik\s+(?:ginjal|renal|ureter)|(?:nyeri|sakit)\s+pinggang\s+(?:\w+\s+){0,3}?menjalar\s+(?:ke\s+)?(?:perut|selangkangan|kemaluan|depan|bawah\s+perut)|(?:kencing|bak|pipis|urin|air\s+kencing)\s+(?:\w+\s+)?(?:berpasir|berdarah|merah|seperti\s+air\s+cucian\s+daging|keluar\s+batu|keluar\s+pasir)|hematuri\w*/ },
+    { key: "NYERI_PERUT", tier: 1, before: "NYERI_PERUT", pattern: /mules|mulas|perut\s+(?:\w+\s+)?(?:kram|keram|kaku|mules|mulas|sakit|nyeri|perih\s+melilit)|(?:nyeri|sakit)\s+(?:di\s+)?perut\s+(?:\w+\s+)?(?:bawah|kiri|kanan\s+atas|tengah|atas)|(?:nyeri|sakit)\s+(?:di\s+)?(?:sekitar\s+)?pusar/ },
+    { key: "HERNIA", tier: 1, pattern: /hernia|turun\s+berok|\bberok\b|\bburut\b|(?:benjolan|bengkak)\s+(?:\w+\s+)?(?:di\s+)?(?:selangkangan|lipat\s+paha|lipatan\s+paha|kantong\s+(?:buah\s+)?zakar|buah\s+zakar|skrotum)|(?:benjolan|bengkak)\s+(?:\w+\s+)?(?:di\s+)?pusar|pusar\s+(?:\w+\s+)?(?:bodong|menonjol)|benjolan\s+(?:\w+\s+)?(?:keluar\s+masuk|hilang\s+timbul)/ },
+    { key: "HEPATITIS", tier: 1, pattern: /hepatitis|sakit\s+kuning|penyakit\s+kuning|liver\s+(?:\w+\s+)?(?:bengkak|naik|tinggi)|sgot\s+(?:\w+\s+)?(?:tinggi|naik)|sgpt\s+(?:\w+\s+)?(?:tinggi|naik)|(?:mata|kulit|badan|wajah|muka)\s+(?:\w+\s+)?kuning|ikterus|ikterik|(?:kencing|bak|pipis|urin)\s+(?:\w+\s+)?(?:seperti\s+)?(?:teh|coklat\s+pekat)/ },
+    { key: "IKTERUS_BAYI", tier: 1, before: "HEPATITIS", pattern: /bayi\s+(?:\w+\s+)?kuning|kuning\s+(?:pada\s+)?bayi|ikterus\s+neonat\w*|neonatal\s+jaundice/ },
+    { key: "HELMINTHIASIS", tier: 1, before: "HELMINTHIASIS", pattern: /cacingan|kremian|(?:gatal|garuk)\s+(?:\w+\s+)?(?:di\s+)?(?:anus|dubur|pantat|lubang\s+pantat)|(?:keluar|ada)\s+cacing|cacing\s+(?:keluar|di\s+(?:bab|berak|feses))/ },
+    { key: "TIFOID", tier: 1, before: "TIFOID", pattern: /gejala\s+tipes|tipus|thypus|typus|widal\s+(?:\w+\s+)?(?:positif|\+)/ },
+    { key: "DISENTRI", tier: 1, before: "DISENTRI", pattern: /(?:bab|berak|beol|feses)\s+(?:\w+\s+)?(?:berlendir|lendir|bercampur\s+darah|berdarah\s+lendir|seperti\s+ingus)|(?:mencret|diare)\s+(?:\w+\s+)?(?:lendir|darah)/ },
+    // mulut / gigi
+    { key: "KANDIDIASIS_ORAL", tier: 1, before: "STOMATITIS", pattern: /(?:lidah|mulut|langit[\s-]+langit|pipi\s+dalam)\s+(?:\w+\s+)?(?:putih[\s-]*putih|berjamur|bercak\s+putih|ada\s+bercak\s+putih|ada\s+putih[\s-]*putih)|jamur\s+(?:di\s+)?(?:mulut|lidah)|oral\s+thrush|\bthrush\b|sariawan\s+putih[\s-]*putih/ },
+    { key: "HFMD", tier: 1, before: "STOMATITIS", pattern: /sariawan\s+(?:\w+\s+){0,3}?(?:bintil|ruam|lepuh)\s+(?:\w+\s+){0,2}?(?:tangan|kaki)/ },
+    { key: "STOMATITIS", tier: 1, before: "STOMATITIS", pattern: /seriawan|panas\s+dalam|lidah\s+(?:\w+\s+)?(?:luka|perih|lecet)|(?:mulut|bibir\s+dalam|pipi\s+dalam|gusi)\s+(?:\w+\s+)?(?:luka|perih|lecet)|luka\s+(?:di\s+)?(?:dalam\s+)?mulut/ },
+    { key: "TUMBUH_GIGI", tier: 1, before: "PULPITIS", pattern: /tumbuh\s+gigi|gigi\s+(?:\w+\s+)?(?:tumbuh|bungsu)|geraham\s+(?:bungsu|belakang)\s+(?:\w+\s+)?(?:sakit|nyeri|tumbuh|bengkak)|teething|impaksi/ },
+    { key: "GINGIVITIS", tier: 1, before: "PULPITIS", pattern: /gingivitis|radang\s+gusi|gusi\s+(?:\w+\s+)?(?:berdarah|turun|merah|gampang\s+berdarah)|karang\s+gigi/ },
+    { key: "PULPITIS", tier: 1, before: "PULPITIS", pattern: /gigi\s+(?:\w+\s+)?(?:bolong|linu|cenat[\s-]*cenut|nyut[\s-]*nyutan|patah|keropos|sensitif)|geraham\s+(?:\w+\s+)?(?:sakit|nyeri|bolong|ngilu)|sakit\s+geraham|(?:pipi|gusi)\s+(?:\w+\s+)?bengkak\s+(?:\w+\s+){0,2}?gigi|gigi\s+(?:\w+\s+)?(?:sakit|nyeri)/ },
+    { key: "HALITOSIS", tier: 1, pattern: /bau\s+mulut|mulut\s+(?:\w+\s+)?bau|na[fp]as\s+(?:\w+\s+)?bau|halitos\w*/ },
+    { key: "PAROTITIS", tier: 1, pattern: /gondong\w*|parotit\w*|mumps|(?:pipi|rahang|bawah\s+telinga|depan\s+telinga)\s+(?:\w+\s+)?bengkak|bengkak\s+(?:di\s+)?(?:pipi|bawah\s+telinga|depan\s+telinga|rahang)/ },
+    { key: "STRUMA", tier: 1, pattern: /\bgondok\b|struma|goiter|tiroid|thyroid|benjol\w*\s+(?:\w+\s+)?(?:di\s+)?leher|leher\s+(?:\w+\s+)?(?:benjol\w*|membesar|bengkak)|(?:pembesaran|bengkak)\s+kelenjar\s+(?:getah\s+bening|leher)|kelenjar\s+(?:\w+\s+)?(?:bengkak|membesar)/ },
+    { key: "CEGUKAN", tier: 1, pattern: /cegukan|sesenggukan|singultus|hiccup/ },
+    // kemih / kelamin / kebidanan
+    { key: "URETRITIS", tier: 1, before: "ISK", pattern: /kencing\s+(?:\w+\s+)?nanah|(?:keluar|ada)\s+nanah\s+(?:\w+\s+)?(?:dari|di)\s+(?:kemaluan|penis|alat\s+kelamin|saluran\s+kencing)|gonore\w*|kencing\s+nanah|raja\s+singa|sifilis|syphilis|\bims\b|penyakit\s+kelamin|(?:luka|lecet|kutil|bintil)\s+(?:\w+\s+)?(?:di\s+)?(?:kemaluan|alat\s+kelamin|penis|kelamin)/ },
+    { key: "DM", tier: 1, before: "ISK", pattern: /(?:sering|banyak)\s+(?:haus|minum)\s+(?:\w+\s+){0,3}?(?:sering|banyak)\s+(?:kencing|bak|pipis)|(?:sering|banyak)\s+(?:kencing|bak|pipis)\s+(?:\w+\s+){0,3}?(?:sering|banyak)\s+(?:haus|minum|makan|lapar)|poliuri\w*|polidipsi\w*|polifagi\w*/ },
+    { key: "ISK", tier: 1, before: "ISK", pattern: /anyang[\s-]*anyangan|beser|(?:kencing|bak|pipis)\s+(?:\w+\s+)?(?:sedikit[\s-]+sedikit|sering|terus|anyang|bau\s+menyengat|keruh)|sering\s+(?:kencing|bak|pipis)(?!\s+(?:di\s+)?malam)|(?:nyeri|sakit)\s+(?:di\s+)?(?:perut\s+bawah|bawah\s+perut)\s+(?:\w+\s+){0,2}?(?:kencing|bak|pipis)/ },
+    { key: "BPH", tier: 1, pattern: /prostat\w*|\bbph\b|(?:kencing|bak|pipis)\s+(?:\w+\s+)?(?:tidak\s+(?:tuntas|lampias|lancar|puas)|kurang\s+lampias|menetes|netes|lemah|mengejan|ngeden|harus\s+mengejan|tersendat|putus[\s-]+putus)|(?:pancaran|pancuran)\s+(?:kencing\s+)?(?:\w+\s+)?(?:lemah|kecil|melemah)|sering\s+(?:kencing|bak|pipis)\s+(?:di\s+)?malam|terbangun\s+(?:\w+\s+){0,2}?(?:untuk\s+)?(?:kencing|bak|pipis)|nokturia/ },
+    { key: "FLUOR_ALBUS", tier: 1, before: "TINEA", pattern: /keputihan|fluor\s+albus|leukore\w*|(?:vagina|miss\s*v|kewanitaan|organ\s+intim\s+wanita)\s+(?:\w+\s+)?(?:gatal|berbau|bau|perih|keluar\s+cairan|basah)|gatal\s+(?:di\s+)?(?:vagina|miss\s*v|kewanitaan)|vaginitis|vaginosis|kandidiasis\s+vagina/ },
+    { key: "MENORAGIA", tier: 1, before: "DISMENORE", pattern: /(?:haid|mens\w*|datang\s+bulan)\s+(?:\w+\s+)?(?:banyak\s+sekali|sangat\s+banyak|banyak|deras|lama|lebih\s+dari\s+(?:7|seminggu)|tidak\s+berhenti[\s-]*berhenti|tidak\s+berhenti|menggumpal|bergumpal)|menoragi\w*|metroragi\w*|perdarahan\s+(?:\w+\s+)?(?:dari\s+)?(?:vagina|kemaluan)/ },
+    { key: "GANGGUAN_HAID", tier: 1, before: "DISMENORE", pattern: /(?:haid|mens\w*|datang\s+bulan)\s+(?:\w+\s+)?(?:tidak\s+teratur|tidak\s+lancar|berantakan|kacau|jarang|tidak\s+keluar|telat|terlambat|maju|mundur|2\s*(?:x|kali)\s+sebulan|dua\s+kali\s+sebulan)|(?:telat|terlambat|belum|tidak)\s+(?:haid|mens\w*|datang\s+bulan)\s+(?:\w+\s+)?(?:\d+|sejak|selama|beberapa|sudah)|amenore\w*|oligomenore\w*|flek\s+(?:\w+\s+)?(?:di\s+luar|di\s+antara|sebelum)\s+(?:jadwal\s+)?haid|\bpcos\b|polikistik/ },
+    { key: "DISMENORE", tier: 1, before: "DISMENORE", pattern: /kram\s+(?:\w+\s+)?(?:haid|mens\w*|datang\s+bulan)|(?:nyeri|sakit)\s+(?:\w+\s+)?(?:saat\s+|waktu\s+|ketika\s+)?datang\s+bulan|(?:perut|pinggang)\s+(?:\w+\s+)?(?:sakit|nyeri|mules|mulas|kram)\s+(?:\w+\s+)?(?:saat|waktu|ketika|kalau|tiap)\s+(?:haid|mens\w*|datang\s+bulan)|(?:haid|mens\w*)\s+(?:hari\s+(?:pertama|ke[\s-]*\d)\s+)?(?:\w+\s+)?(?:mules|mulas|kram)/ },
+    { key: "BENJOLAN_PAYUDARA", tier: 1, pattern: /benjol\w*\s+(?:\w+\s+)?(?:di\s+)?(?:payudara|dada\s+(?:kiri|kanan)\s+wanita|buah\s+dada|tetek|susu)|(?:payudara|buah\s+dada|tetek)\s+(?:\w+\s+)?(?:benjol\w*|ada\s+benjolan)|tumor\s+payudara|kanker\s+payudara/ },
+    { key: "MASTITIS", tier: 1, pattern: /mastitis|(?:payudara|buah\s+dada|tetek|susu)\s+(?:\w+\s+)?(?:bengkak|merah|nyeri|sakit|panas|keras|bernanah)|(?:nyeri|sakit)\s+(?:di\s+)?(?:payudara|buah\s+dada|tetek)|puting\s+(?:\w+\s+)?(?:lecet|luka|nyeri|sakit|pecah)|asi\s+(?:\w+\s+)?(?:bengkak|tersumbat|mampet|bendungan)|bendungan\s+asi/ },
+    { key: "KB", tier: 1, pattern: /\bkb\b|kontrasepsi|keluarga\s+berencana|(?:suntik|pil|susuk|implan|implant|iud|spiral|kondom)\s+(?:\w+\s+)?kb|(?:pasang|lepas|bongkar|cabut)\s+(?:\w+\s+)?(?:iud|spiral|implan|implant|susuk|kb)|\bakdr\b|\bakbk\b|suntik\s+(?:1|3|satu|tiga)\s+bulan/ },
+    { key: "ANC", tier: 2, pattern: /(?:periksa|kontrol|cek)\s+(?:\w+\s+)?(?:hamil|kehamilan|kandungan)|\banc\b|antenatal|ibu\s+hamil|\bbumil\b|hamil\s+(?:\d+|muda|tua|anak\s+ke)|kehamilan\s+(?:\d+|ke[\s-]*\d|trimester)|\bg\d+\s*p\d+|usia\s+kehamilan|(?:test\s*pack|tespek|tes\s+kehamilan)\s+(?:\w+\s+)?(?:positif|\+)/ },
+    { key: "SUNAT", tier: 1, pattern: /sunat|khitan|sirkumsisi|circumcision|supit/ },
+    // otot / tulang / saraf
+    { key: "HNP", tier: 1, before: "LBP", pattern: /ischialgia|iskialgia|sciatica|siatika|skiatika|\bhnp\b|saraf\s+(?:\w+\s+)?(?:kejepit|terjepit|kejepet|jepit)|syaraf\s+(?:\w+\s+)?(?:kejepit|terjepit|jepit)|(?:nyeri|sakit|kesemutan|pegal|kebas)\s+(?:\w+\s+){0,3}?menjalar\s+(?:ke\s+|sampai\s+(?:ke\s+)?)?(?:kaki|tungkai|paha|betis|bokong|pantat|telapak)|pinggang\s+(?:\w+\s+){0,3}?menjalar\s+(?:ke\s+|sampai\s+(?:ke\s+)?)?(?:kaki|tungkai|paha|betis|bokong|pantat)/ },
+    { key: "LBP", tier: 1, before: "LBP", pattern: /boyok|cangkeng|pinggang\s+(?:\w+\s+)?(?:sakit|nyeri|pegal|pegel|linu|kaku|encok|kencang|panas|ngilu)|punggung\s+(?:\w+\s+)?(?:sakit|nyeri|pegal|pegel|kaku|ngilu|panas)|(?:sakit|nyeri|pegal|pegel)\s+(?:di\s+)?(?:punggung|pinggang)\s+(?:bawah|atas)|tulang\s+(?:belakang|ekor)\s+(?:\w+\s+)?(?:sakit|nyeri)|kecetit\s+(?:di\s+)?pinggang|salah\s+angkat/ },
+    { key: "NYERI_LEHER", tier: 1, pattern: /cervicalgia|servikalgia|salah\s+bantal|tengeng|tengleng|(?:nyeri|sakit)\s+(?:di\s+)?leher|leher\s+(?:\w+\s+)?(?:sakit|nyeri|kaku|tidak\s+bisa\s+(?:menoleh|digerakkan))/ },
+    { key: "NYERI_LEHER", tier: 3, pattern: /(?:pegal|pegel|kaku|kencang|tegang|berat)\s+(?:di\s+)?(?:leher|tengkuk|pundak)|(?:leher|tengkuk|pundak)\s+(?:\w+\s+)?(?:pegal|pegel|kencang|tegang|berat|kenceng)/ },
+    { key: "NYERI_BAHU", tier: 1, pattern: /frozen\s+shoulder|(?:nyeri|sakit|pegal|kaku|ngilu|linu)\s+(?:di\s+)?bahu|bahu\s+(?:\w+\s+)?(?:sakit|nyeri|kaku|ngilu|pegal|linu)|lengan\s+(?:\w+\s+)?(?:tidak\s+bisa|susah|sulit)\s+(?:diangkat|diangkat\s+ke\s+atas|digerakkan\s+ke\s+atas)/ },
+    { key: "CHIKUNGUNYA", tier: 1, pattern: /chikungunya|cikungunya|chikun\w*|flu\s+tulang|demam\s+(?:\w+\s+){0,2}?(?:dan|dengan|disertai|\+)\s+(?:nyeri|sakit|ngilu|linu)\s+(?:\w+\s+)?(?:sendi|tulang)|(?:nyeri|sakit|ngilu|linu)\s+(?:\w+\s+)?sendi\s+(?:\w+\s+){0,2}?(?:dan|dengan|disertai|\+)\s+demam/ },
+    { key: "GOUT", tier: 1, before: "GOUT", pattern: /asam\s+urat\s+(?:\w+\s+)?(?:kumat|kambuh)|(?:jempol|ibu\s+jari)\s+kaki\s+(?:\w+\s+)?(?:bengkak|nyeri|sakit|merah|panas)|tofus|tophus/ },
+    { key: "OA_GENU", tier: 1, before: "OA_GENU", pattern: /dengkul\s+(?:\w+\s+)?(?:sakit|nyeri|linu|ngilu|kaku|bengkak|bunyi)|(?:sakit|nyeri|linu|ngilu)\s+(?:di\s+)?dengkul|lutut\s+(?:\w+\s+)?(?:bunyi|krek|kretek|goyang|lemas)|(?:susah|sulit)\s+(?:jongkok|naik\s+tangga|berdiri\s+dari\s+duduk)/ },
+    { key: "ARTRALGIA", tier: 1, pattern: /artralgia|arthralgia|(?:nyeri|sakit|ngilu|linu|kaku)\s+(?:\w+\s+)?sendi|sendi\s+(?:\w+\s+)?(?:sakit|nyeri|ngilu|linu|kaku|bengkak)|rematik|reumati\w*|rheumat\w*|encok\s+sendi|(?:pergelangan(?:\s+tangan|\s+kaki)?|jari[\s-]+jari(?:\s+tangan)?|siku|engkel|mata\s+kaki|pinggul)\s+(?:\w+\s+)?(?:sakit|nyeri|bengkak|kaku|ngilu|linu)|kaku\s+(?:\w+\s+)?(?:pagi|bangun\s+tidur)/ },
+    { key: "SPRAIN", tier: 1, pattern: /keseleo|terkilir|kekilir|kecetit|keceklik|kesleo|terpelintir|salah\s+urat|sprain|(?:kaki|tangan|pergelangan|engkel)\s+(?:\w+\s+)?(?:keseleo|terkilir|terpelintir|kecetit)/ },
+    { key: "KONTUSIO", tier: 1, pattern: /memar|lebam|biru[\s-]+biru|kebentur|terbentur|terantuk|kejedot|terjatuh|\bjatuh\s+(?:dari|di|saat|waktu|ketika|terpeleset)|terpeleset|kepeleset|kontusi\w*|(?:benjol|bengkak)\s+(?:karena|habis|setelah)\s+(?:jatuh|terbentur|kebentur)|kecelakaan|tabrakan|keserempet|serempetan/ },
+    { key: "PERAWATAN_LUKA", tier: 1, before: "ABSES", pattern: /(?:kontrol|rawat|ganti\s+perban|ganti\s+balutan|perawatan)\s+(?:\w+\s+)?(?:luka|jahitan|perban)|(?:lepas|buka|aff|angkat)\s+(?:\w+\s+)?(?:jahitan|hecting|hecting|hechting|benang)|aff\s+hec?h?ting/ },
+    { key: "ULKUS_DM", tier: 1, before: "ABSES", pattern: /luka\s+(?:\w+\s+){0,3}?(?:dm|diabetes|kencing\s+manis|gula)|(?:dm|diabetes|kencing\s+manis)\s+(?:\w+\s+){0,3}?luka|ulkus\s+diabet\w*|kaki\s+diabet\w*|gangren\w*|luka\s+(?:\w+\s+)?(?:tidak|tak|gak)\s+(?:kunjung\s+)?sembuh[\s-]*sembuh|luka\s+(?:\w+\s+)?(?:tidak|tak|gak)\s+(?:kunjung\s+)?sembuh/ },
+    { key: "VULNUS", tier: 1, before: "DERMATITIS", pattern: /luka\s+(?:\w+\s+)?(?:robek|sobek|terbuka|gores|goresan|iris|irisan|tusuk|bacok|potong|menganga|jahit)|tergores|teriris|tersayat|tertusuk|terpotong|kena\s+(?:pisau|paku|kaca|seng|beling|parang|golok|cutter|gunting|silet)|vulnus|\blecet\b|babras|ekskoriasi/ },
+    { key: "COMBUSTIO", tier: 1, before: "ABSES", pattern: /luka\s+bakar|combust\w*|kombust\w*|tersiram\s+(?:\w+\s+)?(?:air|minyak|kuah|kopi|teh)\s+(?:\w+\s+)?(?:panas|mendidih)|kesiram\s+(?:\w+\s+)?(?:air|minyak|kuah)|kena\s+(?:(?:air|minyak|kuah)\s+(?:panas|mendidih)|knalpot|setrika|api)|(?:kulit|tangan|kaki)\s+(?:\w+\s+)?terbakar|melepuh\s+(?:\w+\s+)?(?:karena|kena|habis|setelah)/ },
+    { key: "IMPETIGO", tier: 1, before: "ABSES", pattern: /impetigo|koreng|keropeng\s+(?:\w+\s+)?(?:kuning|madu|basah)|luka\s+(?:\w+\s+)?(?:berkeropeng|keropeng)|lepuh\s+(?:\w+\s+)?(?:berisi\s+)?nanah|bintil\s+(?:\w+\s+)?(?:berisi\s+)?nanah|(?:bisul|bintil)\s+kecil[\s-]+kecil|borok|kudis\s+bernanah/ },
+    { key: "SELULITIS", tier: 1, before: "ABSES", pattern: /selulitis|cellulitis|erisipelas|(?:kaki|tungkai|tangan|lengan|betis|wajah|punggung\s+kaki)\s+(?:\w+\s+){0,2}?(?:merah|kemerahan)\s+(?:\w+\s+){0,2}?(?:bengkak|panas|nyeri|meluas)|(?:bengkak|kemerahan)\s+(?:\w+\s+)?(?:panas\s+dan\s+)?(?:meluas|menjalar)/ },
+    { key: "PARONIKIA", tier: 1, before: "ABSES", pattern: /cantengan|paronik\w*|kuku\s+(?:\w+\s+)?(?:bengkak|bernanah|masuk\s+(?:ke\s+)?daging|tumbuh\s+ke\s+dalam|meradang|nyeri)|(?:sekitar|pinggir|samping)\s+kuku\s+(?:\w+\s+)?(?:bengkak|merah|bernanah|nyeri)|ingrown/ },
+    { key: "AKNE", tier: 1, before: "ABSES", pattern: /jerawat\w*|\bakne\b|\bacne\b|komedo|beruntusan|bruntusan/ },
+    { key: "GIGITAN_SERANGGA", tier: 1, before: "URTIKARIA", pattern: /(?:digigit|gigitan|disengat|sengatan|dicokot|kena|kesengat|disentuh)\s+(?:\w+\s+)?(?:serangga|semut|nyamuk|tawon|lebah|kalajengking|ulat|kelabang|lipan|tomcat|laba[\s-]*laba|kutu\s+busuk|tungau)|ulat\s+bulu|tomcat|kesengat/ },
+    { key: "ALERGI_OBAT", tier: 1, before: "URTIKARIA", pattern: /(?:gatal|bentol|ruam|merah|bintik|bengkak)\s+(?:\w+\s+){0,3}?(?:setelah|habis|sesudah)\s+(?:minum|makan|disuntik|diberi|konsumsi|pakai)\s+obat|erupsi\s+obat|reaksi\s+(?:alergi\s+)?obat|alergi\s+(?:\w+\s+)?obat\s+(?:\w+\s+)?(?:kambuh|muncul|timbul)/ },
+    { key: "URTIKARIA", tier: 1, before: "DERMATITIS", pattern: /bentol[\s-]*bentol|duduran|kulit\s+(?:\w+\s+)?(?:bentol|menonjol\s+merah)|alergi\s+(?:\w+\s+)?(?:makanan|udang|seafood|telur|ikan|kacang|ayam|dingin)|gatal\s+(?:\w+\s+){0,3}?(?:setelah|habis|sesudah)\s+makan|kaligata|bidur/ },
+    { key: "SKABIES", tier: 1, before: "TINEA", pattern: /skabies|scabies|kudis|gudik|gudig|budug|gatal\s+(?:\w+\s+){0,2}?(?:malam|terutama\s+malam|kalau\s+malam|saat\s+malam|di\s+malam\s+hari)|gatal\s+(?:\w+\s+)?(?:di\s+)?sela[\s-]+(?:sela\s+)?jari\s+tangan|(?:satu\s+)?(?:keluarga|serumah|adik|kakak|teman\s+(?:asrama|pondok|kamar)|santri)\s+(?:\w+\s+){0,3}?(?:juga\s+)?gatal/ },
+    { key: "PEDIKULOSIS", tier: 1, before: "TINEA", pattern: /kutu\s+(?:rambut|kepala)|pedikulos\w*|\bkutuan\b|telur\s+kutu|\bkutu\b(?!\s+(?:air|busuk))|kepala\s+(?:\w+\s+)?gatal\s+(?:\w+\s+){0,2}?kutu/ },
+    { key: "TINEA", tier: 1, before: "TINEA", pattern: /gatal\s+(?:\w+\s+)?melingkar|(?:bercak|ruam)\s+(?:\w+\s+)?(?:melingkar|bulat|cincin)|gatal\s+(?:\w+\s+)?(?:di\s+)?(?:selangkangan|lipat\s+paha|lipatan|ketiak|bokong|pantat|sela\s+jari\s+kaki)|(?:sela|celah)\s+(?:\w+\s+)?jari\s+kaki\s+(?:\w+\s+)?(?:gatal|lecet|putih|mengelupas)|kuku\s+(?:\w+\s+)?(?:rusak|tebal|kuning|rapuh|berjamur)|jamuran|tinea|ringworm|eksim\s+basah\s+selangkangan/ },
+    { key: "PANU", tier: 1, before: "PANU", pattern: /bercak\s+(?:\w+\s+)?(?:putih|coklat)\s+(?:\w+\s+){0,2}?(?:bersisik|halus|gatal\s+saat\s+berkeringat)|kulit\s+(?:\w+\s+)?belang\s+(?:putih|putih[\s-]*putih)|panuan|kadas\s+putih/ },
+    { key: "SEBOROIK", tier: 1, before: "DERMATITIS", pattern: /ketombe|seboroi?k|kulit\s+kepala\s+(?:\w+\s+)?(?:gatal|bersisik|berminyak|mengelupas|merah)|kepala\s+(?:\w+\s+)?gatal(?!\s+(?:\w+\s+){0,2}?kutu)/ },
+    { key: "RUAM_POPOK", tier: 1, before: "DERMATITIS", pattern: /ruam\s+popok|iritasi\s+popok|(?:pantat|bokong|selangkangan)\s+(?:bayi\s+|anak\s+)?(?:\w+\s+)?(?:merah|lecet|iritasi|ruam)\s+(?:\w+\s+){0,2}?(?:popok|pampers|diapers?)|diaper\s+rash|kena\s+(?:popok|pampers)|(?:popok|pampers)\s+(?:\w+\s+){0,2}?(?:merah|lecet|ruam)/ },
+    { key: "PSORIASIS", tier: 1, before: "DERMATITIS", pattern: /psoria\w*|kulit\s+(?:\w+\s+)?bersisik\s+(?:\w+\s+)?(?:tebal|perak|putih|seperti\s+lilin)|bercak\s+merah\s+bersisik\s+tebal/ },
+    { key: "ZOSTER", tier: 1, before: "ZOSTER", pattern: /cacar\s+(?:ular|api)|dompo|dompu|(?:lepuh|bintil)\s+(?:\w+\s+){0,3}?(?:berkelompok|bergerombol|sebaris|memanjang|melingkar\s+(?:di\s+)?pinggang)/ },
+    { key: "VARICELLA", tier: 1, before: "VARICELLA", pattern: /cacar\s+air|(?:lepuh|bintil|bintik)\s+(?:\w+\s+){0,2}?berair\s+(?:\w+\s+){0,2}?(?:seluruh|sekujur|menyebar|di\s+badan)|(?:bintil|lepuh)\s+(?:\w+\s+)?(?:menyebar|di\s+seluruh\s+badan)/ },
+    { key: "MILIARIA", tier: 1, before: "MILIARIA", pattern: /keringet\s+buntet|biang\s+keringet|(?:bintik|bintil|ruam)\s+(?:\w+\s+)?(?:kecil[\s-]*kecil\s+)?(?:gatal\s+)?(?:\w+\s+)?(?:di\s+)?(?:leher|dahi|punggung|dada)\s+(?:\w+\s+){0,2}?(?:keringat|kepanasan|gerah)|kepanasan\s+(?:\w+\s+){0,2}?(?:bintik|ruam)/ },
+    { key: "HERPES_LABIALIS", tier: 1, before: "HERPES_LABIALIS", pattern: /(?:lepuh|bintil|luka)\s+(?:\w+\s+)?(?:di\s+)?(?:sudut\s+)?bibir|bibir\s+(?:\w+\s+)?(?:bintil|lepuh|luka\s+berair)|demam\s+bibir/ },
+    { key: "KUTIL", tier: 1, before: "KONJUNGTIVITIS", pattern: /kutil|veruk\w*|verruc\w*|mata\s+ikan|kapalan|kalus/ },
+    { key: "ALOPESIA", tier: 1, pattern: /rambut\s+(?:\w+\s+)?(?:rontok|botak|menipis)|kerontokan|kebotakan|botak\s+(?:\w+\s+)?(?:bulat|pitak)|pitak|alopesia|alopecia/ },
+    { key: "DERMATITIS", tier: 1, before: "DERMATITIS", pattern: /kulit\s+(?:\w+\s+)?(?:merah|kemerahan|kering|bersisik|mengelupas|pecah[\s-]*pecah|iritasi|melepuh|perih|gatal)|iritasi\s+kulit|alergi\s+kulit|gatal[\s-]+gatal|garuk[\s-]+garuk|eksim|eczema|(?:kena|alergi)\s+(?:\w+\s+)?(?:sabun|deterjen|detergen|kosmetik|cat\s+rambut|semen|perhiasan|imitasi|jam\s+tangan)|bintik[\s-]*bintik\s+(?:\w+\s+)?gatal|ruam[\s-]*ruam/ },
+    // umum / tropis / anak / jiwa
+    { key: "DENGUE", tier: 1, pattern: /\bdbd\b|\bdhf\b|demam\s+berdarah|dengue|bintik[\s-]+(?:bintik\s+)?merah[^.;\n]{0,30}?(?:demam|panas)|(?:demam|panas)[^.;\n]{0,30}?bintik[\s-]+(?:bintik\s+)?merah|petek\w*|ptek\w*|trombosit\s+(?:\w+\s+)?(?:turun|rendah|menurun)|\bns1\b\s+(?:positif|\+)/ },
+    { key: "MALARIA", tier: 1, pattern: /malaria|demam\s+(?:\w+\s+)?menggigil\s+(?:\w+\s+)?(?:berkala|tiap|setiap|hilang\s+timbul|selang\s+sehari)|(?:pulang|baru|habis|kembali)\s+(?:\w+\s+){0,2}?dari\s+(?:papua|ntt|maluku|daerah\s+endemis|lampung\s+selatan|kalimantan\s+pedalaman)/ },
+    { key: "LEPTOSPIROSIS", tier: 1, pattern: /leptospir\w*|kencing\s+tikus|(?:demam|nyeri\s+betis)\s+(?:\w+\s+){0,3}?(?:setelah|habis|sesudah)\s+(?:banjir|kebanjiran|ke\s+sawah|membersihkan\s+(?:got|selokan|gorong))|nyeri\s+betis\s+(?:hebat|sekali)/ },
+    { key: "KUSTA", tier: 1, pattern: /kusta|lepra|morbus\s+hansen|bercak\s+(?:\w+\s+){0,2}?(?:mati\s+rasa|baal|kebas|tidak\s+terasa|tidak\s+gatal\s+dan\s+tidak\s+sakit)/ },
+    { key: "CTS", tier: 1, pattern: /carpal|\bcts\b|(?:jari[\s-]*(?:jari)?(?:\s+tangan)?|telapak\s+tangan|pergelangan\s+tangan)\s+(?:\w+\s+)?(?:kesemutan|kebas|baal|mati\s+rasa|semutan)|(?:kesemutan|kebas|baal|semutan)\s+(?:\w+\s+)?(?:di\s+)?(?:jari|telapak)\s+tangan/ },
+    { key: "PARESTESIA", tier: 2, before: "PARESTESIA", pattern: /gringgingen|semutan|(?:tangan|kaki)\s+(?:\w+\s+)?(?:kebas|baal|kesemutan|tebal|seperti\s+tertusuk[\s-]*tusuk|panas\s+terbakar)|neuropat\w*/ },
+    { key: "TRIGGER_FINGER", tier: 1, pattern: /trigger\s+finger|jari\s+(?:\w+\s+)?(?:terkunci|macet|nyangkut|kaku\s+saat\s+ditekuk|bunyi\s+klik|susah\s+diluruskan)/ },
+    { key: "PLANTAR_FASCIITIS", tier: 1, pattern: /(?:nyeri|sakit|ngilu)\s+(?:di\s+)?(?:tumit|telapak\s+kaki)|tumit\s+(?:\w+\s+)?(?:sakit|nyeri|ngilu)|telapak\s+kaki\s+(?:\w+\s+)?(?:sakit|nyeri)\s+(?:\w+\s+){0,2}?(?:pagi|bangun)|plantar\s+fasc\w*|taji\s+tumit/ },
+    { key: "KRAM", tier: 1, pattern: /\bkram\b|\bkeram\b|kramp|kejang\s+otot|(?:betis|paha|kaki)\s+(?:\w+\s+)?(?:kram|keram|kaku\s+tiba[\s-]+tiba|ketarik)/ },
+    { key: "MIGREN", tier: 1, pattern: /migr[ae]i?n\w*|sakit\s+kepala\s+sebelah|(?:nyeri|sakit)\s+kepala\s+(?:\w+\s+)?sebelah|pusing\s+sebelah|kepala\s+(?:\w+\s+)?sebelah|sebelah\s+kepala|kepala\s+(?:\w+\s+){0,2}?berdenyut\s+(?:\w+\s+){0,3}?(?:mual|silau)/ },
+    { key: "BELLS_PALSY", tier: 1, pattern: /bell'?s\s+palsy|bells\s+palsy|kelumpuhan\s+(?:saraf\s+)?wajah|wajah\s+(?:\w+\s+)?(?:sebelah\s+)?(?:lumpuh|kaku|tidak\s+bisa\s+digerakkan)|mata\s+(?:\w+\s+)?(?:tidak\s+bisa|tak\s+bisa|susah)\s+(?:menutup|merem|dipejam|terpejam)/ },
+    { key: "TTH", tier: 3, pattern: /tension|(?:kepala|dahi|pelipis)\s+(?:\w+\s+)?(?:seperti\s+)?(?:diikat|terikat|ditekan|kencang|kenceng|tegang|berat)|kepala\s+(?:\w+\s+)?(?:cekot[\s-]*cekot|nyut[\s-]*nyutan|senut[\s-]*senut|kemeng)|ikat\s+kepala/ },
+    { key: "CEPHALGIA", tier: 3, before: "CEPHALGIA", pattern: /ngelu|mumet|puyeng|pening|kepala\s+(?:\w+\s+)?(?:sakit|nyeri|pusing)|nyut[\s-]*nyutan|kliyeng/ },
+    { key: "VERTIGO", tier: 1, before: "VERTIGO", pattern: /dunia\s+(?:\w+\s+)?berputar|muter[\s-]*muter|pusing\s+(?:tujuh\s+keliling|muter|goyang|seperti\s+naik\s+kapal|oleng)|(?:rumah|kamar|langit[\s-]*langit|plafon)\s+(?:\w+\s+)?(?:berputar|muter)|kepala\s+(?:\w+\s+)?muter|limbung|oleng|goyang\s+(?:\w+\s+)?(?:saat|kalau|bila)\s+(?:bangun|berdiri)/ },
+    { key: "INSOMNIA", tier: 1, pattern: /insomnia|(?:susah|sulit|tidak\s+bisa|gak\s+bisa|ga\s+bisa|nggak\s+bisa|tak\s+bisa|kurang)\s+tidur|tidur\s+(?:\w+\s+)?(?:tidak\s+nyenyak|gelisah|terganggu|kurang|tidak\s+pulas|sering\s+terbangun)|sering\s+terbangun\s+(?:\w+\s+)?(?:malam|tengah\s+malam)|begadang/ },
+    { key: "DEPRESI", tier: 1, pattern: /depresi|sedih\s+(?:\w+\s+)?(?:terus|berkepanjangan|berlarut|setiap\s+hari)|putus\s+asa|(?:tidak|tak|gak)\s+(?:ada\s+)?semangat\s+(?:hidup|melakukan\s+apa[\s-]*apa)|murung|hilang\s+minat|merasa\s+(?:tidak|tak)\s+berguna|merasa\s+hampa/ },
+    { key: "PALPITASI", tier: 1, pattern: /berdebar|deg[\s-]*degan|dag[\s-]*dig[\s-]*dug|jantung\s+(?:\w+\s+)?(?:berdebar|cepat|kencang|tidak\s+teratur|loncat|deg[\s-]*degan)|palpitasi/ },
+    { key: "EDEMA", tier: 1, pattern: /(?:kaki|tungkai|betis|pergelangan\s+kaki|kedua\s+kaki|punggung\s+kaki)\s+(?:\w+\s+)?(?:bengkak|sembab|membengkak|bengkak[\s-]*bengkak)|bengkak\s+(?:di\s+|pada\s+)?(?:kedua\s+)?(?:kaki|tungkai)|\bedema\b|sembab|(?:wajah|muka|kelopak\s+mata)\s+(?:\w+\s+)?sembab/ },
+    { key: "VARISES", tier: 1, pattern: /varises|varices|(?:urat|vena|pembuluh\s+darah)\s+(?:\w+\s+)?(?:kaki\s+)?(?:menonjol|biru|keluar|berkelok|seperti\s+cacing)/ },
+    { key: "HT", tier: 2, before: "HT", pattern: /tensi\s+(?:\w+\s+)?(?:naik|tinggi|tidak\s+terkontrol)|tekanan\s+darah\s+(?:\w+\s+)?(?:tinggi|naik)|kontrol\s+(?:\w+\s+)?(?:tensi|darah\s+tinggi|tekanan\s+darah)|(?:obat|minta\s+obat)\s+(?:\w+\s+)?(?:tensi|darah\s+tinggi|hipertensi)|darting/ },
+    { key: "DM", tier: 2, before: "DM", pattern: /diabet\w*|kontrol\s+(?:\w+\s+)?(?:gula|dm|diabetes)|(?:obat|minta\s+obat)\s+(?:\w+\s+)?(?:gula|kencing\s+manis|diabetes)|gula\s+(?:darah\s+)?(?:\w+\s+)?(?:\d{3})|\bgd[sp]\b\s+(?:\w+\s+)?(?:tinggi|naik|\d{3})|sering\s+(?:haus|lapar)\s+(?:\w+\s+){0,3}?(?:sering\s+)?(?:kencing|bak|pipis)/ },
+    { key: "HIPOTENSI", tier: 2, pattern: /hipotensi|darah\s+rendah|tensi\s+(?:\w+\s+)?(?:rendah|drop|turun)|tekanan\s+darah\s+(?:\w+\s+)?(?:rendah|drop|turun)/ },
+    { key: "DISLIPIDEMIA", tier: 2, before: "DISLIPIDEMIA", pattern: /kolesterol|lemak\s+darah|trigliserid\w*|\bldl\b\s+(?:\w+\s+)?(?:tinggi|naik)/ },
+    { key: "HIPERURISEMIA", tier: 2, before: "HIPERURISEMIA", pattern: /asam\s+urat(?!\s+(?:\w+\s+)?(?:kumat|kambuh|nyeri|sakit|bengkak))|\burat\s+(?:tinggi|naik)/ },
+    { key: "ANEMIA", tier: 2, before: "ANEMIA", pattern: /pucat|kurang\s+darah|\bhb\b\s+(?:\w+\s+)?(?:rendah|turun|\d(?:[.,]\d)?\b)|mata\s+(?:\w+\s+)?berkunang|kunang[\s-]*kunang/ },
+    { key: "OBESITAS", tier: 2, pattern: /obesitas|\bobes\b|kegemukan|kelebihan\s+berat\s+badan|berat\s+badan\s+(?:\w+\s+)?(?:berlebih|naik\s+terus)|(?:ingin|mau|pengen)\s+(?:diet|menurunkan\s+berat\s+badan|kurus|langsing)/ },
+    { key: "CHECKUP", tier: 2, pattern: /cek\s+kesehatan|check[\s-]*up|medical\s+check|\bmcu\b|surat\s+(?:keterangan\s+)?sehat|keterangan\s+(?:berbadan\s+)?sehat|periksa\s+kesehatan|skrining|screening|syarat\s+(?:kerja|sekolah|melamar|nikah|haji)|surat\s+(?:kerja|nikah)/ },
+    { key: "GIZI_KURANG", tier: 1, pattern: /gizi\s+(?:kurang|buruk)|kurang\s+gizi|stunting|stunted|(?:berat\s+badan|\bbb\b)\s+(?:\w+\s+)?(?:tidak|tak|susah|sulit|belum)\s+naik|bawah\s+garis\s+merah|\bbgm\b|kurus\s+(?:sekali|kering)/ },
+    { key: "BB_TURUN", tier: 3, pattern: /(?:berat\s+badan|\bbb\b)\s+(?:\w+\s+)?(?:turun|menurun|berkurang|susut)|(?:makin|tambah|semakin)\s+kurus/ },
+    { key: "KOLIK_BAYI", tier: 3, pattern: /bayi\s+(?:\w+\s+)?(?:rewel|menangis\s+terus|nangis\s+terus|kolik|melengking)|kolik\s+(?:bayi|infantil)|rewel\s+(?:\w+\s+)?(?:terus|malam|sepanjang)|\brewel\b/ },
+    { key: "ANSIETAS", tier: 3, pattern: /cemas|ansietas|anxiety|gelisah|khawatir\s+berlebih\w*|was[\s-]*was|panik|serangan\s+panik|takut\s+(?:mati|berlebihan|sakit\s+jantung)|\bstres\b|\bstress\b|banyak\s+pikiran|overthinking|tertekan\s+(?:batin|pikiran)|pikiran\s+(?:\w+\s+)?(?:kacau|kalut|ruwet)/ },
+    { key: "ANOREKSIA", tier: 5, pattern: /na[fp]su\s+makan\s+(?:\w+\s+)?(?:turun|menurun|kurang|berkurang|hilang|jelek|buruk)|(?:tidak|gak|ga|nggak|susah|sulit|malas|males)\s+(?:mau\s+)?makan|(?:tidak|gak)\s+na[fp]su\s+makan|anoreksi\w*|makan\s+(?:\w+\s+)?sedikit\s+(?:sekali|terus)|picky\s+eater|gtm\b/ },
+    { key: "MALAISE", tier: 5, pattern: /lemas|lemes|lesu|letih|lelah|capek|capai|loyo|(?:tidak|kurang)\s+bertenaga|badan\s+(?:\w+\s+)?(?:lemah|lemas|tidak\s+enak|ga\s+enak|gak\s+enak)|(?:tidak|gak|ga|nggak)\s+enak\s+badan|masuk\s+angin|kecapekan|kelelahan|malaise|fatigue|kurang\s+fit|drop/ },
+    { key: "MYALGIA", tier: 3, before: "MYALGIA", pattern: /badan\s+(?:\w+\s+)?(?:pegal|pegel|remuk|sakit\s+semua|ngilu|linu|kaku|nyeri)|pegal[\s-]*linu|(?:otot|betis|paha|lengan)\s+(?:\w+\s+)?(?:sakit|nyeri|pegal|pegel|tegang)|kemeng|greges|nyeri\s+(?:di\s+)?seluruh\s+badan|sakit\s+(?:di\s+)?seluruh\s+badan/ },
+    { key: "FEVER", tier: 4, before: "FEVER", pattern: /\banget\b|badan\s+(?:\w+\s+)?(?:hangat|anget|panas\s+dingin)|panas\s+dingin|menggigil|demam\s+(?:\w+\s+)?(?:naik\s+turun|tinggi|terus)|\bpanas\s+(?:\w+\s+)?(?:anak|bayi)|(?:anak|bayi)\s+(?:\w+\s+)?panas\b/ },
+    { key: "VULNUS", tier: 1, pattern: /\bluka\b/ },
+    { key: "BENJOLAN", tier: 3, pattern: /benjol\w*|lipoma|\bkista\b|ateroma|menjendol|(?:ada\s+)?daging\s+tumbuh/ },
+  ];
+  for (const e of COMPLAINT_PATTERNS_V05) {
+    const entry = { key: e.key, tier: e.tier, pattern: e.pattern };
+    const at = e.before ? DIAGNOSIS_FROM_COMPLAINT.findIndex((d) => d.key === e.before) : -1;
+    if (at >= 0) DIAGNOSIS_FROM_COMPLAINT.splice(at, 0, entry);
+    else DIAGNOSIS_FROM_COMPLAINT.push(entry);
+  }
+
+  // ============================================================
+  // v0.7.0: KELUHAN KULIT (bintik, bintik berair, bercak) + DIAGNOSIS BANYAK + BANDING
+  // - Diagnosis baru tanpa obat otomatis (dokter memilih obat sendiri).
+  // - detectDiagnoses(): beberapa keluhan berbeda -> 2-3 diagnosis; diagnosis lain
+  //   yang mirip menjadi pilihan DIAGNOSIS BANDING (ditambah dokter bila sesuai).
+  // ============================================================
+  const DIAGNOSIS_TEMPLATES_V07 = [
+    { key: "RUAM_KULIT", label: "Ruam kulit (belum khas)", icd: ["R21"], query: "rash and other nonspecific skin eruption", adult: [], child: [],
+      edu: "Catat kapan bintik/bercak muncul, makanan/obat baru, dan demam. Kembali bila menyebar cepat, melepuh, demam tinggi, atau sesak." },
+    { key: "DERMATITIS_VENENATA", label: "Dermatitis venenata (tomcat)", icd: ["L24.8", "L24.9"], query: "irritant contact dermatitis due to other agents", adult: [], child: [],
+      edu: "Cuci kulit dengan sabun & air mengalir, jangan digaruk/dipecahkan, kompres dingin. Jangan memencet serangga di kulit; tutup lampu/jendela malam hari." },
+    { key: "FOLIKULITIS", label: "Folikulitis", icd: ["L73.9"], query: "follicular disorder", adult: [], child: [],
+      edu: "Mandi teratur, jangan memencet bintik bernanah, ganti pakaian/handuk bersih, hindari mencukur area yang meradang." },
+    { key: "PITIRIASIS_ROSEA", label: "Pitiriasis rosea", icd: ["L42"], query: "pityriasis rosea", adult: [], child: [],
+      edu: "Biasanya sembuh sendiri dalam 6-8 minggu dan tidak menular berat. Hindari sabun keras dan garukan." },
+    { key: "PITIRIASIS_ALBA", label: "Pitiriasis alba", icd: ["L30.5"], query: "pityriasis alba", adult: [], child: [],
+      edu: "Pakai pelembap dan tabir surya, mandi dengan sabun lembut. Bercak memudar perlahan dalam beberapa bulan." },
+    { key: "VITILIGO", label: "Vitiligo", icd: ["L80"], query: "vitiligo", adult: [], child: [],
+      edu: "Tidak menular. Lindungi bercak dari sinar matahari. Kontrol bila bercak cepat meluas." },
+    { key: "MELASMA", label: "Melasma (flek wajah)", icd: ["L81.1"], query: "chloasma", adult: [], child: [],
+      edu: "Pakai tabir surya setiap hari, hindari kosmetik pemutih tanpa izin edar (merkuri)." },
+    { key: "MOLUSKUM", label: "Moluskum kontagiosum", icd: ["B08.1"], query: "molluscum contagiosum", adult: [], child: [],
+      edu: "Menular lewat kontak: jangan digaruk/dipencet, jangan berbagi handuk. Sering sembuh sendiri dalam beberapa bulan." },
+    { key: "KANDIDIASIS_KULIT", label: "Kandidiasis kulit", icd: ["B37.2"], query: "candidiasis of skin and nail", adult: [], child: [],
+      edu: "Jaga lipatan kulit tetap kering, ganti pakaian basah/berkeringat, kontrol gula darah bila diabetes." },
+    { key: "INTERTRIGO", label: "Intertrigo (lecet lipatan)", icd: ["L30.4"], query: "erythema intertrigo", adult: [], child: [],
+      edu: "Keringkan lipatan kulit setelah mandi, pakai pakaian longgar menyerap keringat." },
+    { key: "BLEFARITIS", label: "Blefaritis / kelopak mata bengkak", icd: ["H01.0"], query: "blepharitis", adult: [], child: [],
+      edu: "Kompres hangat kelopak mata 2x sehari, bersihkan tepi kelopak, jangan mengucek mata." },
+    { key: "KEILITIS", label: "Keilitis (bibir pecah / sudut bibir luka)", icd: ["K13.0"], query: "diseases of lips", adult: [], child: [],
+      edu: "Jangan menjilat bibir, pakai pelembap bibir, cukup minum air, makan sayur & buah." },
+    { key: "LIMFADENOPATI", label: "Pembesaran kelenjar getah bening", icd: ["R59.0", "L04.9"], query: "localized enlarged lymph nodes", adult: [], child: [],
+      edu: "Kontrol 2 minggu. Kembali lebih cepat bila benjolan membesar, keras, tidak nyeri, demam lama, atau BB turun." },
+    { key: "TREMOR", label: "Tremor (gemetar)", icd: ["R25.1"], query: "tremor", adult: [], child: [],
+      edu: "Kurangi kopi/rokok, tidur cukup. Periksa gula darah & tiroid bila gemetar disertai berdebar/BB turun." },
+    { key: "AMENORE", label: "Terlambat haid (amenore)", icd: ["N91.2"], query: "amenorrhoea", adult: [], child: [],
+      edu: "Lakukan tes kehamilan. Bila negatif dan belum haid >3 bulan, kontrol untuk pemeriksaan lanjut." },
+    { key: "ROKOK", label: "Konseling berhenti merokok", icd: ["Z71.6", "F17.2"], query: "tobacco abuse counselling", adult: [], child: [],
+      edu: "Tentukan tanggal berhenti, jauhi pemicu (kopi, teman merokok), minta dukungan keluarga. Layanan berhenti merokok: 0800-177-6565." },
+    { key: "XEROSIS", label: "Kulit kering / tumit pecah (xerosis)", icd: ["L85.3"], query: "xerosis cutis", adult: [], child: [],
+      edu: "Pakai pelembap setelah mandi, kurangi sabun keras & air panas, rendam kaki air hangat lalu oles pelembap untuk tumit pecah." },
+    { key: "KALUS", label: "Kalus / mata ikan (kapalan)", icd: ["L84"], query: "corns and callosities", adult: [], child: [],
+      edu: "Pakai alas kaki yang pas & empuk, rendam air hangat lalu kikis perlahan. Penderita diabetes jangan mengikis sendiri." },
+    { key: "KELOID", label: "Keloid", icd: ["L91.0"], query: "hypertrophic scar", adult: [], child: [],
+      edu: "Jangan digaruk/ditekan. Hindari tindik/tato baru. Keloid besar atau mengganggu dapat dirujuk." },
+    { key: "NEVUS", label: "Tahi lalat (nevus)", icd: ["D22.9"], query: "melanocytic naevi", adult: [], child: [],
+      edu: "Kembali/rujuk bila tahi lalat membesar cepat, warna tidak rata, tepi tidak rata, gatal, atau berdarah." },
+    { key: "HIPERHIDROSIS", label: "Keringat berlebih (hiperhidrosis)", icd: ["R61.9", "R61"], query: "hyperhidrosis", adult: [], child: [],
+      edu: "Pakai pakaian menyerap keringat, antiperspiran malam hari. Periksa gula darah/tiroid bila disertai berdebar atau BB turun." },
+    { key: "BAU_BADAN", label: "Bau badan (bromhidrosis)", icd: ["L75.0"], query: "bromhidrosis", adult: [], child: [],
+      edu: "Mandi 2x sehari dengan sabun, keringkan ketiak, ganti pakaian berkeringat, pakai deodoran/antiperspiran." },
+    { key: "GUMOH", label: "Gumoh / regurgitasi bayi", icd: ["P92.1"], query: "regurgitation and rumination of newborn", adult: [], child: [],
+      edu: "Sendawakan bayi setelah menyusu, posisi kepala lebih tinggi, jangan langsung ditidurkan. Kembali bila muntah menyemprot, hijau, atau BB tidak naik." },
+    { key: "ENURESIS", label: "Mengompol (enuresis)", icd: ["F98.0", "R32"], query: "nonorganic enuresis", adult: [], child: [],
+      edu: "Batasi minum 1-2 jam sebelum tidur, ajak buang air kecil sebelum tidur, beri pujian saat tidak mengompol, jangan dimarahi." },
+    { key: "TALI_PUSAT", label: "Infeksi tali pusat (omfalitis)", icd: ["P38"], query: "omphalitis of newborn", adult: [], child: [],
+      edu: "Rawat tali pusat kering & bersih, jangan diberi ramuan/bedak. Segera kembali bila kemerahan meluas, berbau, atau bayi demam/malas menyusu." },
+    { key: "MENYUSUI", label: "Masalah menyusui / ASI", icd: ["O92.7", "O92.0"], query: "disorders of lactation", adult: [], child: [],
+      edu: "Susui sesering mungkin (8-12x/hari), pelekatan yang benar, ibu cukup minum & istirahat. Konseling laktasi bila perlu." },
+    { key: "DISPAREUNIA", label: "Nyeri saat berhubungan (dispareunia)", icd: ["N94.1"], query: "dyspareunia", adult: [], child: [],
+      edu: "Perlu pemeriksaan lanjut (infeksi, keputihan). Perdarahan setelah berhubungan perlu skrining IVA/pap smear." },
+    { key: "DISFAGIA", label: "Sulit menelan (disfagia)", icd: ["R13"], query: "dysphagia", adult: [], child: [],
+      edu: "Makan lunak, potongan kecil, kunyah pelan. Kembali/rujuk bila makin sulit menelan, BB turun, atau muntah darah." },
+    { key: "HEMATURIA", label: "Kencing darah (hematuria)", icd: ["R31"], query: "unspecified haematuria", adult: [], child: [],
+      edu: "Perlu cek urin. Banyak minum air putih. Segera kembali bila tidak bisa kencing, nyeri pinggang hebat, atau demam." },
+    { key: "PELUPA", label: "Mudah lupa", icd: ["R41.3"], query: "other amnesia", adult: [], child: [],
+      edu: "Tidur cukup, aktif bergerak & bersosialisasi, kontrol tensi/gula. Kembali bila lupa makin berat atau mengganggu kegiatan harian." },
+    { key: "TUMBUH_KEMBANG", label: "Keterlambatan tumbuh kembang", icd: ["R62.0"], query: "delayed milestone", adult: [], child: [],
+      edu: "Stimulasi anak setiap hari (bicara, bermain), gizi seimbang, pantau di posyandu. Perlu skrining perkembangan (KPSP) dan rujuk bila terlambat." },
+    { key: "STRABISMUS", label: "Mata juling (strabismus)", icd: ["H50.9"], query: "strabismus", adult: [], child: [],
+      edu: "Juling pada anak perlu diperiksa dokter mata sedini mungkin agar penglihatan tidak malas (ambliopia)." },
+  ];
+  DIAGNOSIS_TEMPLATES.push(...DIAGNOSIS_TEMPLATES_V07);
+
+  // Tier pecahan (0.9) = kalimat sangat khas, mengalahkan kata umum ("gatal" -> dermatitis).
+  const COMPLAINT_PATTERNS_V07 = [
+    // ---- kulit: bintik / bintik berair / bercak ----
+    { key: "DERMATITIS_VENENATA", tier: 0.9, pattern: /tomcat|semut\s+(?:semai|kanal|charlie)|dermatitis\s+venenata|(?:kena|terkena|tergencet|memencet)\s+(?:\w+\s+)?serangga\s+(?:\w+\s+){0,3}?(?:melepuh|perih|panas|merah)|(?:melepuh|lepuh)\s+(?:\w+\s+){0,3}?(?:kena|karena)\s+(?:\w+\s+)?serangga/ },
+    { key: "HERPES_LABIALIS", tier: 0.9, pattern: /(?:bintik|bintil|lenting|lepuh|gelembung)\w*\s+(?:\w+\s+){0,2}?(?:berair\s+|berisi\s+air\s+)?(?:di\s+)?(?:bibir|sudut\s+bibir|pinggir\s+bibir)/ },
+    { key: "ZOSTER", tier: 0.9, pattern: /(?:bintik|bintil|lenting|lepuh|gelembung)\w*[\s-]+(?:\w+[\s-]+){0,3}?(?:berair|berisi\s+air|bening)\s+(?:\w+\s+){0,4}?(?:sebelah|satu\s+sisi|melingkar|berderet|bergerombol|seperti\s+sabuk|menjalar|terbakar|nyeri\s+panas)(?:\s+(?:\w+\s+){0,2}?(?:pinggang|dada|punggung|perut|leher|wajah|muka|lengan|paha))?/ },
+    { key: "HFMD", tier: 0.9, pattern: /(?:bintik|bintil|lenting|lepuh)\w*\s+(?:\w+\s+){0,3}?(?:di\s+)?(?:telapak\s+)?tangan\s+(?:\w+\s+){0,2}?(?:kaki|mulut)|(?:bintik|bintil|lenting|lepuh)\w*\s+(?:\w+\s+){0,3}?(?:di\s+)?mulut\s+(?:\w+\s+){0,2}?(?:tangan|kaki)/ },
+    { key: "IMPETIGO", tier: 0.9, pattern: /(?:koreng|keropeng|kerak|krusta)\s+(?:\w+\s+){0,2}?(?:kuning|madu|menyebar)|(?:lepuh|bintil|bintik)\w*\s+(?:\w+\s+){0,2}?(?:pecah\s+)?(?:jadi\s+|menjadi\s+)?(?:koreng|keropeng)\s+(?:\w+\s+)?kuning|impetigo/ },
+    { key: "FOLIKULITIS", tier: 0.9, pattern: /folikulitis|(?:bintik|bintil)\w*\s+(?:\w+\s+){0,2}?(?:bernanah|nanah|isi\s+nanah|berisi\s+nanah|putih\s+di\s+tengah)|(?:jerawat|bintik\s+nanah)\s+(?:di\s+)?(?:badan|punggung|dada|ketiak|paha|bokong|pantat|kepala|kulit\s+kepala)/ },
+    { key: "MOLUSKUM", tier: 0.9, pattern: /moluskum|molluscum|(?:bintik|bintil|benjolan\s+kecil)\w*\s+(?:\w+\s+){0,3}?(?:seperti\s+mutiara|mengkilap|mengkilat|berlubang\s+(?:di\s+)?tengah|ada\s+lekukan|cekung\s+di\s+tengah)/ },
+    { key: "KANDIDIASIS_ORAL", tier: 0.9, pattern: /(?:bercak|bintik|lapisan|selaput)\w*\s+(?:\w+\s+)?(?:putih|keputihan)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:lidah|mulut|langit[\s-]*langit|pipi\s+dalam|bibir\s+dalam)|lidah\s+(?:\w+\s+)?(?:berjamur|putih[\s-]*putih|keputihan)|(?:mulut|lidah)\s+bayi\s+(?:\w+\s+)?putih/ },
+    { key: "PITIRIASIS_ALBA", tier: 0.9, pattern: /pitiriasis\s+alba|(?:bercak|belang|panu)\w*\s+(?:\w+\s+){0,2}?putih\w*\s+(?:\w+\s+){0,3}?(?:di\s+)?(?:wajah|muka|pipi)|(?:wajah|muka|pipi)\s+(?:\w+\s+){0,2}?(?:bercak|belang)\s+(?:\w+\s+)?putih/ },
+    { key: "VITILIGO", tier: 0.9, pattern: /vitiligo|(?:bercak|belang|kulit)\s+(?:\w+\s+)?putih\s+(?:\w+\s+){0,2}?(?:seperti\s+susu|seperti\s+kapur|susu|makin\s+(?:lebar|luas|banyak)|melebar)|kulit\s+(?:\w+\s+)?(?:kehilangan\s+warna|belang\s+putih\s+susu)/ },
+    { key: "KUSTA", tier: 0.9, pattern: /(?:bercak|belang)\s+(?:\w+\s+){0,3}?(?:mati\s+rasa|baal|kebas|tidak\s+terasa|tak\s+terasa)/ },
+    { key: "PSORIASIS", tier: 0.9, pattern: /(?:bercak|plak|kulit)\s+(?:\w+\s+){0,2}?(?:merah\s+)?(?:bersisik\s+)?(?:tebal|seperti\s+lilin|putih\s+perak|keperakan)\s+(?:\w+\s+){0,3}?(?:siku|lutut|kulit\s+kepala|punggung\s+bawah)|(?:siku|lutut)\s+(?:\w+\s+){0,2}?(?:bersisik\s+tebal|bercak\s+(?:\w+\s+)?bersisik\s+tebal)/ },
+    { key: "PITIRIASIS_ROSEA", tier: 0.9, pattern: /pitiriasis\s+rosea|(?:bercak|ruam)\s+(?:\w+\s+){0,3}?(?:pohon\s+cemara|bercak\s+induk|lonjong[\s-]+lonjong|oval\s+(?:\w+\s+)?(?:di\s+)?(?:dada|punggung|badan))|(?:satu|1)\s+bercak\s+(?:\w+\s+){0,2}?(?:besar\s+)?(?:dulu|duluan)\s+(?:\w+\s+){0,3}?(?:menyebar|banyak)/ },
+    { key: "MELASMA", tier: 0.9, pattern: /melasma|kloasma|flek\s+(?:\w+\s+)?(?:hitam|coklat|gelap)?\s*(?:di\s+)?(?:wajah|muka|pipi|dahi)|(?:bercak|noda)\s+(?:\w+\s+)?(?:hitam|coklat|gelap|kecoklatan)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:wajah|muka|pipi|dahi)/ },
+    { key: "INTERTRIGO", tier: 0.9, pattern: /intertrigo|(?:lecet|merah|perih)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:lipatan|lipat\s+paha|bawah\s+(?:payudara|perut|leher))|lipatan\s+(?:\w+\s+){0,3}?(?:merah|lecet|lembab|perih|basah)|(?:selangkangan|ketiak)\s+(?:\w+\s+)?(?:lecet|merah\s+lecet|lecet\s+perih)/ },
+    { key: "KANDIDIASIS_KULIT", tier: 0.9, pattern: /kandidiasis\s+kulit|(?:jamur|ruam|bintik)\s+(?:\w+\s+){0,2}?(?:merah\s+)?(?:basah|lembab)\s+(?:\w+\s+){0,2}?(?:di\s+)?(?:lipatan|bawah\s+payudara|sela\s+jari\s+tangan)|(?:sela\s+jari\s+tangan)\s+(?:\w+\s+)?(?:merah|lecet|gatal\s+basah)/ },
+    { key: "SKABIES", tier: 0.9, pattern: /(?:bintik|bintil|bentol)\w*\s+(?:\w+\s+){0,3}?gatal\s+(?:\w+\s+){0,3}?(?:malam|sela\s+jari)|(?:bintik|bintil)\w*\s+(?:\w+\s+){0,2}?(?:di\s+)?sela[\s-]+(?:sela\s+)?jari\s+(?:\w+\s+){0,2}?gatal|(?:serumah|satu\s+rumah|keluarga|teman\s+(?:asrama|pondok))\s+(?:\w+\s+){0,2}?(?:juga\s+)?gatal/ },
+    { key: "VARICELLA", tier: 3, pattern: /(?:bintik|bintil|lenting|lepuh|gelembung|bentol)\w*[\s-]+(?:\w+[\s-]+){0,2}?(?:berair|berisi\s+air|bening|berisi\s+cairan|berisi\s+cairan\s+bening)|\blenting\w*|bintik\s+air\b/ },
+    { key: "TINEA", tier: 3, pattern: /bercak\w*[\s-]+(?:\w+[\s-]+){0,2}?(?:merah\s+)?(?:bersisik|berkerak|bersisik\s+gatal)|bercak\s+(?:\w+\s+)?(?:melingkar|bulat\s+(?:\w+\s+)?gatal|seperti\s+cincin|tepi\s+(?:merah|aktif|meninggi))/ },
+    { key: "PANU", tier: 3, pattern: /bercak[\s-]*(?:bercak\s+)?(?:putih|keputihan|coklat\s+muda)|belang[\s-]+belang|kulit\s+(?:\w+\s+)?belang/ },
+    { key: "RUAM_KULIT", tier: 3, pattern: /bintik[\s-]*(?:bintik\s+)?(?:merah|kecil|hitam|coklat)|bercak[\s-]*(?:bercak\s+)?(?:merah|hitam|coklat|ungu|biru|gelap)|\bbintik\w*|\bbercak\w*|\bbintil\w*|kemerahan\s+(?:di\s+)?kulit|kulit\s+(?:\w+\s+)?kemerahan|ruam\s+(?:\w+\s+)?(?:tidak|tak|gak|ga)\s+gatal/ },
+    // ---- keluhan umum lain ----
+    { key: "LIMFADENOPATI", tier: 1, before: "STRUMA", pattern: /kelenjar\s+(?:getah\s+bening\s+)?(?:\w+\s+)?(?:bengkak|membesar|teraba)|getah\s+bening|limfadeno\w*|limfadeni\w*|(?:bengkak|benjol\w*)\s+(?:\w+\s+)?(?:di\s+)?(?:ketiak|lipat\s+paha|selangkangan|bawah\s+rahang|belakang\s+telinga|bawah\s+telinga)|bengkak\s+(?:di\s+)?leher/ },
+    { key: "KEILITIS", tier: 1, pattern: /keilitis|cheilitis|angular|bibir\s+(?:\w+\s+)?(?:pecah[\s-]*pecah|kering\s+(?:\w+\s+)?(?:pecah|mengelupas|perih)|mengelupas|luka\s+(?:di\s+)?sudut)|sudut\s+(?:bibir|mulut)\s+(?:\w+\s+)?(?:luka|pecah|perih|lecet|robek)|(?:luka|lecet)\s+(?:di\s+)?sudut\s+(?:bibir|mulut)/ },
+    { key: "BLEFARITIS", tier: 0.9, pattern: /blefaritis|kelopak\s+mata\s+(?:\w+\s+){0,2}?(?:bersisik|berketombe|berkerak)|bulu\s+mata\s+(?:\w+\s+)?(?:berketombe|berkerak|rontok)/ },
+    { key: "BLEFARITIS", tier: 3, pattern: /(?:mata|kelopak\s+mata|kelopak)\s+(?:\w+\s+)?(?:bengkak|sembab|membengkak)/ },
+    { key: "OTITIS_EKSTERNA", tier: 3, pattern: /(?:telinga|kuping)\s+(?:\w+\s+){0,2}?kemasukan\s+air|(?:telinga|kuping)\s+(?:\w+\s+)?(?:kemasukan\s+)?air\s+(?:\w+\s+)?(?:habis|setelah|sesudah)\s+(?:berenang|mandi|keramas)/ },
+    { key: "TREMOR", tier: 3, pattern: /tremor|(?:tangan|jari|badan)\s+(?:\w+\s+)?(?:gemetar|gemeter|bergetar)|gemetaran/ },
+    { key: "AMENORE", tier: 1, before: "GANGGUAN_HAID", pattern: /amenore\w*|telat\s+(?:datang\s+)?(?:haid|mens\w*|datang\s+bulan|bulan)|(?:haid|mens\w*|datang\s+bulan)\s+(?:\w+\s+)?(?:telat|terlambat|tidak\s+datang|belum\s+datang|tidak\s+keluar|berhenti)|(?:belum|tidak|gak|ga)\s+(?:haid|mens\w*|datang\s+bulan)\s+(?:\w+\s+){0,2}?(?:\d+|dua|tiga|empat|se)\s*bulan/ },
+    { key: "XEROSIS", tier: 1, pattern: /(?:tumit|kaki|telapak\s+kaki|tangan)\s+(?:\w+\s+)?pecah[\s-]*(?:pecah)?|kulit\s+(?:\w+\s+)?(?:kering\s+(?:bersisik|pecah|kasar)|bersisik\s+kering|kasar\s+kering)|xerosis/ },
+    { key: "KALUS", tier: 0.9, pattern: /kapalan|mata\s+ikan|kalus|tumit\s+(?:\w+\s+)?(?:tebal|keras\s+tebal)/ },
+    { key: "KELOID", tier: 1, pattern: /keloid|bekas\s+luka\s+(?:\w+\s+){0,2}?(?:menonjol|menebal|membesar|tumbuh|timbul)/ },
+    { key: "NEVUS", tier: 1, pattern: /tahi\s+lalat|\bnevus\b|\btompel\b/ },
+    { key: "HIPERHIDROSIS", tier: 1, pattern: /hiperhidrosis|keringat\s+(?:\w+\s+)?(?:berlebih\w*|banyak\s+sekali|terus[\s-]*terusan|bercucuran)|(?:tangan|telapak\s+tangan|kaki|ketiak)\s+(?:\w+\s+)?berkeringat\s+(?:\w+\s+)?(?:terus|banyak|basah)|sering\s+berkeringat\s+(?:banyak|berlebihan)/ },
+    { key: "BAU_BADAN", tier: 1, pattern: /bau\s+badan|badan\s+(?:\w+\s+)?bau|ketiak\s+(?:\w+\s+)?bau|bau\s+ketiak|bromhidrosis|kaki\s+(?:\w+\s+)?bau/ },
+    { key: "GUMOH", tier: 1, before: "DISPEPSIA", pattern: /gumoh|(?:bayi|anak\s+bayi)\s+(?:\w+\s+){0,2}?(?:muntah|keluar\s+susu)\s+(?:\w+\s+){0,3}?(?:setelah|habis|sesudah)\s+(?:minum\s+susu|menyusu|nyusu|minum\s+asi|netek)/ },
+    { key: "ENURESIS", tier: 1, pattern: /ngompol|mengompol|ompol|enuresis|kencing\s+(?:\w+\s+)?(?:di\s+kasur|saat\s+tidur|waktu\s+tidur)/ },
+    { key: "TALI_PUSAT", tier: 0.9, pattern: /(?:tali\s+pusat|pusar|pusat)\s+(?:bayi\s+)?(?:\w+\s+)?(?:basah|bau|bernanah|merah|berdarah|lembab|keluar\s+cairan)|omfalitis/ },
+    { key: "MENYUSUI", tier: 1, pattern: /asi\s+(?:\w+\s+)?(?:sedikit|kurang|tidak\s+lancar|seret|tidak\s+keluar|belum\s+keluar)|puting\s+(?:\w+\s+)?(?:masuk|datar|tenggelam|lecet|luka)|susah\s+menyusui|bayi\s+(?:\w+\s+)?(?:tidak\s+mau|susah)\s+(?:menyusu|nyusu|netek)/ },
+    { key: "DISPAREUNIA", tier: 1, pattern: /dispareunia|(?:nyeri|sakit|perih)\s+(?:saat|waktu|ketika|kalau|setelah)\s+(?:berhubungan|hubungan\s+(?:suami\s+istri|intim|badan)|bersenggama|senggama)|(?:perdarahan|keluar\s+darah|flek)\s+(?:\w+\s+)?(?:setelah|sehabis|saat)\s+(?:berhubungan|senggama)/ },
+    { key: "DISFAGIA", tier: 1, before: "FARINGITIS", pattern: /disfagia|(?:susah|sulit|sakit)\s+(?:untuk\s+)?menelan\s+(?:\w+\s+){0,2}?(?:makanan|nasi|lama|terus)|(?:tenggorokan|leher)\s+(?:\w+\s+){0,3}?(?:mengganjal|ada\s+yang\s+(?:nyangkut|mengganjal))|makanan\s+(?:\w+\s+)?(?:nyangkut|tersangkut)|\b(?:susah|sulit)\s+menelan\b/ },
+    { key: "HEMATURIA", tier: 1, before: "ISK", pattern: /hematuri\w*|kencing\s+(?:\w+\s+)?(?:darah|berdarah|merah\s+(?:seperti\s+)?darah|warna\s+merah)|(?:bak|pipis)\s+(?:\w+\s+)?(?:darah|berdarah)/ },
+    { key: "PELUPA", tier: 3, pattern: /(?:sering|mudah|gampang|cepat)\s+lupa|pikun|pelupa|daya\s+ingat\s+(?:\w+\s+)?(?:menurun|berkurang)/ },
+    { key: "TUMBUH_KEMBANG", tier: 1, pattern: /(?:belum|tidak)\s+bisa\s+(?:jalan|berjalan|bicara|ngomong|duduk|merangkak|tengkurap)\b|terlambat\s+(?:bicara|jalan|berjalan)|telat\s+(?:bicara|ngomong|jalan)|speech\s+delay|\bgagap\b|tumbuh\s+kembang\s+(?:\w+\s+)?(?:terlambat|lambat)/ },
+    { key: "STRABISMUS", tier: 1, pattern: /juling|strabismus|mata\s+(?:\w+\s+)?(?:tidak\s+sejajar|miring\s+ke\s+(?:dalam|luar))/ },
+    // kata awam tambahan untuk diagnosis yang sudah ada
+    { key: "VULNUS", tier: 1, pattern: /(?:kena|tertusuk|ketusuk|tergores|kegores)\s+(?:\w+\s+)?(?:duri|pecahan\s+kaca|beling|kaca|seng|pisau|parang|sabit|gunting|kawat|paku|kail)|tertusuk|ketusuk|tergores|kegores/ },
+    { key: "KONTUSIO", tier: 1, pattern: /terjepit|kejepit|kejedot|terbentur|kebentur|tertimpa|ketiban/ },
+    { key: "GIGITAN_SERANGGA", tier: 1, pattern: /(?:tersengat|kena|disengat)\s+(?:\w+\s+)?(?:ubur[\s-]*ubur|ulat\s+bulu|lebah|tawon|kalajengking)|ulat\s+bulu/ },
+    { key: "KANDIDIASIS_ORAL", tier: 0.9, pattern: /lidah\s+(?:\w+\s+)?putih|sariawan\s+putih\s+(?:\w+\s+)?bayi/ },
+    { key: "KELILIPAN", tier: 0.9, pattern: /mata\s+(?:\w+\s+)?(?:kena|kemasukan|terkena|kecipratan)\s+(?:\w+\s+)?(?:sabun|sampo|shampo|cairan|minyak|getah|air\s+sabun|deterjen|pasir|serbuk)/ },
+    { key: "GIZI_KURANG", tier: 1, pattern: /(?:tidak|tak|belum|susah|sulit)\s+naik\s+(?:\w+\s+)?(?:berat\s+badan|bb)\b|berat\s+badan\s+(?:\w+\s+)?(?:tetap|segitu[\s-]*segitu|tidak\s+bertambah)/ },
+    { key: "PAROTITIS", tier: 3, pattern: /(?:sakit|nyeri|bengkak)\s+(?:\w+\s+)?(?:di\s+)?(?:bawah|depan)\s+telinga/ },
+    { key: "BPH", tier: 3, pattern: /(?:susah|sulit|tidak\s+lancar|seret)\s+(?:untuk\s+)?(?:kencing|bak|pipis)|kencing\s+(?:\w+\s+)?(?:tidak\s+lancar|menetes|lemah|harus\s+mengejan|ngeden)/ },
+    { key: "DM", tier: 2, pattern: /sering\s+(?:merasa\s+)?(?:haus|lapar)|(?:haus|lapar)\s+terus/ },
+    { key: "CEPHALGIA", tier: 3, pattern: /nyeri\s+(?:di\s+)?belakang\s+(?:bola\s+)?mata|(?:sakit|nyeri)\s+(?:di\s+)?(?:belakang|balik)\s+mata/ },
+    { key: "TTH", tier: 3, pattern: /kepala\s+(?:bagian\s+)?belakang\s+(?:\w+\s+)?(?:sakit|nyeri|berat|kencang|tegang)|(?:sakit|nyeri)\s+kepala\s+(?:bagian\s+)?belakang/ },
+    { key: "MYALGIA", tier: 3, pattern: /otot\s+(?:\w+\s+)?kaku|kaku\s+otot/ },
+    { key: "ARTRALGIA", tier: 3, pattern: /(?:jari|sendi)\s+(?:\w+\s+)?(?:kaku|bengkak)/ },
+    { key: "LBP", tier: 3, pattern: /(?:tulang\s+ekor|tulang\s+duduk)\s+(?:\w+\s+)?(?:sakit|nyeri)|(?:sakit|nyeri)\s+(?:di\s+)?tulang\s+ekor/ },
+    { key: "ASMA", tier: 3, pattern: /na[fp]as\s+(?:\w+\s+)?(?:pendek|berat|ngos[\s-]*ngosan)|ngos[\s-]*ngosan/ },
+    { key: "HEMOROID", tier: 3, pattern: /(?:anus|dubur|pantat|anal)\s+(?:\w+\s+)?(?:nyeri|sakit|perih|berdarah)|(?:nyeri|sakit|perih)\s+(?:di\s+)?(?:anus|dubur)/ },
+    { key: "OBESITAS", tier: 3, pattern: /perut\s+(?:\w+\s+)?buncit|buncit/ },
+    { key: "FARINGITIS", tier: 3, pattern: /(?:sakit|nyeri)\s+(?:saat|waktu|kalau)\s+menelan|menelan\s+(?:\w+\s+)?sakit/ },
+    { key: "ROKOK", tier: 2, pattern: /berhenti\s+merokok|(?:kecanduan|ketergantungan|candu)\s+(?:rokok|merokok|nikotin|vape)|(?:ingin|mau|pengen)\s+(?:berhenti|stop)\s+(?:rokok|merokok|vape|ngerokok)|konseling\s+(?:berhenti\s+)?rokok/ },
+  ];
+  for (const e of COMPLAINT_PATTERNS_V07) {
+    const entry = { key: e.key, tier: e.tier, pattern: e.pattern };
+    const at = e.before ? DIAGNOSIS_FROM_COMPLAINT.findIndex((d) => d.key === e.before) : -1;
+    if (at >= 0) DIAGNOSIS_FROM_COMPLAINT.splice(at, 0, entry);
+    else DIAGNOSIS_FROM_COMPLAINT.push(entry);
+  }
+
+  // ---- Banyak diagnosis + diagnosis banding ----
+  // Keluarga: dari satu keluarga hanya satu diagnosis yang diisi; sisanya jadi banding.
+  const DX_FAMILY = {};
+  for (const [fam, keys] of Object.entries({
+    napas: "ISPA FARINGITIS TONSILITIS SINUSITIS RINITIS_ALERGI ASMA BRONKITIS PNEUMONIA TB_SUSPEK PPOK LARINGITIS HEMOPTISIS SESAK_BERAT",
+    cerna: "GEA DISPEPSIA GASTRITIS GERD KONSTIPASI NYERI_PERUT DISENTRI KERACUNAN_MAKANAN AKUT_ABDOMEN PERDARAHAN_GI MUAL_HAMIL",
+    anus: "HEMOROID FISURA_ANI",
+    kepala: "CEPHALGIA TTH MIGREN SAKIT_KEPALA_HEBAT VERTIGO",
+    kulit: "DERMATITIS URTIKARIA MILIARIA RUAM_KULIT GIGITAN_SERANGGA ALERGI_OBAT",
+    kulitLepuh: "VARICELLA ZOSTER HFMD IMPETIGO DERMATITIS_VENENATA HERPES_LABIALIS",
+    kulitPutih: "PANU PITIRIASIS_ALBA VITILIGO KUSTA",
+    kulitLipat: "TINEA INTERTRIGO KANDIDIASIS_KULIT RUAM_POPOK",
+    demam: "FEVER DENGUE TIFOID MALARIA CHIKUNGUNYA LEPTOSPIROSIS CAMPAK",
+    mata: "KONJUNGTIVITIS HORDEOLUM KALAZION BLEFARITIS KELILIPAN MATA_KERING CEDERA_MATA PERDARAHAN_SUBKONJ",
+    telinga: "OMA OTITIS_EKSTERNA SERUMEN TINITUS",
+    mulut: "STOMATITIS GINGIVITIS PULPITIS KANDIDIASIS_ORAL HALITOSIS TUMBUH_GIGI KEILITIS HERPES_LABIALIS",
+    kemih: "ISK URETRITIS UROLITIASIS BPH RETENSI_URIN",
+    haid: "GANGGUAN_HAID MENORAGIA DISMENORE AMENORE",
+    leher: "LIMFADENOPATI STRUMA PAROTITIS",
+    bayi: "GUMOH KOLIK_BAYI",
+  }))
+    for (const k of keys.split(" ")) DX_FAMILY[k] = fam;
+  // Gejala umum: tidak diisi sebagai diagnosis tambahan (hanya bila satu-satunya).
+  const DX_SYMPTOM_ONLY = new Set(["FEVER", "MALAISE", "ANOREKSIA", "MYALGIA", "BB_TURUN", "BENJOLAN", "RUAM_KULIT"]);
+  // Diagnosis banding yang lazim di FKTP (dipilih/ditambah dokter, tidak otomatis).
+  const DX_BANDING_RAW = {
+    ISPA: "FARINGITIS RINITIS_ALERGI SINUSITIS BRONKITIS PNEUMONIA",
+    FARINGITIS: "TONSILITIS ISPA LARINGITIS",
+    TONSILITIS: "FARINGITIS ISPA LIMFADENOPATI",
+    LARINGITIS: "FARINGITIS ISPA",
+    BRONKITIS: "ISPA PNEUMONIA ASMA TB_SUSPEK",
+    PNEUMONIA: "BRONKITIS TB_SUSPEK ASMA",
+    TB_SUSPEK: "BRONKITIS PNEUMONIA PPOK",
+    ASMA: "PPOK BRONKITIS GAGAL_JANTUNG",
+    RINITIS_ALERGI: "ISPA SINUSITIS",
+    SINUSITIS: "RINITIS_ALERGI ISPA CEPHALGIA",
+    GEA: "DISENTRI KERACUNAN_MAKANAN TIFOID HELMINTHIASIS",
+    DISENTRI: "GEA HEMOROID",
+    KERACUNAN_MAKANAN: "GEA DISPEPSIA",
+    DISPEPSIA: "GASTRITIS GERD NYERI_DADA",
+    GASTRITIS: "DISPEPSIA GERD",
+    GERD: "DISPEPSIA GASTRITIS NYERI_DADA",
+    NYERI_PERUT: "DISPEPSIA GEA ISK AKUT_ABDOMEN DISMENORE",
+    KONSTIPASI: "HEMOROID NYERI_PERUT",
+    HEMOROID: "FISURA_ANI KONSTIPASI",
+    FEVER: "ISPA DENGUE TIFOID ISK MALARIA",
+    DENGUE: "FEVER TIFOID CHIKUNGUNYA LEPTOSPIROSIS",
+    TIFOID: "DENGUE GEA FEVER MALARIA",
+    CHIKUNGUNYA: "DENGUE ARTRALGIA",
+    CEPHALGIA: "TTH MIGREN HT VERTIGO SINUSITIS",
+    TTH: "CEPHALGIA MIGREN HT",
+    MIGREN: "TTH CEPHALGIA",
+    VERTIGO: "CEPHALGIA HT HIPOTENSI ANEMIA",
+    MYALGIA: "FEVER DENGUE CHIKUNGUNYA ARTRALGIA",
+    LBP: "HNP UROLITIASIS ISK MYALGIA",
+    HNP: "LBP",
+    NYERI_LEHER: "TTH HT MYALGIA",
+    OA_GENU: "GOUT ARTRALGIA HIPERURISEMIA",
+    GOUT: "OA_GENU ARTRALGIA SELULITIS",
+    ARTRALGIA: "OA_GENU GOUT CHIKUNGUNYA",
+    DERMATITIS: "URTIKARIA TINEA SKABIES MILIARIA GIGITAN_SERANGGA PSORIASIS",
+    URTIKARIA: "DERMATITIS GIGITAN_SERANGGA ALERGI_OBAT ANAFILAKSIS",
+    TINEA: "DERMATITIS KANDIDIASIS_KULIT PSORIASIS PITIRIASIS_ROSEA INTERTRIGO",
+    PANU: "PITIRIASIS_ALBA VITILIGO TINEA KUSTA",
+    SKABIES: "DERMATITIS GIGITAN_SERANGGA IMPETIGO",
+    MILIARIA: "DERMATITIS FOLIKULITIS KANDIDIASIS_KULIT",
+    RUAM_KULIT: "DERMATITIS URTIKARIA MILIARIA GIGITAN_SERANGGA ALERGI_OBAT CAMPAK DENGUE",
+    VARICELLA: "ZOSTER HFMD IMPETIGO GIGITAN_SERANGGA DERMATITIS_VENENATA",
+    ZOSTER: "VARICELLA DERMATITIS_VENENATA HERPES_LABIALIS",
+    HERPES_LABIALIS: "ZOSTER STOMATITIS IMPETIGO KEILITIS",
+    IMPETIGO: "VARICELLA FOLIKULITIS DERMATITIS HERPES_LABIALIS",
+    FOLIKULITIS: "AKNE IMPETIGO MILIARIA ABSES",
+    ABSES: "FOLIKULITIS SELULITIS",
+    SELULITIS: "ABSES GIGITAN_SERANGGA GOUT",
+    GIGITAN_SERANGGA: "URTIKARIA DERMATITIS_VENENATA SKABIES DERMATITIS",
+    DERMATITIS_VENENATA: "ZOSTER COMBUSTIO DERMATITIS IMPETIGO",
+    HFMD: "VARICELLA STOMATITIS CAMPAK",
+    CAMPAK: "DENGUE RUAM_KULIT ALERGI_OBAT",
+    PITIRIASIS_ROSEA: "TINEA PSORIASIS PANU",
+    PITIRIASIS_ALBA: "PANU VITILIGO",
+    VITILIGO: "PANU PITIRIASIS_ALBA KUSTA",
+    MOLUSKUM: "KUTIL FOLIKULITIS AKNE",
+    KUTIL: "MOLUSKUM",
+    PSORIASIS: "DERMATITIS TINEA SEBOROIK",
+    SEBOROIK: "PSORIASIS TINEA DERMATITIS",
+    KANDIDIASIS_KULIT: "TINEA INTERTRIGO RUAM_POPOK",
+    INTERTRIGO: "KANDIDIASIS_KULIT TINEA",
+    RUAM_POPOK: "KANDIDIASIS_KULIT MILIARIA",
+    ALERGI_OBAT: "URTIKARIA CAMPAK RUAM_KULIT",
+    AKNE: "FOLIKULITIS MILIARIA",
+    KONJUNGTIVITIS: "KELILIPAN HORDEOLUM MATA_KERING PERDARAHAN_SUBKONJ BLEFARITIS",
+    HORDEOLUM: "KALAZION BLEFARITIS",
+    BLEFARITIS: "HORDEOLUM KONJUNGTIVITIS KALAZION URTIKARIA",
+    OMA: "OTITIS_EKSTERNA SERUMEN",
+    OTITIS_EKSTERNA: "OMA SERUMEN",
+    SERUMEN: "OMA OTITIS_EKSTERNA BENDA_ASING",
+    ISK: "URETRITIS UROLITIASIS FLUOR_ALBUS",
+    UROLITIASIS: "ISK LBP",
+    FLUOR_ALBUS: "ISK URETRITIS",
+    DISMENORE: "NYERI_PERUT GANGGUAN_HAID",
+    GANGGUAN_HAID: "AMENORE ANC",
+    AMENORE: "ANC GANGGUAN_HAID",
+    STOMATITIS: "KANDIDIASIS_ORAL HFMD HERPES_LABIALIS",
+    PULPITIS: "GINGIVITIS ABSES",
+    GINGIVITIS: "PULPITIS STOMATITIS",
+    KEILITIS: "HERPES_LABIALIS STOMATITIS",
+    PALPITASI: "ANSIETAS ANEMIA HT",
+    INSOMNIA: "ANSIETAS DEPRESI",
+    ANSIETAS: "DEPRESI INSOMNIA PALPITASI",
+    MALAISE: "ANEMIA DM FEVER HIPOTENSI",
+    ANOREKSIA: "DISPEPSIA HELMINTHIASIS GIZI_KURANG",
+    PARESTESIA: "DM CTS HNP",
+    EDEMA: "GAGAL_JANTUNG VARISES SELULITIS",
+    LIMFADENOPATI: "TONSILITIS PAROTITIS STRUMA TB_SUSPEK",
+    BENJOLAN: "LIMFADENOPATI ABSES",
+    TREMOR: "ANSIETAS HIPOGLIKEMIA",
+    ROKOK: "PPOK",
+    XEROSIS: "DERMATITIS PSORIASIS TINEA",
+    KALUS: "KUTIL",
+    KELOID: "BENJOLAN",
+    NEVUS: "KUTIL BENJOLAN",
+    HIPERHIDROSIS: "ANSIETAS DM",
+    BAU_BADAN: "HIPERHIDROSIS",
+    GUMOH: "KOLIK_BAYI GEA",
+    ENURESIS: "ISK DM",
+    TALI_PUSAT: "SELULITIS",
+    MENYUSUI: "MASTITIS",
+    DISPAREUNIA: "FLUOR_ALBUS ISK",
+    DISFAGIA: "FARINGITIS GERD TONSILITIS",
+    HEMATURIA: "ISK UROLITIASIS",
+    PELUPA: "ANSIETAS DEPRESI HT",
+    TUMBUH_KEMBANG: "GIZI_KURANG",
+    STRABISMUS: "REFRAKSI",
+    KUSTA: "PANU VITILIGO",
+  };
+  // Diagnosis yang tercakup diagnosis lain bila keduanya ada (mis. mimisan pada DBD).
+  const DX_SUBSUMED_BY = {
+    EPISTAKSIS: ["DENGUE"],
+    NYERI_PERUT: ["GEA", "DISENTRI", "DISMENORE", "UROLITIASIS", "AKUT_ABDOMEN", "ISK", "KONSTIPASI", "HELMINTHIASIS"],
+    DISPEPSIA: ["GEA", "KERACUNAN_MAKANAN", "MUAL_HAMIL", "TIFOID"],
+    CEPHALGIA: ["DENGUE", "TIFOID", "MALARIA", "SINUSITIS", "HT"],
+    RUAM_KULIT: ["DENGUE", "CAMPAK", "HFMD", "VARICELLA"],
+    PARESTESIA: ["DM"],
+  };
+  // Kata umum yang hanya menerangkan keluhan di sebelahnya ("keputihan gatal").
+  const DX_MODIFIER_WORD = /^(?:gatal(?:[\s-]*gatal)?|perih|nyeri|sakit|bengkak|merah|panas)$/;
+  const DX_BANDING = Object.fromEntries(Object.entries(DX_BANDING_RAW).map(([k, v]) => [k, v.split(" ")]));
+
+  // Keluhan -> daftar diagnosis (maks `max`, yang pertama = primer) + diagnosis banding.
+  // Diagnosis tambahan diambil dari keluhan LAIN (kata kunci tidak tumpang tindih, keluarga
+  // berbeda, bukan sekadar gejala umum). TTV saja tidak menambah diagnosis. (pure, diuji)
+  function detectDiagnoses(rawText, vitals, { max = 3 } = {}) {
+    const found = detectDiagnosisFromComplaint(rawText, { vitals });
+    if (!found) return { list: [], banding: [] };
+    const all0 = found.all || [{ key: found.key, keyword: found.keyword, pos: 0 }];
+    const subsumed = all0.filter((f) => (DX_SUBSUMED_BY[f.key] || []).some((k) => all0.some((g) => g.key === k)));
+    const all = all0.filter((f) => !subsumed.includes(f));
+    const has = (k) => DIAGNOSIS_TEMPLATES.some((d) => d.key === k);
+    const list = [all[0]];
+    const extra = [];
+    const span = (f) => [f.pos, f.pos + String(f.keyword || "").length];
+    const overlaps = (a, b) => {
+      if (!Number.isFinite(a.pos) || !Number.isFinite(b.pos)) return false;
+      const [a0, a1] = span(a);
+      const [b0, b1] = span(b);
+      if (a0 < b1 && b0 < a1) return true;
+      // Kata umum tepat di sebelah keluhan lain = keterangan keluhan itu, bukan keluhan baru.
+      const text = String(rawText || "").toLowerCase();
+      const gap = a1 <= b0 ? text.slice(a1, b0) : text.slice(b1, a0);
+      const word = (a1 <= b0 ? b : a).keyword;
+      return /^\s*$/.test(gap) && DX_MODIFIER_WORD.test(String(word || "").trim());
+    };
+    for (const f of all.slice(1)) {
+      const fromVitals = !Number.isFinite(f.pos);
+      const sameFamily = DX_FAMILY[f.key] && list.some((x) => DX_FAMILY[x.key] === DX_FAMILY[f.key]);
+      if (
+        list.length >= max ||
+        fromVitals ||
+        DX_SYMPTOM_ONLY.has(f.key) ||
+        sameFamily ||
+        list.some((x) => overlaps(x, f))
+      ) {
+        extra.push(f.key);
+        continue;
+      }
+      list.push(f);
+    }
+    const chosen = new Set(list.map((f) => f.key));
+    const banding = [];
+    const addB = (k) => k && has(k) && !chosen.has(k) && !banding.includes(k) && banding.push(k);
+    for (const f of list) for (const k of DX_BANDING[f.key] || []) addB(k);
+    for (const k of extra) if (!DX_SYMPTOM_ONLY.has(k)) addB(k);
+    for (const f of subsumed) if (!DX_SYMPTOM_ONLY.has(f.key)) addB(f.key);
+    return { list: list.map((f) => ({ key: f.key, keyword: f.keyword })), banding: banding.slice(0, 6) };
+  }
+
+  // Tanda bahaya / hati-hati dari keluhan + TTV. (pure, diuji)
+  // Hasil: [{ key, level: "bahaya"|"hati", label, advice, keyword, noAuto }]
+  function detectRedFlags(rawText, vitals) {
+    const lower = String(rawText || "").toLowerCase().replace(/ /g, " ");
+    const out = [];
+    if (lower.trim()) {
+      for (const f of RED_FLAGS) {
+        if (f.unless && out.some((o) => o.key === f.unless)) continue;
+        const re = new RegExp(f.pattern.source, "g");
+        let m;
+        while ((m = re.exec(lower))) {
+          if (!m[0]) {
+            re.lastIndex++;
+            continue;
+          }
+          if (!isKeywordNegated(lower, m.index, m.index + m[0].length)) {
+            out.push({ key: f.key, level: f.level, label: f.label, advice: f.advice, keyword: m[0].trim(), noAuto: f.noAuto ?? f.level === "bahaya" });
+            break;
+          }
+        }
+      }
+    }
+    // TTV berbahaya (krisis hipertensi, hipotensi, SpO2 <90). Demam tinggi tidak menahan obat.
+    for (const v of vitals?.flags || []) {
+      if (v.level !== "danger" || /^suhu/i.test(v.text)) continue;
+      out.push({ key: "TTV", level: "bahaya", label: v.text, advice: "Nilai ulang TTV dan stabilkan; pertimbangkan rujuk IGD.", keyword: "TTV", noAuto: true });
+    }
+    return out;
+  }
+
+  function redFlagHtml(flags, held) {
+    if (!flags || !flags.length) return "";
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const danger = flags.filter((f) => f.level === "bahaya");
+    const warn = flags.filter((f) => f.level !== "bahaya");
+    const row = (f) => `<div class="ak-rf-row"><b>${esc(f.label)}</b>${f.keyword && f.keyword !== "TTV" ? ` <small>("${esc(f.keyword)}")</small>` : ""}<br><small>${esc(f.advice)}</small></div>`;
+    return (
+      (danger.length
+        ? `<div class="ak-rf ak-rf-danger"><div class="ak-rf-title">⚠ TANDA BAHAYA — pertimbangkan rujuk / IGD</div>${danger.map(row).join("")}</div>`
+        : "") +
+      (warn.length ? `<div class="ak-rf ak-rf-warn"><div class="ak-rf-title">⚠ Perhatian</div>${warn.map(row).join("")}</div>` : "") +
+      (held ? `<div class="ak-rf-held">Obat saran TIDAK dicentang otomatis. Centang manual bila sesuai.</div>` : "")
+    );
+  }
+
+  // Hasil: { key, keyword, others: [kunci lain yang juga cocok] } atau null.
+  // options.vitals = hasil assessVitals(): demam dari suhu (tier 4) dan TD tinggi
+  // (tier 2,5: di bawah keluhan akut & HT/DM tertulis, di atas pusing/pegal).
+  function detectDiagnosisFromComplaint(rawText, options = {}) {
+    const lower = String(rawText || "").toLowerCase().replace(/\u00a0/g, " ");
+    const vit = options.vitals || null;
+    if (!lower.trim() && !vit?.fever && !vit?.hypertension) return null;
+    const found = [];
+    for (const d of DIAGNOSIS_FROM_COMPLAINT) {
+      // kata lemah untuk diagnosis yang sudah cocok; v0.5.0: entri ber-tier lebih kecil menggantikan.
+      const same = found.findIndex((f) => f.key === d.key);
+      if (same >= 0 && found[same].tier <= d.tier) continue;
+      const re = new RegExp(d.pattern.source, "g");
+      let m;
+      while ((m = re.exec(lower))) {
+        if (!m[0]) {
+          re.lastIndex++;
+          continue;
+        }
+        if (!isKeywordNegated(lower, m.index, m.index + m[0].length)) {
+          if (same >= 0) found.splice(same, 1);
+          found.push({ key: d.key, keyword: m[0], tier: d.tier, pos: m.index, order: found.length });
+          break;
+        }
+      }
+    }
+    if (vit?.hypertension && !found.some((f) => f.key === "HT"))
+      found.push({ key: "HT", keyword: `TD ${vit.bp}`, tier: 2.5, pos: Infinity, order: found.length });
+    if (vit?.fever && !found.some((f) => f.key === "FEVER"))
+      found.push({ key: "FEVER", keyword: `suhu ${String(vit.temp).replace(".", ",")} °C`, tier: 4, pos: Infinity, order: found.length });
+    if (!found.length) return null;
+    // Tier kecil dulu; tier 2 (HT/DM) menurut posisi tulisan, tier lain menurut urutan daftar.
+    found.sort((a, b) => a.tier - b.tier || (a.tier === 2 ? a.pos - b.pos : a.order - b.order));
+    const { key, keyword } = found[0];
+    return {
+      key,
+      keyword,
+      others: found.slice(1).map((f) => f.key),
+      // v0.7.0: semua yang cocok (untuk banyak diagnosis & banding)
+      all: found.map((f) => ({ key: f.key, keyword: f.keyword, tier: f.tier, pos: f.pos })),
+    };
+  }
+
+  // Jika obat `when` disarankan, obat `drop` tidak disarankan (isi tumpang tindih).
+  const ANAMNESIS_SUGGESTION_OVERLAPS = [
+    {
+      when: "ALPARA_DEWASA",
+      drop: ["PARACETAMOL_DEWASA"],
+      note: "Paracetamol tidak disarankan terpisah karena Alpara sudah mengandung paracetamol",
+    },
+    {
+      when: "IBUPROFEN_400",
+      drop: ["DICLOFENAC_50"],
+      note: "Diclofenac tidak disarankan bersamaan dengan Ibuprofen (sama-sama NSAID)",
+    },
+    {
+      when: "BAPIL_2_ANAK",
+      drop: ["ISPA_ANAK"],
+      note: "Racikan ISPA Anak diganti Racikan Bapil 2 (berisi ambroxol untuk dahak)",
+    },
+  ];
+
+  // ============================================================
+  // 2. JEMBATAN MEDISIN — membaca & mengisi lewat state Vue 2 / Vuex
+  // ============================================================
+  // Medisin ("App Sintasi") = Vue 2 + Quasar v1 + Vuex. Form halaman proses
+  // terikat ke store.state.pelayanan.pasien dan data komponen (Diagnosa, Resep,
+  // Racikan), jadi script mengisi STATE-nya, bukan mengetik di DOM.
+  // Script TIDAK PERNAH memanggil fungsi simpan/submit milik Medisin.
+
+  const LOG = (...args) => console.log("[AUTO KLINIK]", ...args);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  async function waitFor(fn, timeout = 8000, step = 150, label = "elemen") {
+    const start = Date.now();
+    let lastErr;
+    while (Date.now() - start < timeout) {
+      try {
+        const v = fn();
+        if (v) return v;
+      } catch (e) {
+        lastErr = e;
+      }
+      await sleep(step);
+    }
+    throw new Error(`Timeout menunggu ${label}${lastErr ? ": " + lastErr.message : ""}`);
+  }
+
+  const MEDISIN_HOST = "app.medisin.id";
+  // /admin/pelayanan/proses/<tab>/<base64 id_kunjungan>
+  const PROSES_PATH = /^\/admin\/pelayanan\/proses(?:-dokter)?\/[^/]+\/([^/]+)/;
+
+  // Id kunjungan dari URL (pure, diuji).
+  function kunjunganIdFromPath(pathname) {
+    const m = String(pathname || "").match(PROSES_PATH);
+    if (!m) return null;
+    try {
+      return atob(decodeURIComponent(m[1])) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+  const urlKunjunganId = () => kunjunganIdFromPath(location.pathname);
+
+  function vueRoot() {
+    try {
+      return document.querySelector("#q-app")?.__vue__?.$root || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Semua komponen Vue di halaman (pohon $children dari root).
+  function allVm() {
+    const root = vueRoot();
+    const out = [];
+    if (!root) return out;
+    const walk = (v) => {
+      out.push(v);
+      for (const c of v.$children || []) walk(c);
+    };
+    walk(root);
+    return out;
+  }
+  // Komponen Medisin dikenali dari name ATAU tag pendaftarannya (mis. "Resep").
+  const vmName = (v) => v?.$options?.name || v?.$options?._componentTag || "";
+  const findVm = (name) => allVm().find((v) => vmName(v) === name) || null;
+
+  const storePasien = () => vueRoot()?.$store?.state?.pelayanan?.pasien || null;
+
+  // Sesaat setelah pindah pasien, store masih berisi pasien SEBELUMNYA. Data hanya
+  // dipakai bila id kunjungan di store sama dengan yang ada di URL.
+  function pasienAktif() {
+    const p = storePasien();
+    const id = urlKunjunganId();
+    return p && id && String(p.id_kunjungan) === id ? p : null;
+  }
+
+  async function waitPasienReady(timeout = 15000) {
+    if (!vueRoot())
+      throw new Error("Aplikasi Medisin tidak terbaca. Pastikan script dijalankan dengan mode inject \"page\".");
+    try {
+      return await waitFor(pasienAktif, timeout, 200, "data pasien");
+    } catch (_) {
+      throw new Error("Data pasien di halaman ini belum selesai dimuat. Tunggu sebentar lalu coba lagi.");
+    }
+  }
+
+  function needPasien() {
+    const p = pasienAktif();
+    if (!p) throw new Error("Data pasien di halaman ini belum selesai dimuat. Tunggu sebentar lalu coba lagi.");
+    return p;
+  }
+
+  function needVm(name, label) {
+    needPasien();
+    const v = findVm(name);
+    if (!v) throw new Error(`Bagian ${label} tidak ada di tab ini. Buka tab DOKTER pada halaman pelayanan pasien.`);
+    return v;
+  }
+
+  const isBlank = (v) => v == null || String(v).trim() === "";
+  // Set reaktif (kunci yang belum ada di objek tetap terpantau Vue).
+  function setReactive(obj, key, value) {
+    const root = vueRoot();
+    if (root?.$set) root.$set(obj, key, value);
+    else obj[key] = value;
+  }
+
+  // ============================================================
+  // 3. FORM PELAYANAN — kesadaran, prognosa, status pulang, anamnesa, diagnosa
+  // ============================================================
+
+  // QSelect yang v-model-nya cocok (mis. "pasien.jenis_prognosa").
+  function findSelectByModel(re) {
+    return (
+      allVm().find((v) => v.$options?.name === "QSelect" && re.test(v.$vnode?.data?.model?.expression || "")) ||
+      null
+    );
+  }
+
+  // Isi pilihan pasien[field] dengan opsi yang labelnya cocok `wantRe`, HANYA bila
+  // masih kosong. Mengembalikan {kept} bila dokter sudah memilih nilai lain.
+  function setSelectIfBlank(field, wantRe, label) {
+    const p = needPasien();
+    const sel = findSelectByModel(new RegExp(`(?:^|\\.)pasien\\.${field}$`));
+    const opts = sel?.$props?.options || [];
+    const ov = sel?.$props?.optionValue || "value";
+    const ol = sel?.$props?.optionLabel || "label";
+    const pick = (o, key) => (typeof key === "function" ? key(o) : o && typeof o === "object" ? o[key] : o);
+    const cur = p[field];
+    if (!isBlank(cur)) {
+      const curVal = cur && typeof cur === "object" ? pick(cur, ov) : cur;
+      const o = opts.find((x) => String(pick(x, ov)) === String(curVal));
+      const shown = o ? String(pick(o, ol)) : String(curVal);
+      return o && !wantRe.test(shown) ? { kept: shown } : false;
+    }
+    if (!sel) throw new Error(`Kolom ${label} tidak ditemukan`);
+    const want = opts.find((x) => wantRe.test(String(pick(x, ol))));
+    if (!want) throw new Error(`Pilihan ${label} yang sesuai tidak ada di daftar`);
+    setReactive(p, field, sel.$props.emitValue ? pick(want, ov) : want);
+    LOG(`${label} -> ${pick(want, ol)}`);
+    return true;
+  }
+
+  const setConsciousness = async () => setSelectIfBlank("kesadaran_id", /compos\s*mentis/i, "Kesadaran");
+  const setPrognosis = async () => setSelectIfBlank("jenis_prognosa", /bonam/i, "Jenis Prognosa");
+  const setDischarge = async () => setSelectIfBlank("status_pulang", /^(?:berobat|rawat) jalan$/i, "Status Pulang");
+
+  // Keluhan Utama (pasien.keluhan) -> Anamnesa (pasien.keluhan_lainya) bila masih kosong.
+  async function copyChiefComplaintToAnamnesis() {
+    const p = needPasien();
+    const chief = String(p.keluhan || "").trim();
+    if (!chief) {
+      LOG("Resume: Keluhan Utama kosong -> Anamnesa tidak disalin");
+      return false;
+    }
+    const current = String(p.keluhan_lainya || "").trim();
+    if (current === chief) return false;
+    if (current) {
+      LOG("Resume: Anamnesa sudah diisi -> tidak ditimpa");
+      return { kept: current.length > 40 ? current.slice(0, 40) + "…" : current };
+    }
+    setReactive(p, "keluhan_lainya", chief);
+    return true;
+  }
+
+  // Keluhan yang diubah di Paket Resep -> Keluhan Utama dan Anamnesa.
+  function writeComplaintToPage(textNew, textBefore) {
+    const p = pasienAktif();
+    if (!p) return false;
+    // v0.4.2 (permintaan dokter): teks yang diedit di panel menjadi Keluhan Utama DAN Anamnesa.
+    setReactive(p, "keluhan", textNew);
+    setReactive(p, "keluhan_lainya", textNew);
+    return true;
+  }
+
+  // ---------------- DIAGNOSA (ICD-10) ----------------
+  const ICD_CODE = /^[A-Z]\d{2}(?:\.\d{1,2})?$/;
+  const icdOptionCode = (o) => {
+    const direct = String(o?.icd_kode || o?.value || "").toUpperCase().trim();
+    if (ICD_CODE.test(direct)) return direct;
+    const m = String(o?.label || "").toUpperCase().match(/\b[A-Z]\d{2}(?:\.\d{1,2})?\b/);
+    return m ? m[0] : "";
+  };
+
+  // Kode template "J06" cocok dengan "J06" maupun turunannya "J06.9" (pure, diuji).
+  function icdCodeMatches(templateCode, pageCode) {
+    const t = String(templateCode || "").toUpperCase().trim();
+    const c = String(pageCode || "").toUpperCase().trim();
+    if (!t || !c) return false;
+    return c === t || (!t.includes(".") && c.startsWith(t + "."));
+  }
+
+  // Opsi ICD untuk kode template: kode persis; bila kode 3 karakter tidak ada sebagai
+  // pilihan, dipakai turunan ".9" (tidak spesifik). Tidak pernah memilih yang lain. (pure)
+  function pickIcdOption(options, code) {
+    const want = String(code || "").toUpperCase().trim();
+    const list = options || [];
+    return (
+      list.find((o) => icdOptionCode(o) === want) ||
+      (!want.includes(".") ? list.find((o) => icdOptionCode(o) === want + ".9") : null) ||
+      null
+    );
+  }
+
+  // Kode ICD dari baris diagnosa yang SUDAH tersimpan (nama kolom bisa berbeda).
+  function savedIcdCode(d) {
+    for (const k of ["icd_kode", "icdx_kode", "kode_icdx", "kd_diag", "kdDiag", "kode"]) {
+      const v = String(d?.[k] || "").toUpperCase().trim();
+      if (ICD_CODE.test(v)) return v;
+    }
+    for (const v of Object.values(d || {})) {
+      const s = typeof v === "string" ? v.toUpperCase().trim() : "";
+      if (ICD_CODE.test(s)) return s;
+    }
+    return "";
+  }
+
+  // Diagnosa di halaman: yang sudah tersimpan + yang baru terisi di baris input.
+  function selectedIcdEntries() {
+    const dg = pasienAktif() ? findVm("Diagnosa") : null;
+    if (!dg) return [];
+    const out = [];
+    const push = (code, name) => {
+      if (!code || out.some((e) => e.code === code)) return;
+      out.push({ code, name: String(name || "").trim(), role: out.length ? "Sekunder" : "Primer" });
+    };
+    for (const d of Array.isArray(dg.data) ? dg.data : [])
+      push(savedIcdCode(d), d?.en || d?.icd_en || d?.kasus || d?.nama || d?.ind || "");
+    for (const r of dg.input_icdx || []) if (r?.val) push(icdOptionCode(r.val), r.val.en || r.kasus || "");
+    return out;
+  }
+
+  // Cari ICD lewat fungsi Medisin sendiri (otomatis memakai daftar PCare untuk pasien BPJS).
+  async function searchIcd(code) {
+    const dg = needVm("Diagnosa", "Diagnosa");
+    dg.icdx_opt = [];
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Pencarian ICD ${code} terlalu lama`)), 25000);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      Promise.resolve(
+        dg.loadIcdx(
+          code,
+          (apply) => {
+            try {
+              if (typeof apply === "function") apply();
+            } finally {
+              done();
+            }
+          },
+          done,
+        ),
+      ).catch((e) => {
+        clearTimeout(timer);
+        reject(new Error(`Pencarian ICD ${code} gagal: ${e?.message || e}`));
+      });
+    });
+    return Array.isArray(dg.icdx_opt) ? dg.icdx_opt : [];
+  }
+
+  // ICD yang diisi SCRIPT di halaman ini. Hanya ini yang boleh diganti otomatis
+  // saat keluhan diubah; diagnosa pilihan dokter tidak disentuh.
+  const autoDx = { href: "", codes: new Set() };
+  function autoDxForPage() {
+    if (autoDx.href !== location.pathname) {
+      autoDx.href = location.pathname;
+      autoDx.codes.clear();
+    }
+    return autoDx;
+  }
+
+  // Isi satu baris Diagnosa dengan kode pertama dx.icd yang tersedia. TIDAK menekan SIMPAN.
+  async function fillDiagnosis(dx) {
+    const dg = needVm("Diagnosa", "Diagnosa");
+    const codes = dx.icd.map((c) => c.toUpperCase());
+    const existing = selectedIcdEntries().find((e) => codes.some((c) => icdCodeMatches(c, e.code)));
+    if (existing) return { diagCode: null, icdCode: existing.code, skipped: true, diagnosisText: existing.name };
+
+    const errors = [];
+    for (const code of codes) {
+      let opt = null;
+      try {
+        opt = pickIcdOption(await searchIcd(code), code);
+      } catch (e) {
+        errors.push(e.message);
+        continue;
+      }
+      if (!opt) {
+        errors.push(`ICD ${code} tidak ada di daftar Medisin.`);
+        continue;
+      }
+      let row = (dg.input_icdx || []).find((r) => !r.val);
+      if (!row) {
+        dg.addColom();
+        row = dg.input_icdx[dg.input_icdx.length - 1];
+      }
+      row.val = opt;
+      try {
+        dg.setIcdx(opt, row);
+      } catch (_) {
+        row.kasus = opt.en || row.kasus;
+      }
+      if (!row.kasus && opt.en) row.kasus = opt.en;
+      row.tacc = "-1"; // Tanpa TACC (bawaan Medisin)
+      const icdCode = icdOptionCode(opt);
+      autoDxForPage().codes.add(icdCode);
+      LOG(`Diagnosa terisi: ${icdCode} ${opt.en || ""} (belum disimpan)`);
+      return { diagCode: null, icdCode, skipped: false, diagnosisText: opt.en || dx.query || "" };
+    }
+    throw new Error(errors.join(" "));
+  }
+
+  // Keluhan diubah di Paket Resep -> diagnosa ikut diperbarui. Baris yang dulu diisi
+  // script (belum disimpan) diganti; diagnosa dokter / yang sudah tersimpan dibiarkan.
+  // v0.7.0: keluhan diubah -> SEMUA diagnosis dari keluhan diperbarui. Baris yang dulu
+  // diisi script (belum disimpan) dan tidak dipakai lagi dikosongkan; diagnosa dokter /
+  // yang sudah tersimpan dibiarkan. TIDAK menyimpan.
+  async function updateDiagnosisFromComplaint(complaint) {
+    const vitals = assessVitals(readVitalsFromPage(), getPatientAgeFromIdentity()?.ageYears ?? null);
+    const dxs = detectDiagnoses(complaint, vitals)
+      .list.map((f) => DIAGNOSIS_TEMPLATES.find((d) => d.key === f.key))
+      .filter(Boolean);
+    if (!dxs.length) return { dx: null, dxs: [], note: "diagnosis tidak dikenali dari keluhan; Diagnosa tidak diubah" };
+    const page = selectedIcdEntries();
+    const isOn = (dx) => dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)));
+    if (dxs.every(isOn)) return { dx: dxs[0], dxs, note: `${dxs.map((d) => d.label).join(", ")} sudah terisi` };
+    const dg = needVm("Diagnosa", "Diagnosa");
+    const auto = autoDxForPage();
+    const saved = new Set((Array.isArray(dg.data) ? dg.data : []).map(savedIcdCode));
+    const doctorIcd = page.filter((e) => !auto.codes.has(e.code) || saved.has(e.code));
+    const wanted = (code) => dxs.some((d) => d.icd.some((c) => icdCodeMatches(c, code)));
+    for (const code of [...auto.codes]) {
+      if (wanted(code)) continue;
+      const row = (dg.input_icdx || []).find((r) => r.val && icdOptionCode(r.val) === code);
+      if (row && !saved.has(code)) {
+        row.val = null;
+        row.kasus = null;
+      }
+      auto.codes.delete(code);
+    }
+    const r = await fillDiagnoses(dxs);
+    if (!r.filled.length && r.failed.length) throw r.failed[0].error;
+    return {
+      dx: dxs[0],
+      dxs,
+      note:
+        r.filled.map((x) => `${x.dx.label} (ICD ${x.icdCode})`).join(", ") +
+        (r.failed.length ? ` · gagal diisi: ${r.failed.map((x) => x.dx.label).join(", ")}` : "") +
+        (doctorIcd.length ? ` · diagnosa lain dibiarkan: ${doctorIcd.map((e) => e.code).join(", ")}` : ""),
+    };
+  }
+
+  // v0.7.0: isi beberapa diagnosis berurutan (yang pertama = primer). TIDAK menyimpan.
+  async function fillDiagnoses(dxList) {
+    const filled = [];
+    const failed = [];
+    for (const dx of dxList) {
+      try {
+        filled.push({ dx, ...(await fillDiagnosis(dx)) });
+      } catch (e) {
+        failed.push({ dx, error: e });
+      }
+    }
+    return { filled, failed };
+  }
+
+  // Template diagnosis untuk ICD yang terisi di halaman (urut Primer, Sekunder).
+  function pageDiagnosisTemplates() {
+    return selectedIcdEntries()
+      .map((e) => DIAGNOSIS_TEMPLATES.find((d) => d.icd.some((c) => icdCodeMatches(c, e.code))))
+      .filter((d, i, a) => d && a.indexOf(d) === i);
+  }
+
+  function savedIcdCodesOnPage() {
+    const dg = pasienAktif() ? findVm("Diagnosa") : null;
+    return new Set((Array.isArray(dg?.data) ? dg.data : []).map(savedIcdCode));
+  }
+
+  // Hapus satu diagnosa yang BELUM tersimpan dari baris input Diagnosa (permintaan dokter).
+  // Diagnosa yang sudah tersimpan TIDAK dihapus script (hapus lewat ikon Medisin sendiri).
+  function removeUnsavedDiagnosis(code) {
+    const dg = needVm("Diagnosa", "Diagnosa");
+    const saved = new Set((Array.isArray(dg.data) ? dg.data : []).map(savedIcdCode));
+    if (saved.has(code)) return { code, removed: false, saved: true };
+    const rows = dg.input_icdx || [];
+    const row = rows.find((r) => r.val && icdOptionCode(r.val) === code);
+    if (!row) return { code, removed: false };
+    if (rows.length > 1 && typeof dg.removeColom === "function") dg.removeColom(row);
+    else {
+      row.val = null;
+      row.kasus = null;
+      row.tacc = "-1";
+    }
+    autoDxForPage().codes.delete(code);
+    LOG(`Diagnosa ${code} dihapus dari isian (belum disimpan)`);
+    return { code, removed: true };
+  }
+
+  // Tambah diagnosis pilihan dokter (banding/pencarian) TANPA mengganti yang sudah ada.
+  // Tidak dihitung "isian script", jadi tidak diganti otomatis saat keluhan diubah.
+  async function addDiagnosisChoice(dx) {
+    const page = selectedIcdEntries();
+    if (dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)))) return { dx, added: false, note: `${dx.label} sudah terisi` };
+    const r = await fillDiagnosis(dx);
+    autoDxForPage().codes.delete(r.icdCode);
+    return { dx, added: true, note: `${dx.label} (ICD ${r.icdCode}) ditambahkan` };
+  }
+
+  // Template ISPA lama (tidak ada di menu; dipertahankan untuk runTemplate("ispa")).
+  async function setDiagnosisAndIcd() {
+    await fillDiagnosis(DIAGNOSIS_TEMPLATES.find((d) => d.key === "ISPA"));
+    await setPrognosis();
+  }
+
+  // ---------------- TINDAKAN (tarif jasa konsultasi) ----------------
+  // Nama tarif mengikuti penjamin: "BPJS - Dokter Umum Jasa Konsultasi",
+  // "Dokter Umum Jasa Konsultasi" (UMUM), "BPJS TK - …", "Inhealth - …". (pure, diuji)
+  function serviceNameFor(penjamin) {
+    const base = String(TEMPLATE.service || "").replace(/^BPJS\s*-\s*/i, "").trim();
+    const prefix = penjaminPrefix(penjamin);
+    return prefix ? `${prefix} - ${base}` : base;
+  }
+
+  async function warmServiceList() {}
+
+  // Isi satu baris Tindakan dengan jasa konsultasi dokter umum sesuai penjamin.
+  // Hanya nama tarif yang SAMA PERSIS; hanya di poli umum; tidak dobel. TIDAK menekan SIMPAN.
+  async function addService() {
+    const p = needPasien();
+    const td = findVm("Tindakan");
+    if (!td) throw new Error("bagian Tindakan tidak ada di tab ini");
+    const poli = String(p.poli_nm || p.nama_poli || "");
+    if (poli && !/umum/i.test(poli)) {
+      LOG(`Tindakan: poli "${poli}" bukan poli umum -> jasa konsultasi tidak diisi`);
+      return false;
+    }
+    const name = serviceNameFor(p.penjamin_nm);
+    const same = (x) => drugNameKey(x) === drugNameKey(name);
+    const savedHas = (Array.isArray(p.tindakan) ? p.tindakan : []).some(
+      (t) => t && Object.values(t).some((v) => typeof v === "string" && same(v)),
+    );
+    if (savedHas || (td.input_tindakan || []).some((r) => r.val && same(tindakanRowName(td, r)))) return false;
+
+    const base = serviceNameFor("UMUM");
+    td.tarif_opt = [];
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("pencarian tarif terlalu lama")), 15000);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      td.loadTarif(
+        base,
+        (apply) => {
+          try {
+            if (typeof apply === "function") apply();
+          } finally {
+            done();
+          }
+        },
+        done,
+      );
+    });
+    const opt = (Array.isArray(td.tarif_opt) ? td.tarif_opt : []).find((o) => same(o?.tarif_nm));
+    if (!opt) throw new Error(`tarif "${name}" tidak ada di daftar tarif`);
+    let row = (td.input_tindakan || []).find((r) => !r.val);
+    if (!row) {
+      td.addColom();
+      row = td.input_tindakan[td.input_tindakan.length - 1];
+    }
+    // Kolom Jenis Tindakan Medisin memakai emit-value: nilainya tarif_id (bukan objek).
+    // Dengan objek, validasi Medisin menolak ("Jenis Tindakan tidak boleh kosong").
+    row.val = opt.tarif_id;
+    TINDAKAN_NAMES.set(row, opt.tarif_nm);
+    // Tampilan HP memakai komponen tarif-tindakan dengan daftar opsi sendiri.
+    const walk = (v) => {
+      for (const c of v?.$children || []) {
+        if (Array.isArray(c.tarif_opt) && !c.tarif_opt.some((o) => o?.tarif_id === opt.tarif_id)) c.tarif_opt.push(opt);
+        walk(c);
+      }
+    };
+    walk(td);
+    try {
+      td.onUpdateInput(opt, row); // harga tindakan
+    } catch (e) {
+      LOG("Harga tindakan tidak terisi otomatis: " + (e?.message || e));
+    }
+    LOG(`Tindakan terisi: ${opt.tarif_nm} (belum disimpan)`);
+    return true;
+  }
+  // Baris tindakan yang diisi tetapi belum disimpan dokter (bagian Tindakan punya SIMPAN sendiri).
+  // Nama tarif baris tindakan (nilai baris = tarif_id, atau objek pada versi lama). (dipakai tes)
+  const TINDAKAN_NAMES = new WeakMap();
+  function tindakanRowName(td, r) {
+    const v = r?.val;
+    if (!v) return "";
+    if (typeof v === "object") return String(v.tarif_nm || "");
+    const o = (td?.tarif_opt || []).find((x) => String(x?.tarif_id) === String(v));
+    return String(o?.tarif_nm || TINDAKAN_NAMES.get(r) || v);
+  }
+  function unsavedServiceNote() {
+    const td = findVm("Tindakan");
+    const names = (td?.input_tindakan || []).filter((r) => r?.val).map((r) => tindakanRowName(td, r));
+    if (!names.length) return "";
+    if (serviceAutoSave.running) return ` Tindakan (${names.join(", ")}) sedang disimpan otomatis.`;
+    return ` Tindakan diisi (${names.join(", ")}): tekan SIMPAN di bagian Tindakan.`;
+  }
+  function validateAndReport() {}
+
+  // ============================================================
+  // 4. RESEP & RACIKAN
+  // ============================================================
+
+  function isMedicalSupplyItem(drug) {
+    const key = norm(drug?.key || "");
+    return ["strip ", "alkohol swab", "blood lancet", "spuit ", "handscoon", "pot plastik"].some((k) =>
+      key.includes(k),
+    );
+  }
+
+  // Sediaan sirup (satuan pemakaian ml).
+  function isSyrupMedication(drug) {
+    const key = norm(drug?.key || "");
+    const unit = norm(drug?.unit || "");
+    const usage = norm(drug?.usageUnit || "");
+    if (usage && usage !== "ml") return false;
+    return ["ml", "bottle", "botol"].includes(unit) || /syrup|sirup|\bsyr\b|suspensi|\bsusp\b/.test(key);
+  }
+
+  function getItemUnit(itemKey) {
+    return String(ITEMS?.[itemKey]?.unit || "").trim();
+  }
+
+  function buildDrugForItem(itemKey, recipe) {
+    const item = ITEMS[itemKey];
+    if (!item) throw new Error(`Item database tidak ditemukan: ${itemKey}`);
+    return {
+      key: item.target,
+      search: item.keyword,
+      freq: recipe.freq,
+      dose: recipe.dose,
+      days: recipe.days,
+      total: recipe.total,
+      instruction: recipe.instruction,
+      unit: item.unit,
+      usageUnit: item.usageUnit || "",
+    };
+  }
+
+  function collectBhpForActions(actionKeys) {
+    const totals = new Map();
+    const labels = [];
+    for (const key of [...new Set(actionKeys || [])]) {
+      const action = PACKAGE_ACTIONS.find((x) => x.key === key);
+      const tpl = action ? RECIPE_TEMPLATES[action.key] : null;
+      if (!action || !tpl?.medicines?.length) continue;
+      labels.push(action.label);
+      for (const m of tpl.medicines) {
+        const qty = Number(m.total || m.dose || 1) || 1;
+        totals.set(m.item, (totals.get(m.item) || 0) + qty);
+      }
+    }
+    return { labels, items: [...totals].map(([item, total]) => ({ item, total: String(total) })) };
+  }
+
+  function parseStockText(raw) {
+    const m = String(raw || "").match(/sisa\s*:?\s*(-?[\d.,]+)/i);
+    if (!m) return null;
+    const n = Number(m[1].replace(/[.,](?=\d{3}\b)/g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // ---------------- SIGNA ----------------
+  // Medisin hanya punya SATU kolom signa (teks). Disusun dari template lama:
+  // "<frekuensi> x <dosis> [satuan] [instruksi]", mis. "3 x 1 setelah makan",
+  // "3 x 5 ml setelah makan", "2 x 1 oles". (pure, diuji)
+  function signaText(freq, dose, unitWord, instruction) {
+    const f = String(freq ?? "").trim();
+    const d = String(dose ?? "").trim();
+    const head = f && d ? `${f} x ${d}` : f || d;
+    return [head, String(unitWord || "").trim().toLowerCase(), String(instruction || "").trim().toLowerCase()]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function buildSigna(drug) {
+    if (isMedicalSupplyItem(drug)) return "";
+    const usage = norm(drug.usageUnit || "");
+    const unitWord = usage || (isSyrupMedication(drug) ? "ml" : "");
+    // Sama seperti versi Klinik Pintar: instruksi kosong = "setelah makan" (kecuali obat oles/tetes).
+    const instruction = drug.instruction || (usage && usage !== "ml" ? "" : "SETELAH MAKAN");
+    return signaText(drug.freq, drug.dose, unitWord, instruction);
+  }
+
+  // Bila master signa Medisin punya tulisan yang sama (beda huruf besar/spasi saja),
+  // tulisan master yang dipakai. (pure, diuji)
+  const signaKey = (s) => String(s || "").toLowerCase().replace(/[\s.]+/g, "");
+  function matchSignaMaster(signaOptions, wanted) {
+    const w = signaKey(wanted);
+    if (!w) return "";
+    const hit = (signaOptions || []).find((o) => signaKey(o?.nama ?? o) === w);
+    return hit ? String(hit.nama ?? hit) : wanted;
+  }
+
+  // ---------------- PEMETAAN NAMA OBAT ----------------
+  // Master obat klinik memakai awalan per penjamin dengan stok terpisah:
+  // "BPJS -- X" (BPJS), "X" (UMUM), "BPJS TK -- X", "IMR -- X", "IDN -- X".
+  // Aturan: dipilih otomatis HANYA obat bernama persis "<awalan penjamin> -- <nama template>"
+  // (UMUM: tanpa awalan). Selain itu dokter memilih sekali dari daftar Medisin; pilihannya
+  // disimpan di browser ini (localStorage) per klinik + penjamin.
+  const DRUG_MAP_PREFIX = "auto-klinik-medisin:obat:";
+  const drugNameKey = (s) => String(s || "").replace(/\s+/g, " ").trim().toUpperCase();
+  const itemBaseName = (itemKey) =>
+    String(ITEMS[itemKey]?.target || itemKey)
+      .replace(/^BPJS\s*--\s*/i, "")
+      .trim();
+
+  // "BPJS -- ZINC 20 MG" -> {prefix:"BPJS", base:"ZINC 20 MG"}; tanpa awalan -> prefix "". (pure, diuji)
+  function splitProductPrefix(name) {
+    const text = String(name || "").trim();
+    const m = text.match(/^(.+?)\s*--\s*(.+)$/);
+    return m ? { prefix: drugNameKey(m[1]), base: m[2].trim() } : { prefix: "", base: text };
+  }
+
+  // Awalan nama obat/tarif untuk penjamin pasien. (pure, diuji)
+  function penjaminPrefix(penjamin) {
+    const p = drugNameKey(penjamin);
+    if (!p || p === "UMUM") return "";
+    if (/^BPJS(?: KESEHATAN)?$/.test(p)) return "BPJS";
+    if (/^BPJS\b.*\b(?:TK|KET|KETENAGAKERJAAN)\b/.test(p)) return "BPJS TK";
+    return p;
+  }
+
+  // Obat bernama persis "<awalan penjamin> -- <nama>" (UMUM: tanpa awalan). (pure, diuji)
+  function pickProductForPenjamin(options, baseName, penjamin) {
+    const want = penjaminPrefix(penjamin);
+    const base = drugNameKey(baseName);
+    return (
+      (options || []).find((o) => {
+        const s = splitProductPrefix(productName(o));
+        return s.prefix === want && drugNameKey(s.base) === base;
+      }) || null
+    );
+  }
+
+  // Kata pencarian awal untuk daftar pilihan: 6 huruf pertama dari kata pertama (≥3 huruf)
+  // nama obat, supaya beda ejaan tetap ketemu (CETIRIZINE -> "CETIRI" cocok "CETIRIZIN"). (pure)
+  function drugSearchWord(name) {
+    const words = String(name || "").split(/[^A-Za-z]+/).filter(Boolean);
+    return (words.find((w) => w.length >= 3) || String(name || "").trim()).slice(0, 6);
+  }
+
+  function drugMapStorageKey() {
+    return DRUG_MAP_PREFIX + String(storePasien()?.klinik_id || "klinik");
+  }
+  function loadDrugMap() {
+    try {
+      const v = JSON.parse(localStorage.getItem(drugMapStorageKey()) || "{}");
+      return v && typeof v === "object" ? v : {};
+    } catch (_) {
+      return {};
+    }
+  }
+  function saveDrugMap(map) {
+    try {
+      localStorage.setItem(drugMapStorageKey(), JSON.stringify(map));
+    } catch (e) {
+      LOG("Pemetaan obat tidak bisa disimpan: " + (e?.message || e));
+    }
+  }
+  const currentPenjamin = () => String(pasienAktif()?.penjamin_nm || "UMUM").trim().toUpperCase();
+
+  const productName = (opt) => String(opt?.value?.produk_nm || "").trim();
+  const exactProduct = (options, name) =>
+    (options || []).find((o) => drugNameKey(productName(o)) === drugNameKey(name)) || null;
+
+  // Cari obat lewat fungsi Medisin sendiri (loadObat milik Resep/Racikan): hasilnya
+  // sudah disaring penjamin & hanya obat yang punya stok di lokasi non-gudang.
+  async function searchProducts(vm, query, kategori) {
+    const q = String(query || "").trim();
+    if (q.length < 2) return [];
+    const keep = Array.isArray(vm.obat_opt) ? vm.obat_opt.slice() : [];
+    let got = null;
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Pencarian obat "${q}" gagal/terlalu lama`)), 15000);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      Promise.resolve(
+        vm.loadObat(
+          q,
+          (apply) => {
+            try {
+              if (typeof apply === "function") apply();
+              got = Array.isArray(vm.obat_opt) ? vm.obat_opt.slice() : [];
+            } finally {
+              done();
+            }
+          },
+          done,
+          kategori, // "BHP" untuk daftar BHP; kosong untuk obat
+        ),
+      ).catch((e) => {
+        clearTimeout(timer);
+        reject(new Error(`Pencarian obat "${q}" gagal: ${e?.message || e}`));
+      });
+    });
+    // Opsi lama digabung kembali agar label baris yang sudah terisi tetap tampil.
+    const merged = (got || []).slice();
+    for (const o of keep) if (!merged.some((x) => x.produk_id === o.produk_id)) merged.push(o);
+    vm.obat_opt = merged;
+    return got || [];
+  }
+
+  // Dialog: dokter memilih obat Medisin untuk satu nama template. null = dilewati.
+  function askDrugMapping({ base, penjamin, staleName, candidates, search }) {
+    return new Promise((resolve) => {
+      document.getElementById("ak-drugmap")?.remove();
+      const shade = document.createElement("div");
+      shade.id = "ak-drugmap";
+      shade.innerHTML = `
+        <div class="akd-card" role="dialog" aria-modal="true">
+          <div class="akd-title">Pilih obat di Medisin</div>
+          <div class="akd-sub">Template: <b>${escapePreviewHtml(base)}</b> · penjamin <b>${escapePreviewHtml(penjamin || "UMUM")}</b><br>Obat dengan nama ini untuk penjamin tersebut tidak ada di daftar Medisin${
+            staleName ? ` (pilihan sebelumnya "${escapePreviewHtml(staleName)}" tidak ditemukan / stok kosong)` : ""
+          }. Pilih obat yang sama. Pilihan diingat untuk berikutnya.</div>
+          <input id="ak-drugmap-q" type="text" autocomplete="off" placeholder="Cari nama obat (min. 2 huruf)" value="${escapePreviewHtml(drugSearchWord(base))}">
+          <div id="ak-drugmap-list" class="akd-list"></div>
+          <div class="akd-foot">
+            <span class="akd-hint">Hanya obat yang punya stok yang tampil.</span>
+            <button id="ak-drugmap-skip" type="button">Lewati obat ini</button>
+          </div>
+        </div>`;
+      (document.body || document.documentElement).appendChild(shade);
+      const listEl = shade.querySelector("#ak-drugmap-list");
+      const input = shade.querySelector("#ak-drugmap-q");
+      let current = [];
+      const finish = (opt) => {
+        shade.remove();
+        resolve(opt);
+      };
+      const render = (list, note = "") => {
+        current = list || [];
+        listEl.innerHTML = current.length
+          ? current
+              .map(
+                (o, i) =>
+                  `<button type="button" class="akd-opt" data-i="${i}"><span>${escapePreviewHtml(productName(o))}</span><small>stok ${escapePreviewHtml(o.totalStockSystem ?? "?")}</small></button>`,
+              )
+              .join("")
+          : `<div class="akd-empty">${escapePreviewHtml(note || "Tidak ada obat yang cocok. Coba kata lain.")}</div>`;
+      };
+      render(candidates);
+      listEl.addEventListener("click", (ev) => {
+        const b = ev.target.closest?.(".akd-opt");
+        if (b) finish(current[Number(b.dataset.i)] || null);
+      });
+      let timer = null;
+      let seq = 0;
+      input.addEventListener("input", () => {
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+          const q = input.value.trim();
+          if (q.length < 2) return;
+          const mine = ++seq;
+          render([], "Mencari…");
+          try {
+            const r = await search(q);
+            if (mine === seq) render(r);
+          } catch (e) {
+            if (mine === seq) render([], e?.message || String(e));
+          }
+        }, 350);
+      });
+      shade.querySelector("#ak-drugmap-skip").addEventListener("click", () => finish(null));
+    });
+  }
+
+  // Opsi obat Medisin untuk satu item template; null bila dokter melewati.
+  async function resolveProduct(vm, itemKey, kategori) {
+    const base = itemBaseName(itemKey);
+    const penjamin = currentPenjamin();
+    const mine = loadDrugMap()?.[penjamin]?.[itemKey] || "";
+    if (mine) {
+      const hit = exactProduct(await searchProducts(vm, mine, kategori), mine);
+      if (hit) return hit;
+    }
+    const found = await searchProducts(vm, base, kategori);
+    const auto = pickProductForPenjamin(found, base, penjamin);
+    if (auto) return auto;
+    const want = penjaminPrefix(penjamin);
+    const list = found.length ? found : await searchProducts(vm, drugSearchWord(base), kategori);
+    // Obat dengan awalan penjamin pasien ditaruh paling atas.
+    const candidates = list
+      .slice()
+      .sort(
+        (a, b) =>
+          Number(splitProductPrefix(productName(b)).prefix === want) -
+          Number(splitProductPrefix(productName(a)).prefix === want),
+      );
+    const pick = await askDrugMapping({
+      base,
+      penjamin,
+      staleName: mine,
+      candidates,
+      search: (q) => searchProducts(vm, q, kategori),
+    });
+    if (!pick) return null;
+    const fresh = loadDrugMap();
+    (fresh[penjamin] ||= {})[itemKey] = productName(pick);
+    saveDrugMap(fresh);
+    LOG(`Pemetaan obat disimpan (${penjamin}): ${base} -> ${productName(pick)}`);
+    return pick;
+  }
+
+  // Baris resep kosong pertama; bila tidak ada, tambah baris.
+  function nextEmptyRow(vm, listKey) {
+    let row = (vm[listKey] || []).find((r) => !r.val);
+    if (!row) {
+      vm.addColom();
+      row = vm[listKey][vm[listKey].length - 1];
+    }
+    return row;
+  }
+
+  function putProductInRow(vm, row, opt, qty) {
+    if (!(vm.obat_opt || []).some((o) => o.produk_id === opt.produk_id)) vm.obat_opt = [...(vm.obat_opt || []), opt];
+    row.val = opt.value;
+    try {
+      vm.loadBatchDetails(row); // batch pertama yang masih ada stok
+    } catch (e) {
+      LOG(`Batch ${productName(opt)} tidak terisi otomatis: ${e?.message || e}`);
+    }
+    const n = Number(String(qty ?? "").replace(",", "."));
+    row.jumlah = Number.isFinite(n) && n > 0 ? n : 1;
+  }
+
+  // Obat sudah ada di resep (baris input atau daftar yang sudah tersimpan)?
+  function productAlreadyInRecipe(rs, opt) {
+    const id = opt.produk_id;
+    const name = drugNameKey(productName(opt));
+    if ((rs.input_resep || []).some((r) => r.val && r.val.produk_id === id)) return true;
+    const saved = [...(Array.isArray(rs.resep) ? rs.resep : []), ...(Array.isArray(pasienAktif()?.resep) ? pasienAktif().resep : [])];
+    return saved.some((x) => x && (x.produk_id === id || drugNameKey(x.produk_nm) === name));
+  }
+
+  // BHP untuk tindakan (strip, lancet, swab, spuit…): diisi di tab BHP bagian Resep.
+  // TIDAK menekan SIMPAN. Mengembalikan catatan (yang sudah ada / belum terisi).
+  async function addBhpItems(list) {
+    const rs = needVm("Resep", "Resep");
+    if (!Array.isArray(rs.input_bhp)) throw new Error("bagian BHP tidak ada di halaman ini");
+    const p = needPasien();
+    const notes = [];
+    let filled = 0;
+    for (const it of list || []) {
+      const label = itemBaseName(it.item);
+      let opt = null;
+      try {
+        opt = await resolveProduct(rs, it.item, "BHP");
+      } catch (e) {
+        notes.push(`${label} belum terisi (${String(e?.message || e).replace(/\.$/, "")})`);
+        continue;
+      }
+      if (!opt) {
+        notes.push(`${label} belum terisi (dilewati)`);
+        continue;
+      }
+      const id = opt.produk_id;
+      const saved = Array.isArray(p.tarif_bhp) ? p.tarif_bhp : [];
+      if (
+        rs.input_bhp.some((r) => r.produk_id && r.produk_id.produk_id === id) ||
+        saved.some((x) => x && (x.produk_id === id || drugNameKey(x.produk_nm) === drugNameKey(productName(opt))))
+      ) {
+        notes.push(`${productName(opt)} sudah ada`);
+        continue;
+      }
+      let row = rs.input_bhp.find((r) => !r.produk_id);
+      if (!row) {
+        rs.input_bhp.push({ produk_id: "", qty: 0, batches: [], produk_detail_id: "" });
+        row = rs.input_bhp[rs.input_bhp.length - 1];
+      }
+      if (!(rs.obat_opt || []).some((o) => o.produk_id === id)) rs.obat_opt = [...(rs.obat_opt || []), opt];
+      setReactive(row, "produk_id", opt);
+      try {
+        rs.batchDetailTarif(row); // batch yang masih ada stok
+      } catch (_) {
+        notes.push(`${productName(opt)}: stok kosong, batch belum terpilih`);
+      }
+      const n = Number(it.total);
+      row.qty = Number.isFinite(n) && n > 0 ? n : 1;
+      filled++;
+      LOG(`BHP: ${productName(opt)} x ${row.qty}`);
+    }
+    if (filled)
+      notify("BHP terisi di tab BHP (bagian Resep). Buka tab BHP, periksa, lalu tekan SIMPAN di sana.", "info", 15000);
+    else if ((list || []).length && notes.every((n) => /belum terisi/.test(n))) throw new Error(notes.join("; "));
+    return notes;
+  }
+
+  function findRacikanModal() {
+    const rk = findVm("Racikan");
+    return rk && (rk.modal_add || rk.modal_add_template) ? rk : null;
+  }
+
+  // Isi baris Resep (Obat Satuan). TIDAK menekan SIMPAN: dokter meninjau lebih dulu.
+  async function addRecipeItems(medicines) {
+    const rs = needVm("Resep", "Resep");
+    const alreadyInRecipe = [];
+    const lowStock = [];
+    const notFilled = [];
+
+    for (let i = 0; i < medicines.length; i++) {
+      const recipe = medicines[i];
+      const drug = buildDrugForItem(recipe.item, recipe);
+      const label = itemBaseName(recipe.item);
+      let opt = null;
+      try {
+        opt = await resolveProduct(rs, recipe.item);
+      } catch (e) {
+        notFilled.push(`${label} (${String(e?.message || e).replace(/\.$/, "")})`);
+        continue;
+      }
+      if (!opt) {
+        notFilled.push(`${label} (dilewati, belum dipilih di daftar Medisin)`);
+        continue;
+      }
+      if (productAlreadyInRecipe(rs, opt)) {
+        alreadyInRecipe.push(productName(opt));
+        continue;
+      }
+      const row = nextEmptyRow(rs, "input_resep");
+      putProductInRow(rs, row, opt, drug.total);
+      row.signa = matchSignaMaster(rs.signa_opt, buildSigna(drug));
+      const stock = Number(opt.totalStockSystem);
+      if (Number.isFinite(stock) && Number(row.jumlah) > stock)
+        lowStock.push(`${productName(opt)} (butuh ${row.jumlah}, stok ${stock})`);
+      LOG(`RESEP ${i + 1}/${medicines.length}: ${productName(opt)} | ${row.jumlah} | ${row.signa}`);
+      await sleep(60);
+    }
+
+    if (lowStock.length)
+      notify(`Stok kurang, ganti obat/jumlah sebelum SIMPAN resep: ${lowStock.join(", ")}.`, "error", 15000);
+    if (alreadyInRecipe.length)
+      notify(`Sudah ada di resep, tidak ditambahkan lagi (periksa dosisnya): ${alreadyInRecipe.join(", ")}.`, "warn", 12000);
+    if (notFilled.length) throw new Error("belum terisi: " + notFilled.join("; "));
+    return { alreadyInRecipe };
+  }
+
+  // ---------------- RACIKAN ----------------
+  // Satuan template lama -> Jenis Racikan Medisin. (pure, diuji)
+  function racikanJenisFor(tpl) {
+    const unit = norm(tpl?.unit || "pulvis");
+    if (unit === "oles") return "pot_salep";
+    if (unit === "kapsul" || unit === "capsule") return "kapsul";
+    if (unit === "ml") return "botol_sirup";
+    return "kertas_puyer";
+  }
+  // "buat 10" -> 10 bungkus; tanpa angka (mis. "mf ungt") -> 1. (pure, diuji)
+  function racikanQtyFor(tpl) {
+    const m = String(tpl?.compoundInstruction || "").match(/(\d+)/);
+    const n = m ? Number(m[1]) : 1;
+    return n > 0 ? n : 1;
+  }
+  function racikanSignaFor(tpl) {
+    const unit = norm(tpl?.unit || "");
+    const instruction = String(tpl?.instruction || "");
+    // "oles di lesi" sudah memuat kata oles; jangan ditulis dua kali.
+    const unitWord = unit === "oles" && !/\boles\b/i.test(instruction) ? "oles" : "";
+    return signaText(tpl?.doseFreq, tpl?.doseAmount, unitWord, instruction);
+  }
+
+  // Buka dialog "Tambah Racikan", isi semuanya, lalu (v0.5.1, disetujui dokter
+  // 2026-11-17) langsung tekan SIMPAN dialog itu bila semua bahan masuk & stok cukup,
+  // agar racikan berikutnya bisa lanjut. Bila tidak, TUNGGU dokter menyimpan/menutup.
+  const lastAutoRacikan = { rk: null, name: "" };
+  async function addRacikan(tpl) {
+    const rk = needVm("Racikan", "Racikan");
+    const title = tpl.title || tpl.name || "racikan";
+    if (rk.modal_add || rk.modal_add_template)
+      throw new Error(`${title}: dialog racikan masih terbuka. Simpan atau tutup dulu.`);
+
+    // Bahan dicocokkan dulu (dialog pilih obat bisa muncul) sebelum dialog racikan dibuka.
+    const parts = [];
+    const missing = [];
+    for (const ing of tpl.ingredients || []) {
+      const opt = await resolveProduct(rk, ing.item);
+      if (opt) parts.push({ opt, quantity: ing.quantity });
+      else missing.push(itemBaseName(ing.item));
+    }
+    if (!parts.length) throw new Error(`${title}: tidak ada bahan yang dipilih di daftar Medisin.`);
+
+    rk.modal_add = true;
+    await sleep(350);
+    let dirty = !isBlank(rk.form?.racikan_nama) || (rk.input_racikan || []).some((r) => r.val);
+    // Sisa isian SCRIPT sendiri (dokter menutup dialog tanpa simpan) boleh dikosongkan.
+    if (dirty && lastAutoRacikan.rk === rk && lastAutoRacikan.name === rk.form?.racikan_nama) {
+      Object.assign(rk.form, { racikan_nama: null, racikan_jenis: null, racikan_qty: 0, racikan_signa: null });
+      rk.input_racikan = [{ no: 1, val: "", batch: "", batches: [], jumlah: 1, diskon_resep: 0, signa: "" }];
+      await sleep(100);
+      dirty = false;
+    }
+    if (dirty) {
+      throw new Error(
+        `${title}: dialog Tambah Racikan masih berisi isian lain. Simpan atau kosongkan dulu, lalu input lagi.`,
+      );
+    }
+    const signa = matchSignaMaster(rk.signa_opt, racikanSignaFor(tpl));
+    rk.form.racikan_nama = tpl.name || title;
+    lastAutoRacikan.rk = rk;
+    lastAutoRacikan.name = rk.form.racikan_nama;
+    rk.form.racikan_jenis = racikanJenisFor(tpl);
+    rk.form.racikan_qty = racikanQtyFor(tpl);
+    rk.form.racikan_signa = signa;
+    const lowStock = [];
+    for (const part of parts) {
+      const row = nextEmptyRow(rk, "input_racikan");
+      putProductInRow(rk, row, part.opt, part.quantity);
+      row.signa = signa;
+      const stock = Number(part.opt.totalStockSystem);
+      if (Number.isFinite(stock) && Number(row.jumlah) > stock)
+        lowStock.push(`${productName(part.opt)} (butuh ${row.jumlah}, stok ${stock})`);
+    }
+    LOG(`Racikan ${title} terisi di dialog`);
+    if (!missing.length && !lowStock.length) {
+      await sleep(300);
+      const saved = await saveRacikanDialog(rk).catch((e) => ({ errors: [String(e?.message || e)] }));
+      if (!rk.modal_add) {
+        notify(`Racikan ${title} tersimpan. Review di daftar Racikan.`, "success", 6000);
+        await sleep(300);
+        return { saved: true };
+      }
+      LOG(`Racikan ${title} belum tersimpan otomatis: ${(saved?.errors || []).join("; ")}`);
+    }
+    notify(
+      `Racikan terisi di dialog Tambah Racikan: ${title}. Belum tersimpan: periksa, lalu tekan SIMPAN di dialog itu (atau tutup bila batal).` +
+        (missing.length ? ` Bahan belum masuk: ${missing.join(", ")}.` : "") +
+        (lowStock.length ? ` STOK KURANG: ${lowStock.join(", ")}.` : ""),
+      lowStock.length ? "error" : missing.length ? "warn" : "info",
+      20000,
+    );
+    // Racikan berikutnya menunggu dialog ini selesai (maks. 10 menit).
+    await waitFor(() => !rk.modal_add, 600000, 400, `dialog racikan ${title} ditutup`).catch(() => {
+      throw new Error(`${title}: dialog racikan belum disimpan/ditutup.`);
+    });
+    await sleep(300);
+  }
+
+  // ============================================================
+  // 5. DATA PASIEN — umur dari identitas, BB, pencarian template BB
+  // Aturan kategori (Paket Resep Golongan):
+  //   umur >17 tahun                    -> DEWASA (BB tidak diperlukan)
+  //   umur <=17 tahun / tidak terbaca   -> BB wajib; BB >40 kg DEWASA, <=40 kg ANAK
+  // ============================================================
+
+  function parseWeightKg(value) {
+    const normalized = String(value ?? "")
+      .replace(",", ".")
+      .replace(/[^0-9.]/g, "");
+    const kg = Number(normalized);
+    return Number.isFinite(kg) && kg > 0 ? kg : null;
+  }
+
+  // Format umur lama (dipertahankan untuk tes), misalnya
+  // "<tanggal lahir> (30 tahun, 2 bulan, 5 hari)" atau "(30 tahun)".
+  function parsePatientAge(rawText) {
+    const textContent = String(rawText || "")
+      .replace(/ /g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!textContent) return null;
+
+    const patterns = [
+      /\((\d+)\s*tahun\s*,\s*(\d+)\s*bulan\s*,\s*(\d+)\s*hari\)/i,
+      /\((\d+)\s*tahun\s*,\s*(\d+)\s*bulan\)/i,
+      /\((\d+)\s*tahun\s*,\s*(\d+)\s*bulan\s*,?\s*(\d+)\s*hari?\)/i,
+    ];
+
+    for (const re of patterns) {
+      const m = textContent.match(re);
+      if (!m) continue;
+      const years = Number(m[1]) || 0;
+      const months = Number(m[2]) || 0;
+      const days = Number(m[3]) || 0;
+      const ageYears = years + months / 12 + days / 365;
+      return { years, months, days, ageYears, source: m[0] };
+    }
+
+    // Fallback untuk format singkat, misalnya "(30 tahun)".
+    const simple = textContent.match(/\((\d+)\s*tahun\)/i);
+    if (simple) {
+      const years = Number(simple[1]);
+      if (Number.isFinite(years)) {
+        return { years, months: 0, days: 0, ageYears: years, source: simple[0] };
+      }
+    }
+
+    return null;
+  }
+
+  // Umur dari store Medisin: pasien.umur "36 tahun 10 bulan 15 hari" (pure, diuji).
+  function parseMedisinAge(raw) {
+    const t = String(raw || "").toLowerCase();
+    const num = (re) => {
+      const m = t.match(re);
+      return m ? Number(m[1]) : null;
+    };
+    const years = num(/(\d+)\s*(?:tahun|thn|th)\b/);
+    const months = num(/(\d+)\s*(?:bulan|bln|bl)\b/);
+    const days = num(/(\d+)\s*(?:hari|hr)\b/);
+    if (years == null && months == null && days == null) return null;
+    const y = years || 0;
+    const m = months || 0;
+    const d = days || 0;
+    return { years: y, months: m, days: d, ageYears: y + m / 12 + d / 365, source: String(raw).trim() };
+  }
+
+  function getPatientAgeFromIdentity() {
+    const p = pasienAktif();
+    return p ? parseMedisinAge(p.umur) : null;
+  }
+
+  function formatPatientAge(info) {
+    if (!info) return "Umur pasien dari identitas belum terdeteksi";
+    const parts = [];
+    if (info.years) parts.push(`${info.years} tahun`);
+    if (info.months) parts.push(`${info.months} bulan`);
+    if (info.days) parts.push(`${info.days} hari`);
+    return parts.length
+      ? `Umur dari identitas: ${parts.join(", ")}`
+      : "Umur dari identitas: 0 tahun";
+  }
+
+  const isPlausibleWeight = (kg) => Number.isFinite(kg) && kg >= 0.5 && kg < 300;
+
+  // Elemen milik script sendiri (launcher, overlay) tidak boleh ikut dibaca.
+  const isOwnUi = (el) => !!el?.closest?.('#auto-klinik-box, [id^="ak-"]');
+
+  // Cadangan berbasis teks: "Berat badan 18 kg" / "Berat badan 17 18 kg"
+  // (beberapa kunjungan) -> ambil angka terakhir sebelum "kg" (kunjungan terbaru).
+  function parseWeightFromVitalsText(rawText) {
+    const pageText = String(rawText || "")
+      .replace(/ /g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const patterns = [
+      /berat\s*badan[\s:]*((?:[0-9]+(?:[.,][0-9]+)?\s+)*[0-9]+(?:[.,][0-9]+)?)\s*kg/i,
+      /berat\s*badan[\s\S]{0,120}?([0-9]+(?:[.,][0-9]+)?)\s*kg/i,
+    ];
+    for (const re of patterns) {
+      const m = pageText.match(re);
+      if (!m) continue;
+      const values = m[1].split(/\s+/).map(parseWeightKg).filter(isPlausibleWeight);
+      if (values.length) return values[values.length - 1];
+    }
+    return null;
+  }
+
+  // BB terbaru dari tabel Tanda-Tanda Vital (dipulihkan dari v8.1.6).
+  // Tabel bisa berupa <table> maupun <div>; kunjungan terbaru = kolom paling kanan.
+  function getPatientWeightFromLatestVitals() {
+    const kg = parseWeightKg(pasienAktif()?.berat_badan);
+    return isPlausibleWeight(kg) ? { kg, source: "kolom Berat Badan" } : null;
+  }
+
+  // ---------------- TANDA-TANDA VITAL (v9.9) ----------------
+  const VITAL_FIELDS = {
+    temp: { names: ["suhu tubuh", "suhu"], ok: (v) => v >= 30 && v <= 45 },
+    sys: { names: ["sistole", "sistolik", "tekanan darah sistolik"], ok: (v) => v >= 40 && v <= 300 },
+    dia: { names: ["diastole", "diastolik", "tekanan darah diastolik"], ok: (v) => v >= 20 && v <= 200 },
+    pulse: { names: ["nadi", "denyut nadi"], ok: (v) => v >= 20 && v <= 250 },
+    rr: { names: ["frekuensi pernafasan", "frekuensi pernapasan", "pernapasan", "respirasi"], ok: (v) => v >= 4 && v <= 80 },
+    spo2: { names: ["saturasi oksigen", "saturasi", "spo2"], ok: (v) => v >= 50 && v <= 100 },
+  };
+
+  function parseVitalNumber(raw) {
+    const n = Number(String(raw ?? "").trim().replace(",", "."));
+    return String(raw ?? "").trim() !== "" && Number.isFinite(n) ? n : null;
+  }
+
+  // TTV dibaca dari store Medisin (kolom Anamnesa/TTV kunjungan ini).
+  const VITAL_STORE_KEYS = { temp: "suhu", sys: "sistole", dia: "diastole", pulse: "nadi", rr: "respirasi", spo2: "saturasi" };
+  function readVitalsFromPage() {
+    const p = pasienAktif();
+    const out = {};
+    for (const [key, field] of Object.entries(VITAL_FIELDS)) {
+      const v = p ? parseVitalNumber(p[VITAL_STORE_KEYS[key]]) : null;
+      out[key] = v != null && field.ok(v) ? v : null;
+    }
+    return out;
+  }
+
+  // Penilaian TTV (pure, diuji). Ambang: demam ≥37,5 °C; hipertensi ≥140/90
+  // (krisis ≥180/110); hipotensi sistolik <90; takikardia >100; bradikardia <50;
+  // takipnea >24; SpO2 <95 (berat <90). TD/nadi/napas hanya dinilai untuk umur ≥18
+  // (anak memakai nilai normal sesuai umur, tidak dinilai otomatis).
+  function assessVitals(v, ageYears = null) {
+    const vit = v || {};
+    const fmt = (n) => String(n).replace(".", ",");
+    const adult = !(Number.isFinite(ageYears) && ageYears < 18);
+    const flags = [];
+    const add = (level, textMsg) => flags.push({ level, text: textMsg });
+    const res = { fever: false, highFever: false, hypertension: false, crisis: false, flags, bp: null, temp: vit.temp ?? null };
+
+    if (vit.temp != null && vit.temp >= 37.5) {
+      res.fever = true;
+      res.highFever = vit.temp >= 39;
+      add(res.highFever ? "danger" : "warn", `Suhu ${fmt(vit.temp)} °C (${res.highFever ? "demam tinggi" : "demam"})`);
+    }
+    if (vit.sys != null && vit.dia != null) res.bp = `${vit.sys}/${vit.dia}`;
+    if (adult && vit.sys != null) {
+      const dia = vit.dia ?? 0;
+      if (vit.sys >= 180 || dia >= 110) {
+        res.hypertension = res.crisis = true;
+        add("danger", `TD ${res.bp || vit.sys} mmHg: krisis hipertensi, evaluasi segera`);
+      } else if (vit.sys >= 140 || dia >= 90) {
+        res.hypertension = true;
+        add("warn", `TD ${res.bp || vit.sys} mmHg (≥140/90)`);
+      } else if (vit.sys < 90) {
+        add("danger", `TD ${res.bp || vit.sys} mmHg: hipotensi`);
+      }
+    }
+    if (adult && vit.pulse != null) {
+      if (vit.pulse > 100) add("warn", `Nadi ${vit.pulse}/menit (takikardia)`);
+      else if (vit.pulse < 50) add("warn", `Nadi ${vit.pulse}/menit (bradikardia)`);
+    }
+    if (adult && vit.rr != null && vit.rr > 24) add("warn", `Napas ${vit.rr}/menit (takipnea)`);
+    if (vit.spo2 != null && vit.spo2 < 95)
+      add(vit.spo2 < 90 ? "danger" : "warn", `SpO2 ${vit.spo2}% (${vit.spo2 < 90 ? "hipoksia berat" : "rendah"})`);
+    return res;
+  }
+
+  function formatVitalsSummary(v) {
+    const fmt = (n) => String(n).replace(".", ",");
+    const parts = [];
+    if (v?.temp != null) parts.push(`Suhu ${fmt(v.temp)}`);
+    if (v?.sys != null || v?.dia != null) parts.push(`TD ${v.sys ?? "-"}/${v.dia ?? "-"}`);
+    if (v?.pulse != null) parts.push(`Nadi ${v.pulse}`);
+    if (v?.rr != null) parts.push(`RR ${v.rr}`);
+    if (v?.spo2 != null) parts.push(`SpO2 ${v.spo2}%`);
+    return parts.join(" · ");
+  }
+
+  // Isi teks kolom halaman, "" bila tidak ada. Medisin tidak punya kolom teks
+  // "Diagnosa" (diagnosa = baris ICD), jadi label itu selalu "".
+  const FIELD_KEYS = { "keluhan utama": "keluhan", anamnesa: "keluhan_lainya" };
+  function readFieldText(label) {
+    const key = FIELD_KEYS[norm(label)];
+    const p = key ? pasienAktif() : null;
+    return p ? String(p[key] || "").trim() : "";
+  }
+
+  // v0.4.2 (permintaan dokter): keluhan dibaca dari ANAMNESA; Keluhan Utama hanya
+  // cadangan bila Anamnesa kosong.
+  function readChiefComplaintFromPage() {
+    const anamnesis = readFieldText("Anamnesa");
+    if (anamnesis) return { text: anamnesis, source: "Anamnesa" };
+    const chief = readFieldText("Keluhan Utama");
+    if (chief) return { text: chief, source: "Keluhan Utama (Anamnesa kosong)" };
+    return { text: "", source: "" };
+  }
+
+  // Cari template yang rentang BB-nya memuat weightKg (lihat weightBands).
+  function findWeightTemplate(templates, prefix, weightKg) {
+    for (const [key, tpl] of Object.entries(templates)) {
+      if (key.startsWith(prefix) && isWeightInBand(tpl.band, weightKg)) {
+        return { key, tpl };
+      }
+    }
+    return null;
+  }
+
+  // Racikan (RACIKAN_TEMPLATES) berbasis BB.
+  function getWeightTemplate(prefix, weightKg) {
+    return findWeightTemplate(RACIKAN_TEMPLATES, prefix, weightKg);
+  }
+
+  // Syrup non-racikan (RECIPE_TEMPLATES) berbasis BB.
+  function getWeightRecipeTemplate(prefix, weightKg) {
+    return findWeightTemplate(RECIPE_TEMPLATES, prefix, weightKg);
+  }
+
+  function getTemplateMedicineList(templateKey) {
+    const tpl = RECIPE_TEMPLATES[templateKey];
+    if (!tpl?.medicines?.length)
+      throw new Error(`Template resep "${templateKey}" tidak ditemukan.`);
+    return tpl.medicines;
+  }
+
+  function escapePreviewHtml(value) {
+    return String(value ?? "").replace(
+      /[&<>"']/g,
+      (ch) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[ch],
+    );
+  }
+
+  function formatPreviewMedicineRow(m) {
+    const info = ITEMS[m.item] || {};
+    const masterUnit = String(
+      info.unit || getItemUnit(m.item || "") || "",
+    ).trim();
+    const syrup = isSyrupMedication(m) || norm(masterUnit) === "bottle";
+    const doseText = String(m.dose ?? "").trim() || "-";
+    const freqText = String(m.freq ?? "").trim() || "-";
+    const daysText = String(m.days ?? "").trim();
+    const totalText = String(m.total ?? "").trim();
+    const doseUnit = syrup ? "mL" : masterUnit;
+    const durationText = daysText
+      ? `Durasi: ${escapePreviewHtml(daysText)} hari`
+      : "";
+    const quantityText = syrup
+      ? totalText
+        ? `Jumlah resep: ${escapePreviewHtml(totalText)} botol`
+        : ""
+      : totalText
+        ? `Jumlah: ${escapePreviewHtml(totalText)} ${escapePreviewHtml(masterUnit)}`
+        : "";
+    const detail = syrup
+      ? [
+          `Dosis: ${escapePreviewHtml(doseText)} ${escapePreviewHtml(doseUnit)}`,
+          `Frekuensi: ${escapePreviewHtml(freqText)}×/hari`,
+          durationText,
+          quantityText,
+        ]
+          .filter(Boolean)
+          .join("<br>")
+      : [
+          `${escapePreviewHtml(doseText)} ${escapePreviewHtml(doseUnit)} · ${escapePreviewHtml(freqText)}×/hari`,
+          durationText,
+          quantityText,
+        ]
+          .filter(Boolean)
+          .join("<br>");
+    return `<div class="ak-live-preview-row"><div><b>${escapePreviewHtml(info.target || m.item)}</b><small>${escapePreviewHtml(m.sourceLabel || "")}</small></div><div>${detail}<br><small>${escapePreviewHtml(m.instruction || "")}</small></div></div>`;
+  }
+
+  function formatPreviewRacikanRow(r) {
+    const tpl = r.tpl || {};
+    const ingredients = Array.isArray(tpl.ingredients) ? tpl.ingredients : [];
+    const ing = ingredients
+      .map(
+        (i) =>
+          `${escapePreviewHtml(ITEMS[i.item]?.target || i.item)}: ${escapePreviewHtml(i.quantity)}`,
+      )
+      .join("<br>");
+    const details = [
+      tpl.doseFreq ? `Frekuensi: ${escapePreviewHtml(tpl.doseFreq)}` : "",
+      tpl.doseAmount ? `Dosis: ${escapePreviewHtml(tpl.doseAmount)}` : "",
+      tpl.duration ? `Durasi: ${escapePreviewHtml(tpl.duration)} hari` : "",
+      tpl.instruction ? escapePreviewHtml(tpl.instruction) : "",
+    ]
+      .filter(Boolean)
+      .join("<br>");
+    return `<div class="ak-live-preview-racikan"><b>${escapePreviewHtml(tpl.title || tpl.name || r.sourceLabel || "RACIKAN")}</b><div>${ing || "<span>Komponen racikan tidak tersedia.</span>"}</div><small>${details}${r.sourceLabel ? `<br>${escapePreviewHtml(r.sourceLabel)}` : ""}</small></div>`;
+  }
+
+  function buildLivePreviewHtml(preview, title = "PREVIEW OBAT TERPILIH") {
+    const medRows = (preview.medicines || [])
+      .map(formatPreviewMedicineRow)
+      .join("");
+    const racikanRows = (preview.racikans || [])
+      .map(formatPreviewRacikanRow)
+      .join("");
+    const notes = [
+      ...(preview.skipped || []),
+      ...(preview.skippedDuplicates || []).map(
+        (x) => `Duplikat dilewati: ${x.split(": ")[1] || x}`,
+      ),
+      ...(preview.notes || []),
+    ];
+    return `<div class="ak-live-preview-box"><div class="ak-live-preview-head"><div><div class="ak-live-preview-title">${escapePreviewHtml(title)}</div></div><div class="ak-live-preview-count">${(preview.medicines || []).length + (preview.racikans || []).length} pilihan</div></div><div class="ak-preview-section"><div class="ak-rp-label">OBAT NON-RACIKAN (${(preview.medicines || []).length})</div>${medRows || '<div class="ak-preview-empty">Belum ada obat non-racikan yang dipilih.</div>'}</div><div class="ak-preview-section"><div class="ak-rp-label">RACIKAN (${(preview.racikans || []).length})</div>${racikanRows || '<div class="ak-preview-empty">Belum ada racikan yang dipilih.</div>'}</div>${notes.length ? `<div class="ak-preview-notes"><b>Catatan:</b><br>${notes.map((n) => `• ${escapePreviewHtml(n)}`).join("<br>")}</div>` : ""}</div>`;
+  }
+
+  function updateMedicationGroupLivePreview(shade, ageYears) {
+    const box = shade.querySelector("#ak-medgroup-live-preview");
+    if (!box) return;
+    const itemKeys = [...shade.querySelectorAll("[data-med-item]:checked")].map(
+      (x) => x.value,
+    );
+    const actionKeys = [
+      ...shade.querySelectorAll("[data-med-action]:checked"),
+    ].map((x) => x.value);
+    const weight = shade.querySelector("#ak-medgroup-weight");
+    const weightKg =
+      Number.isFinite(ageYears) && ageYears > 17
+        ? null
+        : parseWeightKg(weight?.value || "");
+    if (
+      getMedicationPackageNeedsWeight(ageYears) &&
+      !Number.isFinite(weightKg)
+    ) {
+      box.innerHTML = `<div class="ak-live-preview-box ak-live-preview-waiting"><div class="ak-live-preview-title">PREVIEW OBAT TERPILIH</div><div class="ak-preview-empty">Isi BB dulu.</div></div>`;
+      return;
+    }
+    if (!itemKeys.length && !actionKeys.length) {
+      box.innerHTML = `<div class="ak-live-preview-box ak-live-preview-waiting"><div class="ak-live-preview-title">PREVIEW OBAT TERPILIH</div><div class="ak-preview-empty">Belum ada pilihan.</div></div>`;
+      return;
+    }
+    try {
+      const preview = buildMedicationPackagePreview(
+        itemKeys,
+        weightKg,
+        ageYears,
+        actionKeys,
+      );
+      const group = getMedicationPackageGroup(weightKg, ageYears);
+      const groupText = group === "adult" ? "DEWASA" : "ANAK";
+      box.innerHTML = `<div class="ak-package-preview-meta"><b>Kategori:</b> ${groupText} · <b>BB:</b> ${weightKg == null ? "tidak diperlukan" : `${escapePreviewHtml(String(weightKg).replace(".", ","))} kg`}</div>${buildLivePreviewHtml(preview, "PREVIEW OBAT TERPILIH")}`;
+    } catch (e) {
+      box.innerHTML = `<div class="ak-live-preview-box"><div class="ak-live-preview-title">PREVIEW OBAT TERPILIH</div><div class="ak-preview-notes">Preview belum dapat dibuat: ${escapePreviewHtml(e.message || e)}</div></div>`;
+    }
+  }
+
+  // ============================================================
+  // 6. PAKET RESEP GOLONGAN — audit, resolver, preview, eksekusi, picker
+  // ============================================================
+
+  // Flatten satu kali untuk seluruh engine Paket Resep Golongan.
+  // sourceGroup hanya metadata tampilan/diagnostik; logika resep tidak bergantung pada golongan.
+  const MEDICATION_ITEMS_FLAT = MEDICATION_GROUP_PACKAGES.flatMap((group) =>
+    group.items.map((item) => ({ ...item, sourceGroup: group.label })),
+  );
+
+  // Kata kunci dinegasikan: "tidak demam", "tanpa batuk", "tidak disertai mual",
+  // "batuk tidak berdahak", "demam (-)", "mual disangkal".
+  function isKeywordNegated(lowerText, start, end) {
+    let wordStart = start;
+    while (wordStart > 0 && /[a-z0-9]/.test(lowerText[wordStart - 1])) wordStart--;
+    const before = lowerText
+      .slice(Math.max(0, wordStart - 30), wordStart)
+      .split(/[,.;:\n()]/)
+      .pop();
+    if (
+      /(?:^|\s)(?:tidak|tdk|tak|tanpa|bukan|gak|ga|nggak|ngga|belum|disangkal)\s+(?:ada\s+)?(?:[a-z]+\s+)?$/.test(
+        before,
+      )
+    )
+      return true;
+    const after = lowerText.slice(end, end + 40);
+    // v9.4: penanda negasi boleh berjarak 2 kata ("alergi obat disangkal", "demam tidak ada").
+    return /^[a-z]*(?:\s+[a-z]+){0,2}\s*(?::\s*)?(?:\(\s*-\s*\)|\(\s*neg|-\s*(?:[,.;\n]|$)|negatif|disangkal|tidak\s+ada)/.test(
+      after,
+    );
+  }
+
+  // Saran pilihan obat dari teks anamnesa untuk kategori `group` (adult/child).
+  // Hasil: keys (urut, unik, sesuai kategori), matches (alasan), notes.
+  // options.diagnosis = entri DIAGNOSIS_TEMPLATES (dari RESUME + DIAGNOSIS):
+  // obat/tindakannya ikut disarankan, ditampilkan sebagai "Diagnosis ...".
+  function suggestMedicationsFromAnamnesis(rawText, group, options = {}) {
+    const result = { keys: [], actionKeys: [], matches: [], notes: [] };
+    const lower = String(rawText || "").toLowerCase().replace(/ /g, " ");
+    // v0.7.0: options.diagnoses = semua diagnosis terisi; obat tiap diagnosis ikut disarankan.
+    const dxs = (options.diagnoses || [options.diagnosis]).filter((d, i, a) => d && a.indexOf(d) === i);
+    const dx = dxs[0] || null;
+    const vit = options.vitals || null; // hasil assessVitals()
+    if ((!lower.trim() && !dx && !vit?.fever) || (group !== "adult" && group !== "child")) return result;
+
+    for (const dx of dxs) {
+      const keys = dx[group] || [];
+      const actions = dx.actions || [];
+      result.matches.push({ label: `Diagnosis ${dx.label}`, keyword: dx.icd[0], keys: [...keys], actions: [...actions] });
+      for (const k of keys) if (!result.keys.includes(k)) result.keys.push(k);
+      for (const a of actions) if (!result.actionKeys.includes(a)) result.actionKeys.push(a);
+    }
+
+    for (const rule of ANAMNESIS_SUGGESTION_RULES) {
+      const keys = rule[group] || [];
+      const actions = rule.actions || [];
+      if (!keys.length && !actions.length) continue;
+      const re = new RegExp(rule.pattern.source, "g");
+      let m;
+      let keyword = null;
+      while ((m = re.exec(lower))) {
+        if (!m[0]) {
+          re.lastIndex++;
+          continue;
+        }
+        if (!isKeywordNegated(lower, m.index, m.index + m[0].length)) {
+          keyword = m[0];
+          break;
+        }
+      }
+      if (!keyword) continue;
+      result.matches.push({ label: rule.label, keyword, keys: [...keys], actions: [...actions] });
+      for (const k of keys) if (!result.keys.includes(k)) result.keys.push(k);
+      for (const a of actions) if (!result.actionKeys.includes(a)) result.actionKeys.push(a);
+    }
+
+    // v9.9: TTV — suhu ≥37,5 °C = demam walau tidak tertulis di keluhan.
+    if (vit?.fever) {
+      const k = group === "adult" ? "PARACETAMOL_DEWASA" : "PARACETAMOL_ANAK";
+      result.matches.push({ label: "TTV: demam", keyword: `suhu ${String(vit.temp).replace(".", ",")} °C`, keys: [k], actions: [] });
+      if (!result.keys.includes(k)) result.keys.push(k);
+    }
+
+    for (const o of ANAMNESIS_SUGGESTION_OVERLAPS) {
+      if (!result.keys.includes(o.when) || !o.drop.some((k) => result.keys.includes(k)))
+        continue;
+      result.keys = result.keys.filter((k) => !o.drop.includes(k));
+      for (const match of result.matches)
+        match.keys = match.keys.filter((k) => !o.drop.includes(k));
+      result.notes.push(o.note);
+    }
+
+    // v9.9: TTV sebagai pertimbangan terapi (catatan, tidak mencentang obat).
+    if (vit?.hypertension && group === "adult") {
+      if (!result.keys.includes("AMLODIPINE_5") && !result.keys.includes("AMLODIPINE_10"))
+        result.notes.push(`TD ${vit.bp || ""} tinggi: pertimbangkan hipertensi. Antihipertensi tidak dicentang otomatis dari TTV saja.`);
+      const nsaid = result.keys.filter((k) => ["DICLOFENAC_50", "IBUPROFEN_400"].includes(k));
+      if (nsaid.length)
+        result.notes.push(`TD tinggi: ${nsaid.map((k) => (k === "IBUPROFEN_400" ? "Ibuprofen" : "Diclofenac")).join(" & ")} (NSAID) dapat menaikkan tekanan darah; pertimbangkan Paracetamol.`);
+    }
+    if (vit?.crisis) result.notes.push("Krisis hipertensi: evaluasi/rujuk segera sebelum resep rutin.");
+    if (vit?.fever && result.actionKeys.includes("IMUNISASI"))
+      result.notes.push(`Suhu ${String(vit.temp).replace(".", ",")} °C: pertimbangkan menunda imunisasi sampai tidak demam.`);
+
+    result.keys = result.keys.filter((k) =>
+      isMedicationItemAllowedForGroup(
+        MEDICATION_ITEMS_FLAT.find((x) => x.key === k),
+        group,
+      ),
+    );
+    return result;
+  }
+
+  // Validasi terpusat untuk Paket Resep Golongan. Audit ini memastikan semua
+  // referensi item obat/racikan merujuk ke master ITEMS atau template resep
+  // yang pada akhirnya hanya memakai item yang terdaftar di ITEMS.
+  function auditMedicationPackageDefinitions() {
+    const errors = [];
+    const warnings = [];
+    const seenKeys = new Map();
+
+    const assertItem = (itemKey, context) => {
+      if (!itemKey || !ITEMS[itemKey]) {
+        errors.push(
+          `${context}: item master "${itemKey || "(kosong)"}" tidak ditemukan di ITEMS.`,
+        );
+        return false;
+      }
+      if (!ITEMS[itemKey].target) {
+        errors.push(`${context}: target untuk ITEMS.${itemKey} kosong.`);
+        return false;
+      }
+      return true;
+    };
+
+    const auditMedicines = (medicines, context) => {
+      for (const m of medicines || []) assertItem(m?.item, context);
+    };
+
+    const auditTemplate = (tpl, context) => {
+      if (!tpl) {
+        errors.push(`${context}: template tidak ditemukan.`);
+        return;
+      }
+      auditMedicines(tpl.medicines, context);
+      for (const ingredient of tpl.ingredients || [])
+        assertItem(ingredient?.item, context);
+    };
+
+    for (const item of MEDICATION_ITEMS_FLAT) {
+      if (seenKeys.has(item.key)) {
+        errors.push(
+          `Key pilihan duplikat: ${item.key} (${seenKeys.get(item.key)} dan ${item.sourceGroup}).`,
+        );
+      } else {
+        seenKeys.set(item.key, item.sourceGroup);
+      }
+      if (!["adult", "child", "all"].includes(item.population)) {
+        errors.push(`${item.key}: population harus adult, child, atau all.`);
+      }
+
+      switch (item.type) {
+        case "recipe":
+          auditTemplate(
+            RECIPE_TEMPLATES[item.recipeKey],
+            `${item.key} → ${item.recipeKey}`,
+          );
+          break;
+        case "recipe-inline":
+          auditMedicines(
+            item.medicine ? [item.medicine] : [],
+            `${item.key} → recipe-inline`,
+          );
+          break;
+        case "racikan-static":
+          auditTemplate(item.tpl, `${item.key} → racikan-static`);
+          break;
+        case "weight-racikan": {
+          const matches = Object.entries(RACIKAN_TEMPLATES).filter(([key]) =>
+            key.startsWith(item.prefix || ""),
+          );
+          if (!matches.length)
+            warnings.push(
+              `${item.key}: belum ada template berat badan untuk prefix ${item.prefix || "(kosong)"}.`,
+            );
+          matches.forEach(([key, tpl]) =>
+            auditTemplate(tpl, `${item.key} → ${key}`),
+          );
+          break;
+        }
+        case "weight-syrup": {
+          const matches = Object.entries(RECIPE_TEMPLATES).filter(([key]) =>
+            key.startsWith(item.prefix || ""),
+          );
+          if (!matches.length)
+            warnings.push(
+              `${item.key}: belum ada template syrup untuk prefix ${item.prefix || "(kosong)"}.`,
+            );
+          matches.forEach(([key, tpl]) =>
+            auditTemplate(tpl, `${item.key} → ${key}`),
+          );
+          break;
+        }
+        case "age-antacid":
+        case "age-zinc":
+          // Template dibuat dinamis melalui resolver; target komponennya diaudit
+          // dari object resep yang dihasilkan saat runtime.
+          break;
+        default:
+          errors.push(
+            `${item.key}: type ${item.type || "(kosong)"} tidak dikenali.`,
+          );
+      }
+    }
+
+    for (const dx of DIAGNOSIS_TEMPLATES) {
+      for (const a of dx.actions || [])
+        if (!PACKAGE_ACTIONS.some((x) => x.key === a))
+          errors.push(`Diagnosis ${dx.key}: tindakan ${a} tidak ada.`);
+      for (const group of ["adult", "child"])
+        for (const key of dx[group] || []) {
+          const item = MEDICATION_ITEMS_FLAT.find((x) => x.key === key);
+          if (!isMedicationItemAllowedForGroup(item, group))
+            errors.push(`Diagnosis ${dx.key}: obat ${key} tidak tersedia untuk ${group}.`);
+        }
+    }
+    for (const rule of ANAMNESIS_SUGGESTION_RULES) {
+      for (const a of rule.actions || []) {
+        if (!PACKAGE_ACTIONS.some((x) => x.key === a))
+          errors.push(`Saran keluhan "${rule.label}": tindakan ${a} tidak ada di PACKAGE_ACTIONS.`);
+      }
+      for (const group of ["adult", "child"]) {
+        for (const key of rule[group] || []) {
+          const item = MEDICATION_ITEMS_FLAT.find((x) => x.key === key);
+          if (!isMedicationItemAllowedForGroup(item, group))
+            errors.push(
+              `Saran anamnesa "${rule.label}": ${key} ${item ? `tidak tersedia untuk ${group}` : "tidak ada di Paket Golongan"}.`,
+            );
+        }
+      }
+    }
+
+    // Audit target seluruh template aktif yang dipakai oleh Paket Resep Golongan.
+    for (const [key, tpl] of Object.entries(RECIPE_TEMPLATES)) {
+      if (
+        MEDICATION_ITEMS_FLAT.some(
+          (x) => x.recipeKey === key || (x.prefix && key.startsWith(x.prefix)),
+        )
+      ) {
+        auditTemplate(tpl, `RECIPE_TEMPLATES.${key}`);
+      }
+    }
+
+    return { ok: errors.length === 0, errors, warnings };
+  }
+
+  // Uji resolver dinamis dengan sampel batas umur/BB. Ini menangkap error yang
+  // tidak terlihat hanya dengan memeriksa keberadaan key di master ITEMS.
+  function auditMedicationPackageRuntimeResolvers() {
+    const errors = [];
+    const dynamicItems = MEDICATION_ITEMS_FLAT.filter((x) =>
+      ["weight-racikan", "weight-syrup", "age-antacid", "age-zinc"].includes(
+        x.type,
+      ),
+    );
+    const samplesByType = {
+      "weight-racikan": [
+        { weightKg: 1, ageYears: 1 },
+        { weightKg: 5, ageYears: 3 },
+        { weightKg: 10, ageYears: 5 },
+        { weightKg: 20, ageYears: 10 },
+        { weightKg: 40, ageYears: 17 },
+      ],
+      "weight-syrup": [
+        { weightKg: 1, ageYears: 1 },
+        { weightKg: 5, ageYears: 3 },
+        { weightKg: 10, ageYears: 5 },
+        { weightKg: 20, ageYears: 10 },
+        { weightKg: 40, ageYears: 17 },
+      ],
+      "age-antacid": [
+        { weightKg: 10, ageYears: 4 },
+        { weightKg: 20, ageYears: 10 },
+        { weightKg: 30, ageYears: 17 },
+      ],
+      "age-zinc": [
+        { weightKg: 5, ageYears: 0.25 },
+        { weightKg: 10, ageYears: 1 },
+        { weightKg: 20, ageYears: 10 },
+      ],
+    };
+    for (const item of dynamicItems) {
+      for (const sample of samplesByType[item.type] || []) {
+        try {
+          const resolved = resolveMedicationItem(
+            item,
+            sample.weightKg,
+            sample.ageYears,
+          );
+          if (resolved.note) continue; // sample boleh berada di luar rentang template
+          for (const m of resolved.medicines || []) {
+            if (!ITEMS[m.item] || !ITEMS[m.item].target)
+              errors.push(
+                `${item.key}: resolver runtime menghasilkan item/target tidak valid ${m.item || "(kosong)"}.`,
+              );
+          }
+          for (const rc of resolved.racikans || []) {
+            const tpl = rc?.tpl;
+            if (!tpl) {
+              errors.push(
+                `${item.key}: resolver runtime menghasilkan racikan kosong.`,
+              );
+              continue;
+            }
+            // v9: dulu memanggil auditTemplate (fungsi lokal milik audit lain)
+            // sehingga selalu ReferenceError dan mencetak error palsu di console.
+            for (const ing of tpl.ingredients || []) {
+              if (!ITEMS[ing?.item]?.target)
+                errors.push(
+                  `${item.key}: racikan runtime memakai item tidak valid ${ing?.item || "(kosong)"}.`,
+                );
+            }
+          }
+        } catch (e) {
+          errors.push(`${item.key}: resolver runtime gagal (${e.message}).`);
+        }
+      }
+    }
+    return errors;
+  }
+
+  const MEDICATION_PACKAGE_AUDIT = auditMedicationPackageDefinitions();
+  if (
+    !MEDICATION_PACKAGE_AUDIT.ok ||
+    MEDICATION_PACKAGE_AUDIT.warnings.length
+  ) {
+    console.groupCollapsed("[AUTO KLINIK] Audit Paket Resep Golongan");
+    if (MEDICATION_PACKAGE_AUDIT.errors.length)
+      console.error(...MEDICATION_PACKAGE_AUDIT.errors);
+    if (MEDICATION_PACKAGE_AUDIT.warnings.length)
+      console.warn(...MEDICATION_PACKAGE_AUDIT.warnings);
+    console.groupEnd();
+  }
+
+  function getMedicationPackageGroup(weightKg, ageYears) {
+    if (Number.isFinite(ageYears) && ageYears > 17) return "adult";
+    if (!Number.isFinite(weightKg)) return null;
+    return weightKg > 40 ? "adult" : "child";
+  }
+
+  function getMedicationPackageNeedsWeight(ageYears) {
+    return !(Number.isFinite(ageYears) && ageYears > 17);
+  }
+
+  function isMedicationItemAllowedForGroup(item, group) {
+    return !!item && (item.population === group || item.population === "all");
+  }
+
+  function resolveMedicationItem(item, weightKg, ageYears) {
+    if (!item)
+      return {
+        medicines: [],
+        racikans: [],
+        note: "Pilihan obat tidak ditemukan.",
+      };
+
+    switch (item.type) {
+      case "recipe":
+        return {
+          medicines: getTemplateMedicineList(item.recipeKey).map((m) => ({
+            ...m,
+          })),
+          racikans: [],
+        };
+      case "recipe-inline":
+        return {
+          medicines: item.medicine ? [{ ...item.medicine }] : [],
+          racikans: [],
+        };
+      case "racikan-static":
+        return item.tpl
+          ? { medicines: [], racikans: [{ tpl: item.tpl }] }
+          : {
+              medicines: [],
+              racikans: [],
+              note: `${item.label}: template racikan tidak tersedia`,
+            };
+      case "weight-racikan": {
+        const found = getWeightTemplate(item.prefix, weightKg);
+        return found
+          ? { medicines: [], racikans: [{ tpl: found.tpl }] }
+          : {
+              medicines: [],
+              racikans: [],
+              note: `${item.label}: BB ${weightKg} kg di luar template`,
+            };
+      }
+      case "weight-syrup": {
+        const found = getWeightRecipeTemplate(item.prefix, weightKg);
+        return found
+          ? { medicines: [...(found.tpl.medicines || [])], racikans: [] }
+          : {
+              medicines: [],
+              racikans: [],
+              note: `${item.label}: BB ${weightKg} kg di luar template`,
+            };
+      }
+      case "age-antacid": {
+        const recipe = makeNyeriUluHatiAnakRecipe(ageYears);
+        return recipe
+          ? { medicines: [...(recipe.medicines || [])], racikans: [] }
+          : {
+              medicines: [],
+              racikans: [],
+              note: `${item.label}: umur <4 tahun belum memiliki template`,
+            };
+      }
+      case "age-zinc": {
+        const recipe = makeZincChildRecipe(ageYears);
+        return recipe
+          ? { medicines: [...(recipe.medicines || [])], racikans: [] }
+          : {
+              medicines: [],
+              racikans: [],
+              note: `${item.label}: umur belum terbaca`,
+            };
+      }
+      default:
+        return {
+          medicines: [],
+          racikans: [],
+          note: `${item.label}: tipe template ${item.type || "(kosong)"} tidak dikenali`,
+        };
+    }
+  }
+
+  const MEDICATION_PACKAGE_RUNTIME_AUDIT =
+    auditMedicationPackageRuntimeResolvers();
+  if (MEDICATION_PACKAGE_RUNTIME_AUDIT.length) {
+    console.groupCollapsed(
+      "[AUTO KLINIK] Audit Runtime Resolver Paket Resep Golongan",
+    );
+    console.error(...MEDICATION_PACKAGE_RUNTIME_AUDIT);
+    console.groupEnd();
+  }
+
+  function buildMedicationPackagePreview(
+    itemKeys,
+    weightKg,
+    ageYears,
+    actionKeys = [],
+  ) {
+    const group = getMedicationPackageGroup(weightKg, ageYears);
+    if (!group) throw new Error("Kategori pasien belum dapat ditentukan.");
+    const selected = MEDICATION_ITEMS_FLAT.filter((x) =>
+      itemKeys.includes(x.key),
+    );
+    const preview = { medicines: [], racikans: [], notes: [], selected: [] };
+    const seenMedicine = new Set();
+    const seenRacikan = new Set();
+    const identity = (m, sourceLabel = "") => {
+      const item = String(m?.item || "")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
+      if (!item) return "";
+      const form = String(ITEMS?.[m?.item]?.unit || "")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
+      const source = String(sourceLabel || "")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
+      return `${source}__${item}__${form}__${String(m?.freq || "")}__${String(m?.dose || "")}__${String(m?.days || "")}__${String(m?.total || "")}__${String(
+        m?.instruction || "",
+      )
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")}`;
+    };
+    for (const item of selected) {
+      if (!isMedicationItemAllowedForGroup(item, group)) {
+        preview.notes.push(
+          `${item.label}: tidak tersedia untuk kategori ${group === "adult" ? "DEWASA" : "ANAK"}`,
+        );
+        continue;
+      }
+      const r = resolveMedicationItem(item, weightKg, ageYears);
+      if (r.note) {
+        preview.notes.push(r.note);
+        continue;
+      }
+      const meds = [];
+      for (const m of r.medicines || []) {
+        const id = identity(m, item.label);
+        if (id && seenMedicine.has(id)) {
+          preview.notes.push(`Duplikat dilewati: ${item.label} → ${m.item}`);
+          continue;
+        }
+        if (id) seenMedicine.add(id);
+        meds.push({ ...m, sourceLabel: item.label });
+        preview.medicines.push({ ...m, sourceLabel: item.label });
+      }
+      for (const rc of r.racikans || []) {
+        const rid = String(
+          rc.tpl?.title || rc.tpl?.name || item.key,
+        ).toUpperCase();
+        if (seenRacikan.has(rid)) {
+          preview.notes.push(`Duplikat racikan dilewati: ${item.label}`);
+          continue;
+        }
+        seenRacikan.add(rid);
+        preview.racikans.push({ tpl: rc.tpl, sourceLabel: item.label });
+      }
+      if (meds.length || (r.racikans || []).length)
+        preview.selected.push(item.label);
+    }
+    for (const actionKey of [...new Set(actionKeys || [])]) {
+      const action = PACKAGE_ACTIONS.find((x) => x.key === actionKey);
+      const tpl = action ? RECIPE_TEMPLATES[action.key] : null;
+      if (!action || !tpl?.medicines?.length) {
+        preview.notes.push(`Tindakan ${actionKey}: template belum tersedia`);
+        continue;
+      }
+      let added = false;
+      for (const m of tpl.medicines) {
+        const id = identity(m, `BHP ${action.label}`);
+        if (id && seenMedicine.has(id)) {
+          preview.notes.push(
+            `Duplikat tindakan dilewati: ${action.label} → ${m.item}`,
+          );
+          continue;
+        }
+        if (id) seenMedicine.add(id);
+        preview.medicines.push({
+          ...m,
+          sourceLabel: `BHP ${action.label}`,
+        });
+        added = true;
+      }
+      if (added) preview.selected.push(`Tindakan: ${action.label}`);
+    }
+    return preview;
+  }
+
+  async function runMedicationGroupItems(
+    itemKeys,
+    weightKg,
+    ageYears,
+    actionKeys = [],
+  ) {
+    const group = getMedicationPackageGroup(weightKg, ageYears);
+    if (!group) throw new Error("Kategori pasien belum dapat ditentukan.");
+
+    const selected = MEDICATION_ITEMS_FLAT.filter((x) =>
+      itemKeys.includes(x.key),
+    );
+    if (!selected.length && !actionKeys.length)
+      throw new Error("Pilih minimal satu obat atau tindakan.");
+
+    const seenMedicines = new Set();
+    const failedItems = [];
+    const seenRacikan = new Set();
+    const skipped = [];
+    const identity = (m, sourceLabel = "") => {
+      // Deduplikasi berbasis entri resep lengkap + sumber pilihan, bukan hanya zat/item.
+      // Dengan demikian obat tunggal dan komponen racikan/alternatif yang sengaja dipilih tidak saling menghapus.
+      return JSON.stringify({
+        source: sourceLabel,
+        item: m?.item || "",
+        freq: m?.freq || "",
+        dose: m?.dose || "",
+        days: m?.days || "",
+        total: m?.total || "",
+        instruction: m?.instruction || "",
+      });
+    };
+
+    const addUniqueMedicines = async (list, label) => {
+      const unique = (list || []).filter((m) => {
+        const id = identity(m, label);
+        if (!id) return true;
+        if (seenMedicines.has(id)) {
+          skipped.push(`${label}: ${m.item}`);
+          return false;
+        }
+        seenMedicines.add(id);
+        return true;
+      });
+      if (!unique.length) return;
+      // v10.0.5: satu obat gagal tidak menghentikan obat berikutnya.
+      try {
+        await addRecipeItems(unique);
+      } catch (e) {
+        if (findRacikanModal()) throw e; // form racikan terbuka: berhenti
+        failedItems.push(`${label} (${String(e?.message || e).replace(/\.$/, "")})`);
+      }
+    };
+
+    // v10.1.0: tindakan (imunisasi, cek gula/kolesterol/asam urat) diisi di bagian BHP,
+    // LEBIH DULU, karena dialog BHP tidak bisa dibuka selama dialog Resep terbuka.
+    const bhp = collectBhpForActions(actionKeys);
+    for (const actionKey of [...new Set(actionKeys || [])]) {
+      if (!PACKAGE_ACTIONS.some((x) => x.key === actionKey) || !RECIPE_TEMPLATES[actionKey]?.medicines?.length)
+        skipped.push(`Tindakan ${actionKey}: template belum tersedia`);
+    }
+    if (bhp.items.length) {
+      try {
+        const notes = await addBhpItems(bhp.items);
+        if (notes.length) skipped.push(`BHP: ${notes.join(", ")}`);
+      } catch (e) {
+        failedItems.push(`BHP ${bhp.labels.join(" + ")} (${String(e?.message || e).replace(/\.$/, "")})`);
+      }
+    }
+
+    // Dipanggil di dalam runTask (kunci proses + status tombol ditangani di sana).
+    for (const item of selected) {
+      if (!isMedicationItemAllowedForGroup(item, group)) {
+        skipped.push(
+          `${item.label}: tidak tersedia untuk kategori ${group === "adult" ? "DEWASA" : "ANAK"}`,
+        );
+        continue;
+      }
+
+      const resolved = resolveMedicationItem(item, weightKg, ageYears);
+      if (resolved.note) {
+        skipped.push(resolved.note);
+        continue;
+      }
+
+      await addUniqueMedicines(resolved.medicines, item.label);
+
+      for (const rc of resolved.racikans || []) {
+        const rid = String(
+          rc.tpl?.title || rc.tpl?.name || item.key,
+        ).toUpperCase();
+        if (seenRacikan.has(rid)) {
+          skipped.push(`${item.label}: duplikat racikan`);
+          continue;
+        }
+        seenRacikan.add(rid);
+        await addRacikan(rc.tpl);
+      }
+    }
+
+    let msg = `PAKET RESEP selesai: kategori ${group === "adult" ? "DEWASA" : "ANAK"}. Review resep, lalu SIMPAN SEMUA (Alt+S).`;
+    try {
+      if ((await fillEducation()) === true) msg += " Edukasi terisi.";
+    } catch (_) {}
+    msg += unsavedServiceNote();
+    if (failedItems.length) msg += ` GAGAL DIINPUT (tambahkan manual): ${failedItems.join("; ")}.`;
+    if (skipped.length) msg += ` Catatan: ${skipped.join(", ")}.`;
+    notify(msg, failedItems.length ? "error" : skipped.length ? "warn" : "success", failedItems.length ? 25000 : 12000);
+  }
+
+  // options.diagnosis: diagnosis yang baru diisi RESUME + DIAGNOSIS (obatnya ikut dicentang).
+  function renderMedicationGroupPackagePicker(options = {}) {
+    // Diagnosis yang sudah terinput di halaman (kartu ICD + kolom Diagnosa).
+    const pageIcd = selectedIcdEntries();
+    const pageDiagnosisText = readFieldText("Diagnosa");
+    const icdDiagnosis =
+      pageIcd
+        .map((e) => DIAGNOSIS_TEMPLATES.find((d) => d.icd.some((c) => icdCodeMatches(c, e.code))))
+        .find(Boolean) || null;
+    let presetDiagnosis = options.diagnosis || icdDiagnosis;
+    const old = document.getElementById("ak-medgroup-picker");
+    if (old) old.remove();
+    // Baca halaman SEBELUM overlay dipasang, agar kolom milik overlay tidak ikut terbaca.
+    const ageInfo = getPatientAgeFromIdentity();
+    const weightInfo = getPatientWeightFromLatestVitals();
+    const pageComplaint = readChiefComplaintFromPage();
+    const pageVitals = readVitalsFromPage();
+    const vitalsAssessment = assessVitals(pageVitals, ageInfo?.ageYears ?? null);
+    const shade = document.createElement("div");
+    shade.id = "ak-medgroup-picker";
+    shade.innerHTML = `<div class="ak-rp-card ak-medgroup-card akm">
+  <div class="akm-head">
+    <div class="akm-head-text"><div class="ak-rp-title">💊 Paket Resep</div><div class="ak-rp-sub">Obat <em class="ak-suggest-badge">saran</em> sudah dicentang · review sebelum input</div></div>
+    <button class="ak-rp-x" type="button" aria-label="Tutup">×</button>
+  </div>
+  <div class="akm-body">
+   <div class="akm-col akm-col-left">
+    <section class="akm-sec akm-pasien">
+      <div class="akm-sec-title">👤 Pasien</div>
+      <div class="akm-stats">
+        <div class="akm-stat"><span>Umur</span><b id="ak-medgroup-age">…</b></div>
+        <label class="akm-stat akm-stat-bb" id="ak-medgroup-bb-step"><span>Berat badan</span><span class="akm-bb"><input id="ak-medgroup-weight" type="number" min="0.1" max="499" step="0.1" inputmode="decimal" placeholder="—"><i>kg</i></span></label>
+        <div class="akm-stat"><span>Kategori</span><b id="ak-medgroup-group-status" class="akm-cat">—</b></div>
+      </div>
+      <div id="ak-medgroup-weight-source" class="akm-hint"></div>
+      <div id="ak-medgroup-vitals" class="akm-vitals"></div>
+    </section>
+    <section class="akm-sec akm-diagnosis">
+      <div class="akm-sec-title">🩺 Diagnosis</div>
+      <div id="ak-medgroup-dx" class="akm-dx"></div>
+      <div id="ak-medgroup-dx-preview"></div>
+      <div id="ak-medgroup-dx-choices" class="akm-dxc"></div>
+      <div class="akm-dxs">
+        <input id="ak-medgroup-dx-search" type="search" autocomplete="off" placeholder="🔍 Cari diagnosis / ICD (mis. gastritis, K29)">
+        <div id="ak-medgroup-dx-results" class="akm-dxs-res"></div>
+      </div>
+    </section>
+    <section class="akm-sec akm-anamnesa">
+      <div class="akm-sec-title">📝 Keluhan (Anamnesa) <button id="ak-medgroup-resuggest" class="akm-link" type="button">↻ Baca ulang</button></div>
+      <textarea id="ak-medgroup-anamnesis" class="ak-package-anamnesis" rows="3" placeholder="Ketik keluhan pasien…"></textarea>
+      <div id="ak-medgroup-anamnesis-source" class="akm-hint"></div>
+      <div id="ak-medgroup-sync" class="akm-hint akm-sync"></div>
+      <div id="ak-medgroup-suggestion" class="ak-package-suggestion"></div>
+    </section>
+    <section class="akm-sec akm-preview">
+      <div id="ak-medgroup-live-preview" class="ak-package-live-preview"></div>
+    </section>
+   </div>
+   <div class="akm-col akm-col-right">
+    <section class="akm-sec akm-obat">
+      <div class="akm-sec-title">💊 Pilih obat <span id="ak-medgroup-count" class="akm-count"></span></div>
+      <div id="ak-medgroup-items" class="akm-items"></div>
+    </section>
+    <section class="akm-sec akm-tindakan">
+      <div class="akm-sec-title">🩹 Tindakan / BHP</div>
+      <div class="akm-choices" id="ak-medgroup-actions"></div>
+    </section>
+   </div>
+  </div>
+  <div class="akm-foot">
+    <div id="ak-medgroup-selected" class="akm-selected">Belum ada obat dipilih</div>
+    <div class="akm-actions"><button class="akm-btn-ghost" id="ak-medgroup-close" type="button">Tutup</button><button class="akm-btn-primary" id="ak-medgroup-run" type="button">✓ INPUT RESEP</button></div>
+  </div>
+</div>`;
+    document.body.appendChild(shade);
+    const onKey = (ev) => {
+      if (ev.key === "Escape") close();
+    };
+    const close = () => {
+      document.removeEventListener("keydown", onKey, true);
+      shade.remove();
+    };
+    document.addEventListener("keydown", onKey, true);
+    shade.querySelector(".ak-rp-x")?.addEventListener("click", close);
+    shade.querySelector("#ak-medgroup-close")?.addEventListener("click", close);
+    // Sorotan pilihan tercentang (pengganti :has() untuk browser HP lama).
+    const markChecked = () =>
+      shade.querySelectorAll(".ak-package-choice").forEach((l) => {
+        l.classList.toggle("akm-on", !!l.querySelector("input:checked"));
+      });
+    shade.addEventListener("change", markChecked);
+    new MutationObserver(markChecked).observe(shade, { childList: true, subtree: true });
+    const weight = shade.querySelector("#ak-medgroup-weight"),
+      weightSourceEl = shade.querySelector("#ak-medgroup-weight-source"),
+      status = shade.querySelector("#ak-medgroup-group-status"),
+      ageEl = shade.querySelector("#ak-medgroup-age"),
+      anamnesisEl = shade.querySelector("#ak-medgroup-anamnesis"),
+      anamnesisSourceEl = shade.querySelector("#ak-medgroup-anamnesis-source"),
+      suggestionEl = shade.querySelector("#ak-medgroup-suggestion"),
+      items = shade.querySelector("#ak-medgroup-items"),
+      countEl = shade.querySelector("#ak-medgroup-count"),
+      selectedEl = shade.querySelector("#ak-medgroup-selected");
+    let ageYears = ageInfo?.ageYears ?? null;
+    if (ageInfo) {
+      ageEl.textContent =
+        [ageInfo.years ? `${ageInfo.years} th` : "", ageInfo.months ? `${ageInfo.months} bln` : ""]
+          .filter(Boolean)
+          .join(" ") || `${ageInfo.days || 0} hari`;
+    } else {
+      ageEl.textContent = "Tidak terbaca";
+      ageEl.classList.add("akm-missing");
+    }
+    const weightHint = weightInfo
+      ? `BB dari ${weightInfo.source}.`
+      : "BB belum ada, isi manual.";
+    if (weightInfo) weight.value = String(weightInfo.kg);
+    const setAnamnesisSource = (source) => {
+      anamnesisSourceEl.textContent = source
+        ? `Dari ${source} · diedit = Keluhan Utama & Anamnesa ikut diganti`
+        : "Anamnesa kosong · ketik keluhan";
+    };
+    {
+      const summary = formatVitalsSummary(pageVitals);
+      const flagsHtml = vitalsAssessment.flags
+        .map((f) => `<span class="akm-vflag ${f.level}">${escapePreviewHtml(f.text)}</span>`)
+        .join(" ");
+      shade.querySelector("#ak-medgroup-vitals").innerHTML = summary
+        ? `<b>TTV:</b> ${escapePreviewHtml(summary)}${flagsHtml ? `<div>${flagsHtml}</div>` : ""}`
+        : '<span class="akm-hint">TTV kunjungan ini belum terbaca.</span>';
+    }
+    // v0.7.0: obat mengikuti SEMUA diagnosis terisi (+ diagnosis dari keluhan).
+    const medDiagnoses = () => [presetDiagnosis, ...pageDiagnosisTemplates()].filter((d, i, a) => d && a.indexOf(d) === i);
+    const renderDx = (icdList, diagText) => {
+      const savedCodes = savedIcdCodesOnPage();
+      const rows = icdList.map(
+        (e) =>
+          `<div class="akm-dx-row"><span><b>${escapePreviewHtml(e.code)}</b> <span class="akm-dx-role">${e.role}</span> ${escapePreviewHtml(e.name)}</span>` +
+          (savedCodes.has(e.code)
+            ? '<span class="akm-dx-saved" title="Sudah tersimpan; hapus lewat ikon hapus di bagian Diagnosa Medisin">tersimpan</span>'
+            : `<button type="button" class="akm-dx-del" data-dx-del="${escapePreviewHtml(e.code)}" title="Hapus diagnosa ini (belum disimpan)" aria-label="Hapus ${escapePreviewHtml(e.code)}">✕</button>`) +
+          `</div>`,
+      );
+      if (diagText) rows.push(`<div class="akm-hint">Diagnosa: ${escapePreviewHtml(diagText)}</div>`);
+      const meds = medDiagnoses();
+      if (meds.length)
+        rows.push(`<div class="akm-hint">Obat ikut: <b>${escapePreviewHtml(meds.map((d) => d.label).join(" + "))}</b></div>`);
+      shade.querySelector("#ak-medgroup-dx").innerHTML = rows.length
+        ? rows.join("")
+        : '<span class="akm-hint akm-missing">Belum ada diagnosa.</span>';
+    };
+    renderDx(pageIcd, pageDiagnosisText);
+    anamnesisEl.value = pageComplaint.text;
+
+    // v10.1.1: preview diagnosis yang akan dipilih di halaman, langsung saat keluhan
+    // diketik. Setelah keluhan diubah dokter, saran obat ikut diagnosis preview ini.
+    const baseDiagnosis = presetDiagnosis;
+    const initialComplaint = String(pageComplaint.text || "").trim();
+    const dxLabelOf = (key) => DIAGNOSIS_TEMPLATES.find((d) => d.key === key)?.label || key;
+    const renderDxPreview = () => {
+      const el = shade.querySelector("#ak-medgroup-dx-preview");
+      const t = String(anamnesisEl.value || "").trim();
+      const found = t ? detectDiagnosisFromComplaint(t, { vitals: vitalsAssessment }) : null;
+      const dx = found && DIAGNOSIS_TEMPLATES.find((d) => d.key === found.key);
+      if (t !== initialComplaint) presetDiagnosis = dx || baseDiagnosis;
+      if (!el) return;
+      if (!t) {
+        el.innerHTML = "";
+        return;
+      }
+      if (!dx) {
+        el.innerHTML = `<div class="akm-dxp none">🔎 Keluhan tidak dikenali — pilih/cari diagnosis.</div>`;
+        return;
+      }
+      const page = selectedIcdEntries();
+      const filled = dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)));
+      const others = detectDiagnoses(t, vitalsAssessment).list.slice(1).map((f) => dxLabelOf(f.key));
+      el.innerHTML =
+        `<div class="akm-dxp"><div class="akm-dxp-head">🔎 Dari keluhan<span class="akm-dxp-tag${filled ? " ok" : ""}">${filled ? "sudah terisi" : "akan dipilih"}</span></div>` +
+        `<div><b>${escapePreviewHtml(dx.icd[0])}</b> ${escapePreviewHtml(dx.label)} <small>(dari "${escapePreviewHtml(found.keyword)}")</small></div>` +
+        (others.length ? `<small>+ diagnosis tambahan: ${escapePreviewHtml(others.join(", "))}</small>` : "") +
+        `</div>`;
+    };
+    renderDxPreview();
+    setAnamnesisSource(pageComplaint.source);
+
+    // Simpan pilihan obat lintas perubahan kategori. Obat yang tidak sesuai kategori
+    // hanya disembunyikan, bukan dihapus dari state, sehingga ketika BB diubah kembali
+    // ke kategori sebelumnya pilihan pengguna dapat muncul lagi.
+    const selectedMedicationKeys = new Set();
+    // Saran anamnesa: autoAdded = dicentang oleh saran (dicabut lagi bila saran
+    // berubah), dismissed = saran yang centangnya dihapus dokter (tidak dicentang ulang).
+    let currentGroup = null;
+    let suggestedKeys = new Set();
+    const autoAdded = new Set();
+    const dismissed = new Set();
+    // v9.6: resep tindakan juga bisa disarankan (mis. "imunisasi", "cek gula").
+    const selectedActionKeys = new Set();
+    let suggestedActions = new Set();
+    const autoAddedActions = new Set();
+    const dismissedActions = new Set();
+    const actionsEl = shade.querySelector("#ak-medgroup-actions");
+    const renderActions = () => {
+      actionsEl.innerHTML = PACKAGE_ACTIONS.map(
+        (a) =>
+          `<label class="ak-package-choice${suggestedActions.has(a.key) ? " akm-suggested" : ""}"><input data-med-action="${a.key}" type="checkbox" value="${a.key}" ${selectedActionKeys.has(a.key) ? "checked" : ""}><span class="akm-name">${escapePreviewHtml(a.label)}</span>${suggestedActions.has(a.key) ? '<em class="ak-suggest-badge">saran</em>' : ""}</label>`,
+      ).join("");
+      actionsEl.querySelectorAll("[data-med-action]").forEach((x) =>
+        x.addEventListener("change", () => {
+          if (x.checked) {
+            selectedActionKeys.add(x.value);
+            dismissedActions.delete(x.value);
+          } else {
+            selectedActionKeys.delete(x.value);
+            if (autoAddedActions.delete(x.value)) dismissedActions.add(x.value);
+          }
+          updateSelected();
+        }),
+      );
+    };
+    const actionLabel = (key) => PACKAGE_ACTIONS.find((a) => a.key === key)?.label || key;
+    const itemLabel = (key) =>
+      MEDICATION_ITEMS_FLAT.find((x) => x.key === key)?.label || key;
+
+    const applySuggestions = (group, { reset = false } = {}) => {
+      for (const k of autoAdded) selectedMedicationKeys.delete(k);
+      autoAdded.clear();
+      if (reset) dismissed.clear();
+      const s = suggestMedicationsFromAnamnesis(anamnesisEl.value, group, { diagnoses: medDiagnoses(), vitals: vitalsAssessment });
+      suggestedKeys = new Set(s.keys);
+      // v0.5.0: tanda bahaya / hamil / alergi obat -> obat tidak dicentang otomatis.
+      const akFlags = detectRedFlags(anamnesisEl.value, vitalsAssessment);
+      const akHold = akFlags.some((f) => f.noAuto);
+      for (const k of s.keys) {
+        if (akHold || dismissed.has(k) || selectedMedicationKeys.has(k)) continue;
+        selectedMedicationKeys.add(k);
+        autoAdded.add(k);
+      }
+      for (const a of autoAddedActions) selectedActionKeys.delete(a);
+      autoAddedActions.clear();
+      if (reset) dismissedActions.clear();
+      suggestedActions = new Set(s.actionKeys);
+      for (const a of s.actionKeys) {
+        if (dismissedActions.has(a) || selectedActionKeys.has(a)) continue;
+        selectedActionKeys.add(a);
+        autoAddedActions.add(a);
+      }
+      renderActions();
+      if (!group) {
+        suggestionEl.innerHTML = `<div class="ak-preview-empty">Saran obat muncul setelah kategori DEWASA/ANAK diketahui.</div>`;
+      } else if (!anamnesisEl.value.trim() && !s.matches.length) {
+        suggestionEl.innerHTML = `<div class="ak-preview-empty">Keluhan kosong · pilih obat manual.</div>`;
+      } else if (!s.matches.length) {
+        suggestionEl.innerHTML = `<div class="ak-preview-empty">Keluhan tidak dikenali. Pilih obat manual atau pilih diagnosis.</div>`;
+      } else {
+        const rows = s.matches
+          .map(
+            (m) =>
+              `• <b>${escapePreviewHtml(m.label)}</b> <small>("${escapePreviewHtml(m.keyword)}")</small> → ${[...m.keys.map((k) => escapePreviewHtml(itemLabel(k))), ...(m.actions || []).map((a) => "Tindakan " + escapePreviewHtml(actionLabel(a)))].join(", ") || (/^Diagnosis /.test(m.label) ? "tanpa obat otomatis · pilih manual" : "sudah tercakup obat lain (lihat ⓘ)")}`,
+          )
+          .join("<br>");
+        const notes = s.notes
+          .map((n) => `<br><small>ⓘ ${escapePreviewHtml(n)}</small>`)
+          .join("");
+        suggestionEl.innerHTML = `<div class="ak-package-suggestion-box"><div class="ak-live-preview-title">✨ SARAN (${group === "adult" ? "DEWASA" : "ANAK"})</div>${rows}${notes}<div class="ak-package-suggestion-warn">${akHold ? "Belum dicentang (lihat peringatan) · centang manual bila sesuai." : "Sudah dicentang · evaluasi indikasi, kontraindikasi & alergi."}</div></div>`;
+      }
+      if (akFlags.length) suggestionEl.insertAdjacentHTML("afterbegin", redFlagHtml(akFlags, akHold));
+    };
+
+    const renderItemsForGroup = (group) => {
+      const choice = (i) => {
+        const [name, sub] = String(i.label).split(" — ");
+        return `<label class="ak-package-choice${suggestedKeys.has(i.key) ? " akm-suggested" : ""}"><input data-med-item="${i.key}" type="checkbox" value="${i.key}" ${selectedMedicationKeys.has(i.key) ? "checked" : ""}><span class="akm-name">${escapePreviewHtml(name)}${sub ? `<small>${escapePreviewHtml(sub)}</small>` : ""}</span>${suggestedKeys.has(i.key) ? '<em class="ak-suggest-badge">saran</em>' : ""}</label>`;
+      };
+      // Dikelompokkan per golongan supaya mudah dicari; semua pilihan tetap tampil.
+      items.innerHTML = MEDICATION_GROUP_PACKAGES.map((g) => {
+        const list = g.items.filter(
+          (i) => i.population === group || i.population === "all",
+        );
+        return list.length
+          ? `<div class="akm-group"><div class="akm-group-title">${escapePreviewHtml(g.label)}</div><div class="akm-choices">${list.map(choice).join("")}</div></div>`
+          : "";
+      }).join("");
+      items.querySelectorAll("[data-med-item]").forEach((x) =>
+        x.addEventListener("change", () => {
+          if (x.checked) {
+            selectedMedicationKeys.add(x.value);
+            dismissed.delete(x.value);
+          } else {
+            selectedMedicationKeys.delete(x.value);
+            if (autoAdded.delete(x.value)) dismissed.add(x.value);
+          }
+          updateSelected();
+        }),
+      );
+    };
+    const updateSelected = () => {
+      const visibleLabels = [...shade.querySelectorAll("[data-med-item]")];
+      const meds = visibleLabels
+        .filter((x) => selectedMedicationKeys.has(x.value))
+        .map((x) => itemLabel(x.value));
+      const hiddenCount = [...selectedMedicationKeys].filter(
+        (key) => !visibleLabels.some((x) => x.value === key),
+      ).length;
+      const acts = [...shade.querySelectorAll("[data-med-action]:checked")].map((x) =>
+        actionLabel(x.value),
+      );
+      const names = [...meds, ...acts.map((x) => "Tindakan " + x)];
+      const total = names.length;
+      countEl.textContent = meds.length ? `${meds.length} dipilih` : "";
+      selectedEl.innerHTML = total
+        ? `<b>${total} dipilih</b> <span>${escapePreviewHtml(names.join(" · "))}</span>${hiddenCount ? ` <small>(+${hiddenCount} di kategori lain, tidak diinput)</small>` : ""}`
+        : "Belum ada obat dipilih";
+      updateMedicationGroupLivePreview(shade, ageYears);
+    };
+    const showGroup = (group) => {
+      if (group !== currentGroup) {
+        currentGroup = group;
+        applySuggestions(group);
+      }
+      renderItemsForGroup(group);
+      updateSelected();
+    };
+    const setStatus = (group, hint) => {
+      status.textContent = group === "adult" ? "DEWASA" : group === "child" ? "ANAK" : "Isi BB";
+      status.className = `akm-cat ${group || "akm-missing"}`;
+      weightSourceEl.textContent = hint;
+    };
+    const refreshCategory = () => {
+      const needsWeight = getMedicationPackageNeedsWeight(ageYears);
+      if (!needsWeight) {
+        setStatus("adult", `Umur >17 th → dosis dewasa. ${weightInfo ? weightHint : ""}`.trim());
+        showGroup("adult");
+        return "adult";
+      }
+      const kg = parseWeightKg(weight?.value || "");
+      if (!kg) {
+        setStatus(null, `${ageYears == null ? "Umur tidak terbaca. " : ""}Isi BB untuk dosis. ${weightHint}`);
+        currentGroup = null;
+        applySuggestions(null);
+        items.innerHTML = '<div class="ak-preview-empty">Isi berat badan dulu untuk menampilkan daftar obat.</div>';
+        countEl.textContent = "";
+        selectedEl.textContent = "Menunggu BB pasien";
+        updateMedicationGroupLivePreview(shade, ageYears);
+        return null;
+      }
+      const group = getMedicationPackageGroup(kg, ageYears);
+      setStatus(group, `${ageYears == null ? "Umur tidak terbaca; kategori dari BB. " : ""}BB ${String(kg).replace(".", ",")} kg → dosis ${group === "adult" ? "dewasa" : "anak"}. ${weightHint}`);
+      showGroup(group);
+      return group;
+    };
+    const resuggest = (options) => {
+      if (!currentGroup) return;
+      applySuggestions(currentGroup, options);
+      renderItemsForGroup(currentGroup);
+      updateSelected();
+    };
+    let anamnesisTimer = null;
+    anamnesisEl.addEventListener("input", () => {
+      clearTimeout(anamnesisTimer);
+      anamnesisTimer = setTimeout(() => {
+        renderDxPreview();
+        renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
+        resuggest();
+        syncComplaintText();
+      }, 350);
+    });
+
+    // v10.1.0: keluhan yang diubah di sini ikut mengubah Keluhan Utama & Anamnesa di
+    // halaman (langsung), lalu Diagnosis (saat selesai mengetik / sebelum INPUT RESEP).
+    let syncedText = String(anamnesisEl.value || "").trim();
+    let dxSyncedText = syncedText;
+    let dxSyncPromise = null;
+    const syncStatusEl = shade.querySelector("#ak-medgroup-sync");
+    const syncComplaintText = () => {
+      const t = String(anamnesisEl.value || "").trim();
+      if (!t || t === syncedText || !isMedicalRecordCreatePage()) return;
+      writeComplaintToPage(t, syncedText);
+      syncedText = t;
+      setAnamnesisSource("Anamnesa");
+      if (syncStatusEl) syncStatusEl.textContent = "✓ Keluhan Utama & Anamnesa diperbarui";
+    };
+    const syncDiagnosis = () => {
+      const t = String(anamnesisEl.value || "").trim();
+      if (!t || t === dxSyncedText || !isMedicalRecordCreatePage()) return Promise.resolve();
+      if (dxSyncPromise) return dxSyncPromise;
+      syncComplaintText();
+      dxSyncPromise = runTask("PERBARUI DIAGNOSIS", async () => {
+        if (syncStatusEl) syncStatusEl.textContent = "⏳ Memperbarui diagnosis…";
+        const r = await updateDiagnosisFromComplaint(t);
+        dxSyncedText = t;
+        if (r.dx) presetDiagnosis = r.dx;
+        if (syncStatusEl) syncStatusEl.textContent = `✓ Diperbarui · Diagnosis: ${r.note}`;
+        renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
+        renderDxPreview();
+        resuggest();
+      }).finally(() => {
+        dxSyncPromise = null;
+      });
+      return dxSyncPromise;
+    };
+    anamnesisEl.addEventListener("change", () => {
+      clearTimeout(anamnesisTimer);
+      renderDxPreview();
+      resuggest();
+      syncDiagnosis();
+    });
+
+    // v0.4.2: pilihan diagnosis paling mungkin + pencarian diagnosis/ICD.
+    const dxChoicesEl = shade.querySelector("#ak-medgroup-dx-choices");
+    const dxSearchEl = shade.querySelector("#ak-medgroup-dx-search");
+    const dxResultsEl = shade.querySelector("#ak-medgroup-dx-results");
+    const dxBtn = (d) => {
+      const on = selectedIcdEntries().some((e) => d.icd.some((c) => icdCodeMatches(c, e.code)));
+      return `<button type="button" class="akm-dxc-btn${on ? " akm-dxc-on" : ""}" data-dx-key="${escapePreviewHtml(d.key)}"><b>${escapePreviewHtml(d.icd[0])}</b>${escapePreviewHtml(d.label)}${on ? " ✓" : ""}</button>`;
+    };
+    const renderDxChoices = () => {
+      if (!dxChoicesEl) return;
+      // v0.7.0: diagnosis dari keluhan + DIAGNOSIS BANDING (ketuk = tambah, ✕ di atas = hapus).
+      const det = detectDiagnoses(String(anamnesisEl.value || ""), vitalsAssessment);
+      const tpl = (k) => DIAGNOSIS_TEMPLATES.find((d) => d.key === k);
+      const main = det.list.map((f) => tpl(f.key)).filter(Boolean);
+      const band = det.banding.map(tpl).filter(Boolean);
+      dxChoicesEl.innerHTML =
+        (main.length ? `<div class="akm-dxc-title">DARI KELUHAN</div><div class="akm-dxc-list">${main.map(dxBtn).join("")}</div>` : "") +
+        (band.length
+          ? `<div class="akm-dxc-title">DIAGNOSIS BANDING · ketuk untuk menambah</div><div class="akm-dxc-list">${band.map(dxBtn).join("")}</div>`
+          : "");
+    };
+    const chooseDx = (d) =>
+      runTask("PILIH DIAGNOSIS", async () => {
+        if (syncStatusEl) syncStatusEl.textContent = `⏳ Memilih ${d.label}…`;
+        let r;
+        try {
+          r = await addDiagnosisChoice(d);
+        } catch (e) {
+          if (syncStatusEl) syncStatusEl.textContent = `✕ ${d.label} belum terisi: ${e?.message || e}. Isi manual di bagian Diagnosa.`;
+          throw e;
+        }
+        if (!presetDiagnosis) presetDiagnosis = d;
+        dxSyncedText = String(anamnesisEl.value || "").trim();
+        if (syncStatusEl) syncStatusEl.textContent = `✓ Diagnosis: ${r.note}`;
+        renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
+        renderDxChoices();
+        resuggest({ reset: true });
+      });
+    let icdResults = [];
+    let dxSearchTimer = null;
+    let dxSearchSeq = 0;
+    const renderDxSearch = async () => {
+      const q = String(dxSearchEl?.value || "").trim();
+      const seq = ++dxSearchSeq;
+      if (q.length < 2) {
+        dxResultsEl.innerHTML = "";
+        return;
+      }
+      const tpl = searchDiagnosisTemplates(q);
+      const tplHtml = tpl.length
+        ? `<div class="akm-dxc-title">DENGAN PAKET OBAT</div><div class="akm-dxc-list">${tpl.map(dxBtn).join("")}</div>`
+        : "";
+      dxResultsEl.innerHTML = tplHtml + (q.length >= 3 ? '<div class="akm-hint">⏳ Mencari ICD…</div>' : "");
+      if (q.length < 3) return;
+      let opts = [];
+      try {
+        opts = await searchIcdOptions(q);
+      } catch (e) {
+        if (seq === dxSearchSeq) dxResultsEl.innerHTML = tplHtml + `<div class="akm-hint akm-missing">Pencarian ICD gagal: ${escapePreviewHtml(e?.message || e)}</div>`;
+        return;
+      }
+      if (seq !== dxSearchSeq) return;
+      icdResults = opts;
+      dxResultsEl.innerHTML =
+        tplHtml +
+        (opts.length
+          ? `<div class="akm-dxc-title">ICD 10 (DITAMBAHKAN)</div><div class="akm-dxc-list">${opts
+              .map((o, i) => `<button type="button" class="akm-dxc-btn akm-dxc-icd" data-icd-i="${i}"><b>${escapePreviewHtml(icdOptionCode(o))}</b>${escapePreviewHtml(o.en || o.label || "")}</button>`)
+              .join("")}</div>`
+          : '<div class="akm-hint">ICD tidak ditemukan. Coba bahasa Inggris / kode.</div>');
+    };
+    dxSearchEl?.addEventListener("input", () => {
+      clearTimeout(dxSearchTimer);
+      dxSearchTimer = setTimeout(renderDxSearch, 500);
+    });
+    dxSearchEl?.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        clearTimeout(dxSearchTimer);
+        renderDxSearch();
+      }
+    });
+    shade.querySelector(".akm-diagnosis")?.addEventListener("click", (ev) => {
+      const b = ev.target.closest?.("button[data-dx-key],button[data-icd-i],button[data-dx-del]");
+      if (!b) return;
+      ev.preventDefault();
+      if (b.dataset.dxDel) {
+        // v0.7.0: hapus diagnosa yang kurang cocok (hanya yang belum tersimpan).
+        const code = b.dataset.dxDel;
+        let r;
+        try {
+          r = removeUnsavedDiagnosis(code);
+        } catch (e) {
+          notify(`Hapus diagnosa gagal: ${e?.message || e}`, "error", 8000);
+          return;
+        }
+        if (presetDiagnosis?.icd.some((c) => icdCodeMatches(c, code))) presetDiagnosis = pageDiagnosisTemplates()[0] || null;
+        if (syncStatusEl)
+          syncStatusEl.textContent = r.removed
+            ? `✓ Diagnosa ${code} dihapus (belum disimpan).`
+            : r.saved
+              ? `${code} sudah TERSIMPAN: hapus lewat ikon hapus di bagian Diagnosa Medisin.`
+              : `${code} tidak ditemukan di isian Diagnosa.`;
+        renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
+        renderDxPreview();
+        renderDxChoices();
+        resuggest();
+        return;
+      }
+      if (b.dataset.dxKey) {
+        const d = DIAGNOSIS_TEMPLATES.find((x) => x.key === b.dataset.dxKey);
+        if (d) chooseDx(d).then(() => dxSearchEl?.value && renderDxSearch());
+        return;
+      }
+      const o = icdResults[Number(b.dataset.icdI)];
+      if (!o) return;
+      runTask("TAMBAH DIAGNOSA", async () => {
+        const r = await addIcdOption(o);
+        if (syncStatusEl) syncStatusEl.textContent = r.skipped ? `ICD ${r.code} sudah ada.` : `✓ ICD ${r.code} ditambahkan ke Diagnosa (belum disimpan).`;
+        renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
+        renderDxChoices();
+      });
+    });
+    renderDxChoices();
+    let dxChoiceTimer = null;
+    anamnesisEl.addEventListener("input", () => {
+      clearTimeout(dxChoiceTimer);
+      dxChoiceTimer = setTimeout(renderDxChoices, 400);
+    });
+    shade
+      .querySelector("#ak-medgroup-resuggest")
+      ?.addEventListener("click", () => {
+        const fresh = readChiefComplaintFromPage();
+        if (fresh.text) anamnesisEl.value = fresh.text;
+        setAnamnesisSource(fresh.source);
+        resuggest({ reset: true });
+      });
+    weight?.addEventListener("input", () => refreshCategory());
+    renderActions();
+    refreshCategory();
+    shade
+      .querySelector("#ak-medgroup-run")
+      ?.addEventListener("click", async () => {
+        // Jangan panggil refreshCategory() di sini karena fungsi tersebut merender
+        // ulang daftar checkbox dan akan menghilangkan centang yang baru dipilih.
+        const needsWeight = getMedicationPackageNeedsWeight(ageYears);
+        let group = "adult";
+        const kg = needsWeight ? parseWeightKg(weight?.value || "") : null;
+        if (needsWeight) {
+          if (!kg) {
+            notify(
+              "Kategori pasien belum dapat ditentukan. Isi BB terlebih dahulu untuk pasien usia ≤17 tahun atau umur yang belum terdeteksi.",
+              "warn",
+              8000,
+            );
+            return;
+          }
+          group = getMedicationPackageGroup(kg, ageYears);
+          if (!group) {
+            notify("Kategori pasien belum dapat ditentukan.", "warn", 8000);
+            return;
+          }
+        }
+        // Pastikan state persistent tetap menjadi sumber kebenaran. Item di kategori lain
+        // boleh tersimpan tetapi tidak boleh ikut diinput pada kategori saat ini.
+        const itemKeys = [...selectedMedicationKeys];
+        const actionKeys = [
+          ...shade.querySelectorAll("[data-med-action]:checked"),
+        ].map((x) => x.value);
+        if (!itemKeys.length && !actionKeys.length) {
+          notify("Pilih minimal satu obat atau tindakan.", "warn", 7000);
+          return;
+        }
+        // v10.1.0: keluhan yang baru diubah -> perbarui halaman & diagnosis dulu.
+        if (isMedicalRecordCreatePage()) {
+          clearTimeout(anamnesisTimer);
+          await syncDiagnosis().catch(() => {});
+        }
+        // v10.0.8: picker tetap terbuka (pilihan tidak hilang) bila belum bisa input.
+        if (!isMedicalRecordCreatePage()) {
+          notify("Buka halaman pelayanan pasien (tab DOKTER) dulu, lalu tekan INPUT RESEP lagi.", "warn", 9000);
+          return;
+        }
+        if (taskRunning) {
+          notify("Masih ada proses AUTO KLINIK yang berjalan. Tunggu sampai selesai, lalu tekan INPUT RESEP lagi.", "warn", 8000);
+          return;
+        }
+        close();
+        await runTask(`PAKET RESEP ${group === "adult" ? "DEWASA" : "ANAK"}`, () =>
+          runMedicationGroupItems(itemKeys, kg, ageYears, actionKeys),
+        );
+      });
+  }
+
+  // ============================================================
+  // 7. MENU — RESUME, RESUME + DIAGNOSIS + RESEP
+  // ============================================================
+
+  // ---------------- FORM REKAM MEDIS: RESUME ----------------
+  // resume : salin Keluhan Utama -> Anamnesa, kesadaran, prognosa (bila ada), layanan, status pulang
+  // (mode "ispa" lama tidak lagi ada di menu; diganti RESUME + DIAGNOSIS + RESEP)
+  function runTemplate(mode = "ispa") {
+    const withDiagnosis = mode === "resume-diagnosis";
+    const isResume = mode === "resume" || withDiagnosis;
+    const label = withDiagnosis
+      ? "RESUME + DIAGNOSIS"
+      : isResume
+        ? "AUTO KLINIK - RESUME"
+        : "AUTO KLINIK - ISPA DEWASA";
+    let dxResult = null;
+    let dxDetected = null;
+    let dxError = null;
+    const dxExtra = [];
+    const dxExtraFail = [];
+    // v10.0.5: tiap langkah RESUME berdiri sendiri. Dulu satu langkah gagal (mis.
+    // Layanan) menghentikan semuanya: Status Pulang kosong, Paket Resep tidak terbuka.
+    const failed = [];
+    const kept = [];
+    const step = async (name, fn) => {
+      try {
+        const r = await fn();
+        if (r?.kept) kept.push(`${name} "${r.kept}"`);
+      } catch (e) {
+        console.warn(`${label}: ${name} gagal`, e);
+        failed.push(`${name} (${String(e?.message || e).replace(/\.$/, "")})`);
+      }
+    };
+
+    return runTask(label, async () => {
+      if (!isMedicalRecordCreatePage()) {
+        throw new Error(
+          "Fungsi ini hanya dapat dijalankan di halaman pelayanan pasien (tab DOKTER). Buka pasien dari antrean poli terlebih dahulu.",
+        );
+      }
+
+      // Tunggu data pasien halaman ini (bukan pasien sebelumnya) siap.
+      await waitPasienReady();
+
+      if (isResume) {
+        // v10.0.9: mulai muat daftar layanan lebih dulu (lihat warmServiceList).
+        await warmServiceList().catch((e) => LOG("Pemanasan layanan dilewati: " + (e?.message || e)));
+        // Jangan menghentikan seluruh Resume bila struktur field berbeda.
+        await step("Anamnesa", copyChiefComplaintToAnamnesis);
+      }
+
+      if (isResume) await step("Status Kesadaran", setConsciousness);
+      else await setConsciousness();
+
+      // RESUME + DIAGNOSIS: Diagnosa + ICD dari Keluhan Utama, SEBELUM layanan
+      if (isResume) {
+        const vitals = assessVitals(readVitalsFromPage(), getPatientAgeFromIdentity()?.ageYears ?? null);
+        dxDetected = detectDiagnosisFromComplaint(readChiefComplaintFromPage().text, { vitals });
+        const dx = dxDetected && DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key);
+        // v0.7.0: keluhan lain yang berbeda -> diagnosis tambahan (sekunder).
+        const dxMore = detectDiagnoses(readChiefComplaintFromPage().text, vitals)
+          .list.slice(1)
+          .map((f) => DIAGNOSIS_TEMPLATES.find((d) => d.key === f.key))
+          .filter(Boolean);
+        // v10.0.5: ICD yang sudah diisi dokter dihormati; tidak ditambah diagnosis lain.
+        const existingIcd = selectedIcdEntries();
+        if (existingIcd.length) {
+          dxDetected = null;
+          dxResult = null;
+          LOG(`ICD sudah terisi (${existingIcd.map((e) => e.code).join(", ")}) -> diagnosis otomatis dilewati`);
+          dxError = { existing: existingIcd };
+        } else if (dx) {
+          // Gagal memilih diagnosis tidak menghentikan resume; dilaporkan di akhir.
+          try {
+            dxResult = await fillDiagnosis(dx);
+          } catch (e) {
+            dxError = e;
+            console.warn("RESUME + DIAGNOSIS: diagnosis gagal", e);
+          }
+          if (dxResult) LOG(`Diagnosis dari Keluhan Utama ("${dxDetected.keyword}") -> ${dx.label} ${dxResult.icdCode}`);
+          if (dxResult)
+            for (const d2 of dxMore) {
+              try {
+                dxExtra.push({ dx: d2, icdCode: (await fillDiagnosis(d2)).icdCode });
+              } catch (e) {
+                dxExtraFail.push(d2.label);
+              }
+            }
+        } else {
+          LOG("Diagnosis tidak dikenali dari Keluhan Utama -> dilewati");
+        }
+      }
+
+      if (!isResume) {
+        await setDiagnosisAndIcd();
+      } else {
+        // Resume: isi Prognosa bila kolomnya ada, selain itu dilewati.
+        if (findSelectByModel(/(?:^|\.)pasien\.jenis_prognosa$/)) {
+          await step("Prognosa", setPrognosis);
+        } else {
+          LOG("Prognosa Resume tidak tersedia -> dilewati");
+        }
+      }
+
+      if (isResume) {
+        await step("Status Pulang", setDischarge);
+        await step("Layanan", addServiceAndSave);
+      } else {
+        await addService();
+        await addRecipeItems(TEMPLATE.medicines);
+        await setDischarge();
+        validateAndReport();
+      }
+      const failNote =
+        (kept.length ? ` Tidak diubah (sudah diisi dokter): ${kept.join(", ")}.` : "") +
+        (failed.length ? ` BELUM TERISI: ${failed.join("; ")}. Isi manual.` : "") +
+        unsavedServiceNote();
+
+      if (withDiagnosis) {
+        const dxLabel = (key) => DIAGNOSIS_TEMPLATES.find((d) => d.key === key)?.label || key;
+        // Satu tombol lengkap: Paket Resep langsung terbuka dengan obat/tindakan
+        // dari diagnosis + Keluhan Utama sudah dicentang. Input tetap menunggu dokter.
+        const filledDx = dxResult ? DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key) : null;
+        // Tanpa filledDx, Paket Resep memakai ICD yang terisi di halaman (bila ada).
+        setTimeout(() => renderMedicationGroupPackagePicker({ diagnosis: filledDx }), 300);
+        if (dxError?.existing) {
+          notify(
+            `RESUME selesai. ICD sudah terisi (${dxError.existing.map((e) => e.code).join(", ")}), jadi diagnosis otomatis tidak ditambahkan. Paket Resep dibuka.` +
+              failNote,
+            failed.length ? "warn" : "success",
+            failed.length ? 20000 : 12000,
+          );
+        } else if (dxResult) {
+          notify(
+            `RESUME + DIAGNOSIS selesai. Diagnosis: ${dxLabel(dxDetected.key)} (ICD ${dxResult.icdCode}), dari kata "${dxDetected.keyword}".` +
+              (dxExtra.length ? ` Diagnosis tambahan: ${dxExtra.map((x) => `${x.dx.label} (ICD ${x.icdCode})`).join(", ")}.` : "") +
+              (dxExtraFail.length ? ` Gagal diisi: ${dxExtraFail.join(", ")}.` : "") +
+              " Di Paket Resep: ✕ untuk menghapus diagnosis yang kurang cocok, atau tambah DIAGNOSIS BANDING." +
+              " Paket Resep dibuka: periksa obat lalu INPUT RESEP." +
+              failNote,
+            failed.length ? "warn" : "success",
+            failed.length ? 20000 : 14000,
+          );
+        } else if (dxError) {
+          notify(
+            `RESUME selesai, tetapi diagnosis ${dxLabel(dxDetected.key)} gagal diisi: ${dxError.message}` + failNote,
+            "warn",
+            16000,
+          );
+        } else {
+          notify(
+            "RESUME selesai, tetapi diagnosis tidak dikenali dari Keluhan Utama. Isi Diagnosa secara manual." + failNote,
+            "warn",
+            14000,
+          );
+        }
+        return;
+      }
+
+      const dxNote = !isResume
+        ? ""
+        : dxResult
+          ? ` Diagnosa: ${DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key)?.label || dxDetected.key} (ICD ${dxResult.icdCode}), dari "${dxDetected.keyword}".` +
+            (dxExtra.length ? ` Tambahan: ${dxExtra.map((x) => `${x.dx.label} (ICD ${x.icdCode})`).join(", ")}.` : "")
+          : dxError?.existing
+            ? ` Diagnosa sudah terisi (${dxError.existing.map((e) => e.code).join(", ")}).`
+            : dxError
+              ? ` Diagnosa gagal diisi: ${dxError.message}`
+              : " Diagnosa tidak dikenali dari keluhan; isi manual.";
+      notify(
+        (isResume
+          ? "AUTO KLINIK - RESUME selesai." + dxNote + " Resep tidak diisi. Silakan periksa sebelum SUBMIT."
+          : "AUTO KLINIK - ISPA DEWASA selesai. Draft sudah diisi; silakan periksa sebelum SIMPAN/SUBMIT.") + failNote,
+        failed.length ? "warn" : "success",
+        failed.length ? 20000 : 9000,
+      );
+    });
+  }
+
+  // ============================================================
+  // 8. UI & BOOT — notifikasi, kunci proses, launcher, CSS
+  // ============================================================
+
+  // Notifikasi ditumpuk (tidak saling menimpa) di kiri bawah.
+  function notify(msg, kind = "info", ms = 5000) {
+    LOG(`[${kind}]`, msg);
+    if (!document.body) return;
+    let stack = document.getElementById("ak-notify-stack");
+    if (!stack) {
+      stack = document.createElement("div");
+      stack.id = "ak-notify-stack";
+      document.body.appendChild(stack);
+    }
+    const n = document.createElement("div");
+    n.className = "ai-notify " + kind;
+    n.title = "Ketuk untuk menutup";
+    const icon = document.createElement("span");
+    icon.className = "ak-ni";
+    icon.textContent = { success: "✓", error: "✕", warn: "!", info: "i" }[kind] || "i";
+    const body = document.createElement("span");
+    body.textContent = msg;
+    n.append(icon, body);
+    stack.appendChild(n);
+    // v10.0.8: notifikasi bisa diketuk untuk ditutup; paling banyak 4 sekaligus.
+    while (stack.childElementCount > 4) stack.firstElementChild.remove();
+    const dismiss = () => {
+      n.remove();
+      if (!stack.childElementCount) stack.remove();
+    };
+    n.addEventListener("click", dismiss);
+    setTimeout(dismiss, ms);
+  }
+
+  function mainButtonHtml(busyLabel) {
+    return busyLabel
+      ? `<span>⏳ ${escapePreviewHtml(busyLabel)}…</span>`
+      : `<span>⚡ AUTO KLINIK</span><span class="ak-ver">v${escapePreviewHtml(VERSION)}</span>`;
+  }
+
+  function setBusy(on, label = "AUTO KLINIK") {
+    const b = document.getElementById("auto-klinik-main");
+    if (!b) return;
+    b.disabled = on;
+    b.innerHTML = mainButtonHtml(on ? label : null);
+  }
+
+  // Semua automasi dijalankan lewat runTask: hanya SATU proses boleh berjalan
+  // (mencegah dua automasi mengisi form yang sama bersamaan), tombol utama
+  // menampilkan status, dan error selalu muncul sebagai notifikasi.
+  let taskRunning = false;
+  async function runTask(label, fn) {
+    if (taskRunning) {
+      notify("Masih ada proses AUTO KLINIK yang berjalan. Tunggu sampai selesai.", "warn", 6000);
+      return false;
+    }
+    taskRunning = true;
+    setBusy(true, label);
+    try {
+      await fn();
+      return true;
+    } catch (err) {
+      console.error(err);
+      notify(`${label} berhenti: ${err?.message || err}`, "error", 12000);
+      return false;
+    } finally {
+      taskRunning = false;
+      setBusy(false);
+    }
+  }
+
+  // Launcher tampil di beranda, pendaftaran, dan semua halaman rekam medis.
+  function isTargetPage() {
+    return location.hostname === MEDISIN_HOST && PROSES_PATH.test(location.pathname);
+  }
+
+  // Halaman pelayanan pasien (tab apa pun); bagian yang tidak ada di tab dilaporkan saat mengisi.
+  function isMedicalRecordCreatePage() {
+    return isTargetPage();
+  }
+
+  // Menu yang membaca data pasien menunggu store memuat pasien halaman ini dulu.
+  async function whenPasienReady(fn) {
+    await waitPasienReady();
+    return fn();
+  }
+
+  const MAIN_MENU = [
+    {
+      id: "auto-klinik-resume-dx",
+      icon: "🧪",
+      label: "RESUME + DIAGNOSIS + RESEP",
+      desc: "Resume, diagnosis dari keluhan, lalu Paket Resep · Alt+R",
+      primary: true,
+      run: () => runTemplate("resume-diagnosis"),
+    },
+    {
+      id: "auto-klinik-resume",
+      icon: "📋",
+      label: "RESUME",
+      desc: "Anamnesa, kesadaran, prognosa, layanan, status pulang",
+      run: () => runTemplate("resume"),
+    },
+    {
+      id: "auto-klinik-paket-obat",
+      icon: "💊",
+      label: "PAKET RESEP GOLONGAN",
+      desc: "Pilih obat & racikan sesuai umur/BB · Alt+P",
+      run: () => whenPasienReady(() => renderMedicationGroupPackagePicker()),
+    },
+    {
+      id: "auto-klinik-simpan",
+      icon: "💾",
+      label: "SIMPAN SEMUA",
+      desc: "Simpan Diagnosa, Resep, BHP, Tindakan · Alt+S",
+      run: () => saveAll(),
+    },
+    {
+      id: "auto-klinik-next",
+      icon: "⏭️",
+      label: "PASIEN BERIKUTNYA",
+      desc: "Buka antrean & panggil pasien menunggu · Alt+N",
+      anywhere: true,
+      run: () => goNextPatient(),
+    },
+    {
+      id: "auto-klinik-otomatis",
+      icon: "⚙️",
+      label: "JALAN OTOMATIS",
+      desc: autoRunLabel(),
+      toggle: true,
+      keepOpen: true,
+      anywhere: true,
+      run: () => toggleAutoRun(),
+    },
+  ];
+
+  function closeMainSubmenu() {
+    const submenu = document.getElementById("auto-klinik-submenu");
+    if (!submenu) return;
+    submenu.classList.remove("ak-open");
+    submenu.setAttribute("aria-hidden", "true");
+  }
+
+  function ensureButtonMounted() {
+    const existing = document.getElementById("auto-klinik-box");
+    // v0.6.0: tombol di semua halaman Medisin (bukan hanya pelayanan pasien).
+    if (!isMedisinPage()) {
+      existing?.remove();
+      return;
+    }
+    if (existing?.isConnected) return;
+
+    const mountRoot = document.body || document.documentElement;
+    if (!mountRoot) return;
+
+    const box = document.createElement("div");
+    box.id = "auto-klinik-box";
+    box.setAttribute("data-auto-klinik", "1");
+    // v10.0.8: menu muncul DI ATAS tombol utama, jadi tombol tidak bergeser saat menu dibuka.
+    const menuButton = (m) =>
+      `<button id="${m.id}" type="button"${m.primary ? ' class="ak-primary"' : m.toggle ? ` class="ak-toggle ${autoRunEnabled() ? "ak-on" : "ak-off"}" role="switch" aria-checked="${autoRunEnabled()}"` : ""}>` +
+      `<span class="ak-ico">${m.icon}</span>` +
+      `<span class="ak-txt"><span>${escapePreviewHtml(m.label)}</span><small>${escapePreviewHtml(m.desc)}</small></span>` +
+      (m.toggle ? '<span class="ak-sw" aria-hidden="true"></span>' : "") +
+      `</button>`;
+    box.innerHTML = `
+      <div class="ak-menu">
+        <div id="auto-klinik-submenu" class="ak-submenu" aria-hidden="true">
+          <div class="ak-sub-head"><span>Auto Klinik</span><span>v${escapePreviewHtml(VERSION)}</span></div>
+          <div class="ak-sub-note">Buka pasien dari antrean poli (tab DOKTER) dulu.</div>
+          ${MAIN_MENU.map(menuButton).join("")}
+        </div>
+        <button id="auto-klinik-main" type="button">${mainButtonHtml(taskRunning ? "Berjalan" : null)}</button>
+      </div>`;
+    mountRoot.appendChild(box);
+    if (taskRunning) box.querySelector("#auto-klinik-main").disabled = true;
+    makeLauncherDraggable(box);
+    applyLauncherPos(box);
+    if (akLocked()) {
+      // Dikunci jarak jauh: hanya tombol abu-abu bergembok, menu tidak bisa dibuka.
+      box.classList.add("ak-locked");
+      box.querySelector("#auto-klinik-main").innerHTML = "🔒 AUTO KLINIK dikunci";
+      box.querySelector("#auto-klinik-main").addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        showPinPanel(box);
+      });
+      return;
+    }
+    if (remoteLocked()) {
+      // Dibuka dengan PIN di perangkat ini: tombol untuk mengunci lagi.
+      const relock = document.createElement("button");
+      relock.type = "button";
+      relock.className = "ak-relock";
+      relock.textContent = "🔒 Kunci lagi di perangkat ini";
+      relock.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setLocalOpen(false);
+        remountLauncher();
+        notify("AUTO KLINIK dikunci lagi di perangkat ini.", "warn", 6000);
+      });
+      box.querySelector("#auto-klinik-submenu")?.appendChild(relock);
+    }
+
+    const submenu = box.querySelector("#auto-klinik-submenu");
+    box.querySelector("#auto-klinik-main")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const isOpen = submenu.classList.toggle("ak-open");
+      submenu.classList.toggle("ak-offpage", !isMedicalRecordCreatePage());
+      submenu.setAttribute("aria-hidden", isOpen ? "false" : "true");
+    });
+
+    for (const item of MAIN_MENU) {
+      box.querySelector(`#${item.id}`)?.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (!item.keepOpen) closeMainSubmenu();
+        if (akLocked()) return notify(lockMessage(), "warn", 6000);
+        if (!item.anywhere && !isTargetPage())
+          return notify("Buka pasien dari antrean poli (tab DOKTER) dulu.", "warn", 6000);
+        try {
+          Promise.resolve(item.run()).catch((e) => notify(`${item.label}: ${e?.message || e}`, "error", 12000));
+        } catch (e) {
+          notify(`${item.label}: ${e?.message || e}`, "error", 12000);
+        }
+      });
+    }
+  }
+
+  function hookSpaNavigation() {
+    // Medisin adalah SPA: rute berganti lewat pushState/replaceState
+    // tanpa reload halaman, jadi launcher dicek ulang setiap perpindahan rute.
+    if (window.__AUTO_ISPA_SPA_HOOKED__) return;
+    window.__AUTO_ISPA_SPA_HOOKED__ = true;
+
+    for (const method of ["pushState", "replaceState"]) {
+      const original = history[method];
+      history[method] = function () {
+        const result = original.apply(this, arguments);
+        window.dispatchEvent(new Event("auto-ispa-route-change"));
+        return result;
+      };
+    }
+
+    const recheck = () => {
+      setTimeout(ensureButtonMounted, 50);
+      setTimeout(ensureButtonMounted, 250);
+    };
+    window.addEventListener("popstate", recheck);
+    window.addEventListener("hashchange", recheck);
+    window.addEventListener("auto-ispa-route-change", recheck);
+    window.addEventListener("pageshow", recheck);
+  }
+
+  // v10.0.8: satu keluarga huruf sistem (lebih nyaman dibaca di HP & desktop).
+  const AK_FONT = 'system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';
+
+  const STYLES = `
+    /* ---------- Launcher (kanan bawah, di atas tombol TEAM CHAT Medisin) ---------- */
+    #auto-klinik-box{position:fixed!important;right:16px!important;bottom:56px!important;z-index:2147483644!important;
+      display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:8px!important;
+      width:auto!important;max-width:calc(100vw - 24px)!important;box-sizing:border-box!important;
+      font-family:${AK_FONT}!important;pointer-events:none!important;}
+    #auto-klinik-box .ak-menu{display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:8px!important;}
+    #auto-klinik-box .ak-menu > *{pointer-events:auto!important;}
+    #auto-klinik-main{display:inline-flex!important;align-items:center!important;gap:8px!important;min-height:44px!important;
+      padding:10px 14px 10px 16px!important;border:0!important;border-radius:999px!important;
+      background:linear-gradient(135deg,#fb923c,#ea580c)!important;color:#fff!important;
+      font:700 14px/1 ${AK_FONT}!important;letter-spacing:.2px!important;white-space:nowrap!important;
+      cursor:pointer!important;touch-action:manipulation!important;box-sizing:border-box!important;
+      box-shadow:0 6px 18px rgba(234,88,12,.32),0 2px 6px rgba(15,23,42,.12)!important;}
+    #auto-klinik-main .ak-ver{font:600 10.5px/1 ${AK_FONT}!important;padding:3px 7px!important;border-radius:999px!important;
+      background:rgba(255,255,255,.22)!important;color:#fff!important;}
+    #auto-klinik-main:hover{filter:brightness(1.06)!important;}
+    #auto-klinik-main:disabled{cursor:wait!important;background:#64748b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important;}
+    #auto-klinik-submenu{display:none!important;}
+    #auto-klinik-submenu.ak-open{display:flex!important;flex-direction:column!important;gap:6px!important;
+      width:min(300px,calc(100vw - 24px))!important;padding:8px!important;border:1px solid #e2e8f0!important;border-radius:16px!important;
+      background:#fff!important;box-shadow:0 14px 36px rgba(15,23,42,.2)!important;box-sizing:border-box!important;}
+    #auto-klinik-submenu .ak-sub-head{display:flex!important;justify-content:space-between!important;align-items:center!important;
+      padding:4px 6px 2px!important;font:700 11px/1.3 ${AK_FONT}!important;color:#64748b!important;letter-spacing:.5px!important;text-transform:uppercase!important;}
+    #auto-klinik-submenu .ak-sub-note{display:none!important;}
+    #auto-klinik-submenu.ak-offpage .ak-sub-note{display:block!important;margin:0 2px 2px!important;padding:8px 10px!important;border-radius:10px!important;
+      background:#fffbeb!important;color:#92400e!important;font:600 12px/1.4 ${AK_FONT}!important;}
+    #auto-klinik-submenu button{display:flex!important;align-items:center!important;gap:10px!important;width:100%!important;min-height:48px!important;
+      margin:0!important;padding:9px 12px!important;text-align:left!important;border:1px solid #e2e8f0!important;border-radius:12px!important;
+      background:#fff!important;color:#0f172a!important;font:700 13.5px/1.25 ${AK_FONT}!important;cursor:pointer!important;
+      touch-action:manipulation!important;box-sizing:border-box!important;box-shadow:none!important;}
+    #auto-klinik-submenu button:hover{background:#fff7ed!important;border-color:#fdba74!important;}
+    #auto-klinik-submenu button .ak-ico{flex:none!important;width:22px!important;text-align:center!important;font-size:17px!important;line-height:1!important;}
+    #auto-klinik-submenu button .ak-txt{display:flex!important;flex-direction:column!important;gap:2px!important;min-width:0!important;}
+    #auto-klinik-submenu button small{font:500 11.5px/1.3 ${AK_FONT}!important;color:#64748b!important;white-space:normal!important;}
+    #auto-klinik-submenu button.ak-primary{background:#f97316!important;border-color:#ea580c!important;color:#fff!important;}
+    #auto-klinik-submenu button.ak-primary small{color:#ffedd5!important;}
+    #auto-klinik-submenu button.ak-primary:hover{background:#ea580c!important;}
+
+    /* ---------- Notifikasi (kiri bawah; ketuk untuk menutup) ---------- */
+    #ak-notify-stack{position:fixed!important;left:12px!important;bottom:12px!important;z-index:2147483647!important;
+      display:flex!important;flex-direction:column!important;gap:8px!important;max-width:min(380px,calc(100vw - 24px))!important;
+      pointer-events:none!important;}
+    .ai-notify{display:flex!important;gap:9px!important;align-items:flex-start!important;padding:10px 12px!important;border-radius:12px!important;
+      color:#fff!important;font:500 12.5px/1.42 ${AK_FONT}!important;box-shadow:0 8px 24px rgba(15,23,42,.24)!important;
+      pointer-events:auto!important;cursor:pointer!important;word-break:break-word!important;}
+    .ai-notify .ak-ni{flex:none!important;font-weight:800!important;}
+    .ai-notify.success{background:#15803d!important}
+    .ai-notify.error{background:#b91c1c!important}
+    .ai-notify.warn{background:#b45309!important}
+    .ai-notify.info{background:#1d4ed8!important}
+
+    /* ---------- Overlay & kartu Paket Resep ---------- */
+    #ak-medgroup-picker{position:fixed!important;inset:0!important;z-index:2147483646!important;
+      background:rgba(15,23,42,.45)!important;display:flex!important;align-items:center!important;justify-content:center!important;
+      font-family:${AK_FONT}!important;}
+    .ak-rp-card{width:min(680px,calc(100vw - 24px))!important;max-height:calc(100vh - 40px)!important;overflow:auto!important;
+      background:#fff!important;border-radius:16px!important;padding:16px!important;box-shadow:0 24px 60px rgba(15,23,42,.35)!important;
+      box-sizing:border-box!important;color:#0f172a!important;}
+    .ak-rp-title{font:800 18px/1.25 ${AK_FONT}!important;color:#0f172a!important}
+    .ak-rp-sub{font:500 13px/1.45 ${AK_FONT}!important;color:#64748b!important;margin-top:4px!important}
+    .ak-rp-x{flex:none!important;width:36px!important;height:36px!important;border:0!important;border-radius:10px!important;background:#f1f5f9!important;
+      color:#475569!important;font:400 24px/1 ${AK_FONT}!important;cursor:pointer!important;}
+    .ak-rp-x:hover{background:#e2e8f0!important;}
+    .ak-rp-label{margin-bottom:6px!important;font:800 11px/1.3 ${AK_FONT}!important;color:#64748b!important;letter-spacing:.4px!important;}
+
+    /* ---------- Paket Resep: isi ---------- */
+    .akm-dx-row{font:500 12.5px/1.5 ${AK_FONT}!important;color:#334155!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;padding:2px 0!important;}
+    .akm-dx-del{flex:none!important;width:28px!important;height:28px!important;border:1px solid #fecaca!important;border-radius:999px!important;background:#fff1f2!important;color:#dc2626!important;font:700 13px/1 ${AK_FONT}!important;cursor:pointer!important;padding:0!important;}
+    .akm-dx-del:hover{background:#dc2626!important;color:#fff!important;}
+    .akm-dx-saved{flex:none!important;font:600 10.5px/1.4 ${AK_FONT}!important;color:#64748b!important;background:#f1f5f9!important;border-radius:999px!important;padding:2px 8px!important;}
+    .akm-dx-row b{color:#0f172a!important;}
+    .akm-dx-role{font:700 10px/1.4 ${AK_FONT}!important;color:#0369a1!important;background:#f0f9ff!important;border:1px solid #bae6fd!important;
+      border-radius:999px!important;padding:0 6px!important;margin-right:4px!important;}
+    .akm-dxp{margin-top:8px!important;padding:8px 10px!important;border:1px dashed #93c5fd!important;border-radius:10px!important;
+      background:#eff6ff!important;color:#1e3a8a!important;font:500 12.5px/1.5 ${AK_FONT}!important;}
+    .akm-dxp b{color:#0f172a!important;}
+    .akm-dxp small{color:#475569!important;}
+    .akm-dxp.none{border-color:#cbd5e1!important;background:#f8fafc!important;color:#64748b!important;}
+    .akm-dxp-head{display:flex!important;align-items:center!important;gap:6px!important;font-weight:700!important;margin-bottom:2px!important;}
+    .akm-dxp-tag{margin-left:auto!important;padding:1px 8px!important;border-radius:999px!important;background:#2563eb!important;color:#fff!important;
+      font:700 10.5px/1.5 ${AK_FONT}!important;}
+    .akm-dxp-tag.ok{background:#16a34a!important;}
+    .akm-sync:empty{display:none!important;}
+    .akm-sync{color:#15803d!important;font-weight:600!important;}
+    .akm-vitals{margin-top:6px!important;font:600 12px/1.5 ${AK_FONT}!important;color:#334155!important;}
+    .akm-vflag{display:inline-block!important;margin:3px 4px 0 0!important;padding:1px 7px!important;border-radius:999px!important;font:700 11px/1.5 ${AK_FONT}!important;}
+    .akm-vflag.warn{background:#fef3c7!important;color:#92400e!important;}
+    .akm-vflag.danger{background:#fee2e2!important;color:#b91c1c!important;}
+    .ak-package-choice{display:flex!important;align-items:center!important;gap:9px!important;padding:10px 12px!important;border:1px solid #e2e8f0!important;
+      border-radius:10px!important;background:#fff!important;cursor:pointer!important;font-weight:700!important;}
+    .ak-package-choice input{flex:none!important;width:18px!important;height:18px!important;margin:0!important;accent-color:#f97316!important;}
+    .ak-package-anamnesis{display:block!important;width:100%!important;margin-top:7px!important;padding:10px 12px!important;border:1px solid #cbd5e1!important;
+      border-radius:10px!important;background:#fff!important;color:#0f172a!important;font:500 13px/1.45 ${AK_FONT}!important;box-sizing:border-box!important;resize:vertical!important;}
+    .ak-package-anamnesis:focus{outline:none!important;border-color:#f97316!important;box-shadow:0 0 0 3px rgba(249,115,22,.14)!important;}
+    .ak-package-suggestion{margin-top:8px!important;}
+    .ak-package-suggestion-box{padding:10px 12px!important;border:1px solid #ddd6fe!important;border-radius:10px!important;background:#f5f3ff!important;
+      color:#3b0764!important;font:500 12px/1.6 ${AK_FONT}!important;}
+    .ak-package-suggestion-box .ak-live-preview-title{color:#6d28d9!important;margin-bottom:4px!important;}
+    .ak-package-suggestion-warn{margin-top:6px!important;color:#92400e!important;font:600 11px/1.4 ${AK_FONT}!important;}
+    .ak-suggest-badge{flex:none!important;margin-left:auto!important;padding:2px 7px!important;border-radius:999px!important;background:#7c3aed!important;color:#fff!important;
+      font:700 10px/1.4 ${AK_FONT}!important;font-style:normal!important;}
+
+    /* ---------- Paket Resep: tata letak kartu ---------- */
+    .ak-rp-card.akm{display:flex!important;flex-direction:column!important;width:min(1120px,calc(100vw - 32px))!important;max-width:none!important;
+      height:min(900px,calc(100vh - 32px))!important;max-height:none!important;padding:0!important;overflow:hidden!important;background:#f1f5f9!important;}
+    .akm-head{display:flex!important;justify-content:space-between!important;align-items:flex-start!important;gap:12px!important;
+      padding:14px 18px!important;background:#fff!important;border-bottom:1px solid #e2e8f0!important;}
+    .akm-head .ak-rp-title{font-size:19px!important;}
+    .akm-head .ak-rp-sub{font-size:12.5px!important;line-height:1.5!important;}
+    .akm-body{flex:1!important;min-height:0!important;overflow:auto!important;padding:14px!important;display:grid!important;gap:12px!important;
+      grid-template-columns:minmax(0,5fr) minmax(0,7fr)!important;align-items:start!important;}
+    .akm-col{display:flex!important;flex-direction:column!important;gap:12px!important;min-width:0!important;}
+    .akm-sec{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:14px!important;padding:12px 14px!important;min-width:0!important;
+      box-shadow:0 1px 2px rgba(15,23,42,.04)!important;}
+    .akm-preview{padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;}
+    .akm-sec-title{display:flex!important;align-items:center!important;gap:8px!important;margin:0 0 10px!important;
+      font:800 13px/1.3 ${AK_FONT}!important;color:#0f172a!important;letter-spacing:.2px!important;}
+    .akm-sec-title small{font-weight:600!important;color:#94a3b8!important;}
+    .akm-count{margin-left:auto!important;padding:2px 9px!important;border-radius:999px!important;background:#f97316!important;color:#fff!important;font-size:11px!important;}
+    .akm-count:empty{display:none!important;}
+    .akm-link{margin-left:auto!important;border:0!important;background:transparent!important;color:#ea580c!important;
+      font:700 12px ${AK_FONT}!important;cursor:pointer!important;padding:2px 4px!important;}
+    .akm-hint{margin-top:8px!important;color:#64748b!important;font:500 11.5px/1.45 ${AK_FONT}!important;}
+    .akm-stats{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important;}
+    .akm-stat{display:flex!important;flex-direction:column!important;gap:4px!important;padding:9px 10px!important;border:1px solid #e2e8f0!important;
+      border-radius:10px!important;background:#f8fafc!important;min-width:0!important;}
+    .akm-stat > span:first-child{font:700 10.5px ${AK_FONT}!important;color:#64748b!important;text-transform:uppercase!important;letter-spacing:.4px!important;}
+    .akm-stat b{font:800 16px/1.2 ${AK_FONT}!important;color:#0f172a!important;}
+    .akm-stat-bb{cursor:text!important;}
+    .akm-bb{display:flex!important;align-items:baseline!important;gap:4px!important;}
+    .akm-bb input{width:100%!important;min-width:0!important;padding:0!important;border:0!important;border-bottom:2px solid #f97316!important;
+      border-radius:0!important;background:transparent!important;font:800 16px/1.2 ${AK_FONT}!important;color:#0f172a!important;outline:none!important;}
+    .akm-bb i{font:700 12px ${AK_FONT}!important;color:#64748b!important;font-style:normal!important;}
+    .akm-cat{align-self:flex-start!important;padding:2px 9px!important;border-radius:999px!important;font-size:13px!important;}
+    .akm-cat.adult{background:#ffedd5!important;color:#9a3412!important;}
+    .akm-cat.child{background:#dbeafe!important;color:#1d4ed8!important;}
+    .akm-missing{color:#b45309!important;}
+    .akm-cat.akm-missing{background:#fef3c7!important;}
+    .akm .ak-package-anamnesis{margin-top:0!important;min-height:64px!important;}
+    .akm-items{display:flex!important;flex-direction:column!important;gap:12px!important;}
+    .akm-group-title{margin:0 0 6px!important;font:800 10.5px ${AK_FONT}!important;color:#64748b!important;text-transform:uppercase!important;letter-spacing:.5px!important;}
+    .akm-choices{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important;}
+    .akm .ak-package-choice{min-height:40px!important;padding:7px 10px!important;gap:9px!important;font:600 13px/1.3 ${AK_FONT}!important;color:#1e293b!important;}
+    .akm .ak-package-choice:hover{border-color:#cbd5e1!important;}
+    .akm .ak-package-choice.akm-suggested{border-color:#c4b5fd!important;}
+    .akm .ak-package-choice.akm-on{border-color:#f97316!important;background:#fff7ed!important;box-shadow:inset 3px 0 0 #f97316!important;}
+    .akm-name{display:flex!important;flex-direction:column!important;min-width:0!important;}
+    .akm-name small{font:500 11px/1.3 ${AK_FONT}!important;color:#64748b!important;}
+    .akm .ak-package-suggestion-box{font-size:12px!important;}
+    .akm-foot{display:flex!important;align-items:center!important;gap:12px!important;padding:12px 18px!important;background:#fff!important;
+      border-top:1px solid #e2e8f0!important;box-shadow:0 -4px 14px rgba(15,23,42,.06)!important;}
+    .akm-selected{flex:1!important;min-width:0!important;font:500 12px/1.4 ${AK_FONT}!important;color:#475569!important;
+      display:-webkit-box!important;-webkit-line-clamp:2!important;-webkit-box-orient:vertical!important;overflow:hidden!important;}
+    .akm-selected b{color:#ea580c!important;}
+    .akm-actions{display:flex!important;gap:8px!important;flex:none!important;}
+    .akm-btn-ghost,.akm-btn-primary{min-height:44px!important;padding:10px 18px!important;border-radius:12px!important;cursor:pointer!important;
+      font:700 14px ${AK_FONT}!important;touch-action:manipulation!important;}
+    .akm-btn-ghost{border:1px solid #cbd5e1!important;background:#fff!important;color:#475569!important;}
+    .akm-btn-ghost:hover{background:#f8fafc!important;}
+    .akm-btn-primary{border:1px solid #ea580c!important;background:#f97316!important;color:#fff!important;}
+    .akm-btn-primary:hover{background:#ea580c!important;}
+    @media (max-width:860px){
+      .akm-body{display:flex!important;flex-direction:column!important;align-items:stretch!important;padding:10px!important;gap:10px!important;}
+      .akm-col{display:contents!important;}
+      .akm-pasien{order:1!important}.akm-diagnosis{order:2!important}.akm-anamnesa{order:3!important}
+      .akm-obat{order:4!important}.akm-tindakan{order:5!important}.akm-preview{order:6!important}
+    }
+    @media (max-width:600px){
+      #ak-medgroup-picker{align-items:stretch!important;}
+      .ak-rp-card.akm{width:100vw!important;height:100%!important;border-radius:0!important;}
+      .akm-head{padding:12px 14px!important;}
+      .akm-head .ak-rp-sub{display:none!important;}
+      .akm-choices{grid-template-columns:minmax(0,1fr)!important;}
+      .akm-stat b,.akm-bb input{font-size:15px!important;}
+      .akm-foot{flex-direction:column!important;align-items:stretch!important;padding:10px 12px!important;gap:8px!important;}
+      .akm-actions > *{flex:1!important;}
+    }
+
+    /* ---------- Preview obat terpilih ---------- */
+    .ak-package-live-preview{margin-top:0!important;}
+    .ak-package-preview-meta{margin:0 0 10px!important;padding:10px 12px!important;border-radius:10px!important;background:#fff!important;
+      border:1px solid #e2e8f0!important;font:600 13px/1.55 ${AK_FONT}!important;color:#334155!important;}
+    .ak-live-preview-box{padding:12px!important;border:1px solid #fed7aa!important;border-radius:14px!important;background:#fffaf5!important;}
+    .ak-live-preview-head{display:flex!important;justify-content:space-between!important;gap:10px!important;align-items:flex-start!important;}
+    .ak-live-preview-title{font:800 13px/1.3 ${AK_FONT}!important;color:#9a3412!important;}
+    .ak-live-preview-sub{font:500 11px/1.4 ${AK_FONT}!important;color:#64748b!important;margin-top:2px!important;}
+    .ak-live-preview-count{flex:none!important;padding:3px 9px!important;border-radius:999px!important;background:#f97316!important;color:#fff!important;font:800 11px ${AK_FONT}!important;}
+    .ak-preview-section{margin-top:12px!important;}
+    .ak-live-preview-row{display:grid!important;grid-template-columns:minmax(0,1.35fr) minmax(180px,.85fr)!important;gap:12px!important;
+      padding:11px 12px!important;border:1px solid #e2e8f0!important;border-radius:10px!important;background:#fff!important;margin-top:7px!important;
+      font:500 12px/1.45 ${AK_FONT}!important;color:#334155!important;}
+    .ak-live-preview-racikan{padding:11px 12px!important;border:1px solid #e2e8f0!important;border-radius:10px!important;background:#fff!important;
+      margin-top:7px!important;font:500 12px/1.5 ${AK_FONT}!important;color:#334155!important;}
+    .ak-live-preview-row b,.ak-live-preview-racikan b{font-size:13px!important;color:#0f172a!important;}
+    .ak-live-preview-row small,.ak-live-preview-racikan small{display:block!important;margin-top:3px!important;color:#64748b!important;font-weight:500!important;}
+    .ak-preview-empty{padding:11px 12px!important;border:1px dashed #cbd5e1!important;border-radius:10px!important;color:#64748b!important;
+      background:#f8fafc!important;font:500 12px/1.4 ${AK_FONT}!important;}
+    .ak-preview-notes{margin-top:12px!important;padding:10px 12px!important;border:1px solid #fde68a!important;border-radius:10px!important;
+      background:#fffbeb!important;color:#92400e!important;font:500 12px/1.5 ${AK_FONT}!important;}
+    @media (max-width:767px){.ak-live-preview-row{grid-template-columns:1fr!important;}}
+  `;
+
+  const DRUGMAP_STYLES = `
+    #ak-drugmap{position:fixed!important;inset:0!important;z-index:2147483646!important;display:flex!important;align-items:center!important;
+      justify-content:center!important;padding:12px!important;background:rgba(15,23,42,.45)!important;font-family:${AK_FONT}!important;box-sizing:border-box!important;}
+    #ak-drugmap .akd-card{width:min(460px,100%)!important;max-height:min(560px,calc(100vh - 24px))!important;display:flex!important;flex-direction:column!important;
+      gap:10px!important;padding:16px!important;border-radius:16px!important;background:#fff!important;color:#0f172a!important;
+      box-shadow:0 20px 50px rgba(15,23,42,.35)!important;box-sizing:border-box!important;}
+    #ak-drugmap .akd-title{font:700 16px/1.3 ${AK_FONT}!important;}
+    #ak-drugmap .akd-sub{font:400 13px/1.45 ${AK_FONT}!important;color:#475569!important;}
+    #ak-drugmap input{width:100%!important;min-height:40px!important;padding:8px 10px!important;border:1px solid #cbd5e1!important;border-radius:10px!important;
+      font:400 14px/1.3 ${AK_FONT}!important;color:#0f172a!important;background:#fff!important;box-sizing:border-box!important;}
+    #ak-drugmap .akd-list{display:flex!important;flex-direction:column!important;gap:6px!important;overflow:auto!important;min-height:60px!important;}
+    #ak-drugmap .akd-opt{display:flex!important;justify-content:space-between!important;align-items:center!important;gap:10px!important;min-height:40px!important;
+      padding:8px 10px!important;border:1px solid #e2e8f0!important;border-radius:10px!important;background:#f8fafc!important;color:#0f172a!important;
+      font:600 13px/1.3 ${AK_FONT}!important;text-align:left!important;cursor:pointer!important;}
+    #ak-drugmap .akd-opt:hover{background:#ffedd5!important;border-color:#fb923c!important;}
+    #ak-drugmap .akd-opt small{flex:none!important;font:400 12px/1.2 ${AK_FONT}!important;color:#64748b!important;}
+    #ak-drugmap .akd-empty{padding:14px 8px!important;font:400 13px/1.4 ${AK_FONT}!important;color:#64748b!important;text-align:center!important;}
+    #ak-drugmap .akd-foot{display:flex!important;justify-content:space-between!important;align-items:center!important;gap:10px!important;}
+    #ak-drugmap .akd-hint{font:400 12px/1.3 ${AK_FONT}!important;color:#64748b!important;}
+    #ak-drugmap #ak-drugmap-skip{min-height:36px!important;padding:6px 12px!important;border:1px solid #cbd5e1!important;border-radius:10px!important;
+      background:#fff!important;color:#334155!important;font:600 13px/1 ${AK_FONT}!important;cursor:pointer!important;}
+  `;
+
+
+  // ============================================================
+  // 9. ALUR CEPAT (v0.4.0, permintaan dokter 2026-11-17)
+  //    resep ulang, edukasi per diagnosis, surat sakit, jalan otomatis,
+  //    pasien berikutnya, shortcut keyboard, SIMPAN SEMUA
+  // ============================================================
+
+  // ---------------- EDUKASI PER DIAGNOSIS (pure, diuji) ----------------
+  // Teks singkat untuk kolom Edukasi (pasien.rl_edukasi). Hanya diisi bila kosong.
+  const EDUKASI = {
+    ISPA: "Istirahat cukup, perbanyak minum air hangat, pakai masker, tutup mulut saat batuk.",
+    FARINGITIS: "Perbanyak minum air hangat, hindari gorengan/es/pedas, istirahat cukup.",
+    TONSILITIS: "Habiskan antibiotik sesuai aturan, minum air hangat, hindari gorengan/es.",
+    SINUSITIS: "Habiskan antibiotik, cuci hidung dengan air garam, hindari debu/asap.",
+    OMA: "Jaga telinga tetap kering, jangan mengorek telinga, habiskan antibiotik.",
+    RINITIS_ALERGI: "Hindari pencetus (debu, dingin, bulu hewan), pakai masker.",
+    ASMA: "Hindari pencetus, segera ke IGD bila sesak berat atau tidak membaik.",
+    KONJUNGTIVITIS: "Jangan mengucek mata, cuci tangan, handuk/sapu tangan tidak dipakai bersama.",
+    HORDEOLUM: "Kompres hangat 3-4x sehari, jangan dipencet, jaga kebersihan kelopak mata.",
+    GEA: "Minum oralit/air sedikit-sedikit tapi sering, makan lunak, cuci tangan. Segera kembali bila lemas atau tidak bisa minum.",
+    DISENTRI: "Minum cukup, makan lunak, cuci tangan sebelum makan. Kembali bila BAB darah bertambah atau lemas.",
+    TIFOID: "Tirah baring, makan lunak rendah serat, habiskan antibiotik, kontrol 3 hari.",
+    DISPEPSIA: "Makan teratur porsi kecil, hindari pedas/asam/kopi, jangan langsung berbaring setelah makan.",
+    GASTRITIS: "Makan teratur porsi kecil, hindari pedas/asam/kopi/rokok, kelola stres.",
+    NYERI_PERUT: "Makan lunak, minum cukup. Segera kembali bila nyeri makin hebat, muntah terus, atau demam tinggi.",
+    KONSTIPASI: "Perbanyak sayur, buah, dan air putih, olahraga ringan.",
+    FEVER: "Kompres hangat, minum cukup, istirahat. Kontrol bila demam lebih dari 3 hari.",
+    MYALGIA: "Istirahat cukup, kompres hangat bagian yang pegal, peregangan ringan.",
+    LBP: "Hindari mengangkat beban berat, perbaiki posisi duduk, kompres hangat.",
+    OA_GENU: "Kurangi berat badan bila berlebih, hindari jongkok/naik turun tangga berlebihan.",
+    GOUT: "Kurangi jeroan, seafood, emping, dan minuman manis; minum air putih cukup.",
+    HIPERURISEMIA: "Kurangi jeroan, seafood, emping, dan minuman manis; minum air putih cukup.",
+    CEPHALGIA: "Istirahat dan tidur cukup, kurangi layar/gadget, minum cukup.",
+    VERTIGO: "Bangun dari tidur perlahan, hindari gerakan kepala mendadak, hati-hati jatuh.",
+    DERMATITIS: "Jangan digaruk, hindari sabun/bahan pencetus, jaga kulit tetap lembap.",
+    URTIKARIA: "Hindari pencetus (makanan/obat tertentu), jangan digaruk.",
+    TINEA: "Jaga kulit tetap kering, ganti pakaian berkeringat, handuk tidak dipakai bersama.",
+    PANU: "Jaga kulit tetap kering, ganti pakaian berkeringat, oles obat sampai bersih.",
+    MILIARIA: "Pakai baju tipis yang menyerap keringat, mandi teratur, hindari gerah.",
+    VARICELLA: "Jangan digaruk/dipecahkan, isolasi di rumah sampai lenting kering, potong kuku.",
+    ZOSTER: "Jangan dipecahkan, jaga lesi tetap kering dan bersih, istirahat cukup.",
+    HERPES_LABIALIS: "Jangan dipecahkan, hindari berbagi alat makan.",
+    ABSES: "Jaga luka tetap bersih, jangan dipencet, habiskan antibiotik.",
+    ISK: "Minum air putih minimal 2 liter, jangan menahan kencing, habiskan antibiotik.",
+    DISMENORE: "Kompres hangat perut bawah, istirahat cukup.",
+    PULPITIS: "Sikat gigi 2x sehari, kontrol ke dokter gigi untuk perawatan gigi.",
+    STOMATITIS: "Perbanyak sayur dan buah, minum cukup, jaga kebersihan mulut.",
+    HELMINTHIASIS: "Cuci tangan sebelum makan, potong kuku, pakai alas kaki.",
+    HEMOROID: "Perbanyak serat dan air putih, jangan mengejan terlalu kuat, jangan duduk terlalu lama.",
+    ANEMIA: "Perbanyak makanan tinggi zat besi (daging, hati, sayur hijau), minum tablet tambah darah dengan air putih.",
+    PARESTESIA: "Hindari posisi yang menekan saraf terlalu lama; kontrol gula darah bila diabetes.",
+    HT: "Kurangi garam, olahraga teratur, minum obat rutin, kontrol tensi berkala.",
+    DM: "Kurangi gula dan nasi, olahraga teratur, minum obat rutin, kontrol gula darah berkala.",
+    DISLIPIDEMIA: "Kurangi gorengan, santan, dan jeroan, olahraga teratur.",
+    IMUNISASI: "Demam ringan setelah imunisasi wajar; kompres dan beri obat penurun panas bila perlu.",
+  };
+  for (const d of DIAGNOSIS_TEMPLATES) if (d.edu && !EDUKASI[d.key]) EDUKASI[d.key] = d.edu;
+  const EDUKASI_UMUM = "Minum obat sesuai aturan. Kontrol bila keluhan tidak membaik dalam 3 hari atau memberat.";
+
+  // Kode ICD di halaman -> teks edukasi (tanpa dobel). (pure, diuji)
+  function educationForCodes(codes, templates = DIAGNOSIS_TEMPLATES) {
+    const out = [];
+    for (const code of codes || []) {
+      const dx = (templates || []).find((d) => (d.icd || []).some((c) => icdCodeMatches(c, code)));
+      const t = dx && EDUKASI[dx.key];
+      if (t && !out.includes(t)) out.push(t);
+    }
+    if (!out.length) return EDUKASI_UMUM;
+    return out.join(" ");
+  }
+
+  // Isi kolom Edukasi (Rencana Lanjutan) bila masih kosong. Tersimpan saat dokter SUBMIT.
+  async function fillEducation() {
+    const p = needPasien();
+    if (!isBlank(p.rl_edukasi)) return { kept: String(p.rl_edukasi).slice(0, 40) };
+    const codes = selectedIcdEntries().map((e) => e.code);
+    if (!codes.length) return false;
+    setReactive(p, "rl_edukasi", educationForCodes(codes));
+    LOG("Edukasi terisi (belum disimpan)");
+    return true;
+  }
+
+  // ---------------- RIWAYAT KUNJUNGAN ----------------
+  // Kunjungan terakhir SEBELUM kunjungan ini yang punya diagnosa/resep. (pure, diuji)
+  function pickLastVisit(list, currentId) {
+    const when = (v) => String(v?.tgl_kunjungan || v?.kunjungan_entrytime || v?.tgl_antrian || "");
+    return (
+      (Array.isArray(list) ? list : [])
+        .filter((v) => v && String(v.id_kunjungan) !== String(currentId))
+        .filter((v) => (v.resep || []).length || (v.icdx || []).length)
+        .sort((a, b) => when(b).localeCompare(when(a)))[0] || null
+    );
+  }
+
+  // Ringkasan kunjungan: diagnosa + obat satuan (racikan dihitung saja). (pure, diuji)
+  function summarizeVisit(v) {
+    const icdx = [];
+    for (const d of v?.icdx || []) {
+      const code = String(d?.icd_kode || d?.icdx || "").trim().toUpperCase();
+      if (code && !icdx.some((x) => x.code === code)) icdx.push({ code, en: String(d?.en || d?.icdx_kasus || "").trim() });
+    }
+    const drugs = [];
+    let racikan = 0;
+    for (const r of v?.resep || []) {
+      if (String(r?.is_racikan ?? "0") !== "0") {
+        racikan++;
+        continue;
+      }
+      const name = String(r?.produk_nm || "").trim();
+      if (!name) continue;
+      drugs.push({
+        name,
+        base: splitProductPrefix(name).base,
+        qty: Number(r?.resep_qty) > 0 ? Number(r.resep_qty) : 1,
+        signa: String(r?.resep_signa || "").trim(),
+      });
+    }
+    const date = String(v?.tgl_kunjungan || v?.kunjungan_entrytime || "").slice(0, 10);
+    return { date, icdx, drugs, racikan };
+  }
+
+  // ---------------- SURAT SAKIT ----------------
+  // "2026-11-17" + n hari (pure, diuji).
+  function addDaysIso(iso, n) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + Number(n || 0)));
+    return dt.toISOString().slice(0, 10);
+  }
+  const todayIso = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  // ---------------- PASIEN BERIKUTNYA ----------------
+  // Baris antrean pertama yang masih menunggu poli (201/202). (pure, diuji)
+  function nextWaitingRow(rows, currentId) {
+    return (
+      (Array.isArray(rows) ? rows : []).find(
+        (r) =>
+          [201, 202].includes(Number(r?.status?.status_id ?? r?.status_antrian)) &&
+          String(r?.kunjungan?.id_kunjungan) !== String(currentId || ""),
+      ) || null
+    );
+  }
+
+  // ---------------- DIALOG KONFIRMASI ----------------
+  // lines: array teks; buttons: [{label, value, primary}] -> Promise<value|null>
+  function askChoice(title, lines, buttons) {
+    return new Promise((resolve) => {
+      document.getElementById("ak-confirm")?.remove();
+      const shade = document.createElement("div");
+      shade.id = "ak-confirm";
+      shade.innerHTML = `
+        <div class="akc-card" role="dialog" aria-modal="true">
+          <div class="akc-title">${escapePreviewHtml(title)}</div>
+          <div class="akc-body">${(lines || []).map((l) => `<div>${escapePreviewHtml(l)}</div>`).join("")}</div>
+          <div class="akc-foot">
+            <button type="button" data-v="__cancel">Batal</button>
+            ${(buttons || [])
+              .map((b, i) => `<button type="button" data-i="${i}"${b.primary ? ' class="akc-primary"' : ""}>${escapePreviewHtml(b.label)}</button>`)
+              .join("")}
+          </div>
+        </div>`;
+      (document.body || document.documentElement).appendChild(shade);
+      const finish = (v) => {
+        shade.remove();
+        document.removeEventListener("keydown", onKey, true);
+        resolve(v);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") finish(null);
+        if (ev.key === "Enter") {
+          const i = (buttons || []).findIndex((b) => b.primary);
+          if (i >= 0) {
+            ev.preventDefault();
+            finish(buttons[i].value);
+          }
+        }
+      };
+      document.addEventListener("keydown", onKey, true);
+      shade.addEventListener("click", (ev) => {
+        const b = ev.target.closest?.("button");
+        if (!b) {
+          if (ev.target === shade) finish(null);
+          return;
+        }
+        if (b.dataset.v === "__cancel") return finish(null);
+        finish(buttons[Number(b.dataset.i)]?.value ?? null);
+      });
+    });
+  }
+
+  const ALUR_STYLES = `
+  .ak-rf{border-radius:8px;padding:6px 8px;margin:0 0 6px;font-size:12px;line-height:1.35}
+  .ak-rf-danger{background:#fdecea;border:2px solid #d32f2f;color:#7f1010}
+  .ak-rf-warn{background:#fff8e1;border:2px solid #f9a825;color:#5d4300}
+  .ak-rf-title{font-weight:800;margin-bottom:3px}
+  .ak-rf-row{margin:2px 0}
+  .ak-rf-held{background:#d32f2f;color:#fff;font-weight:700;border-radius:6px;padding:4px 8px;margin:0 0 6px;font-size:12px}
+
+    /* ---------- Menu: saklar JALAN OTOMATIS ---------- */
+    #auto-klinik-submenu button.ak-toggle{position:relative!important;padding-right:62px!important;}
+    #auto-klinik-submenu button.ak-toggle .ak-sw{position:absolute!important;right:12px!important;top:50%!important;transform:translateY(-50%)!important;
+      width:40px!important;height:22px!important;border-radius:999px!important;background:#cbd5e1!important;transition:background .15s!important;}
+    #auto-klinik-submenu button.ak-toggle .ak-sw::after{content:""!important;position:absolute!important;top:3px!important;left:3px!important;width:16px!important;height:16px!important;
+      border-radius:50%!important;background:#fff!important;box-shadow:0 1px 3px rgba(15,23,42,.3)!important;transition:left .15s!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on{background:#dcfce7!important;border-color:#22c55e!important;color:#14532d!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on small{color:#15803d!important;font-weight:700!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on .ak-sw{background:#16a34a!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on .ak-sw::after{left:21px!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-off{background:#f1f5f9!important;border-color:#cbd5e1!important;color:#475569!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-off small{color:#64748b!important;font-weight:700!important;}
+
+    /* ---------- Paket Resep: tampilan berwarna, batas kolom jelas ---------- */
+    .ak-rp-card.akm{border:1px solid #94a3b8!important;}
+    .akm-head{background:linear-gradient(135deg,#f97316,#ea580c)!important;border-bottom:0!important;}
+    .akm-head .ak-rp-title{color:#fff!important;}
+    .akm-head .ak-rp-sub{color:#ffedd5!important;}
+    .akm-head .ak-rp-x{background:rgba(255,255,255,.22)!important;color:#fff!important;}
+    .akm-head .ak-rp-x:hover{background:rgba(255,255,255,.35)!important;}
+    .akm-head .ak-suggest-badge{background:#fff!important;color:#6d28d9!important;}
+    .akm-body{background:#e2e8f0!important;}
+    .akm-sec{border:1px solid #94a3b8!important;border-top:4px solid var(--akc,#64748b)!important;border-radius:12px!important;
+      box-shadow:0 1px 2px rgba(15,23,42,.08)!important;padding:0 0 12px!important;overflow:hidden!important;}
+    .akm-sec > *:not(.akm-sec-title){margin-left:12px!important;margin-right:12px!important;}
+    .akm-sec-title{margin:0 0 10px!important;padding:9px 12px!important;background:var(--akb,#f8fafc)!important;
+      border-bottom:1px solid #cbd5e1!important;color:var(--akt,#0f172a)!important;font-size:13px!important;letter-spacing:.2px!important;}
+    .akm-pasien{--akc:#2563eb;--akb:#eff6ff;--akt:#1e3a8a;}
+    .akm-diagnosis{--akc:#0d9488;--akb:#f0fdfa;--akt:#134e4a;}
+    .akm-anamnesa{--akc:#7c3aed;--akb:#f5f3ff;--akt:#4c1d95;}
+    .akm-obat{--akc:#ea580c;--akb:#fff7ed;--akt:#7c2d12;}
+    .akm-tindakan{--akc:#16a34a;--akb:#f0fdf4;--akt:#14532d;}
+    .akm-sec.akm-preview{border:0!important;box-shadow:none!important;padding:0!important;overflow:visible!important;background:transparent!important;}
+    .akm-sec.akm-preview > *{margin:0!important;}
+    .akm .ak-live-preview-box{border:1px solid #fb923c!important;border-top:4px solid #ea580c!important;border-radius:12px!important;background:#fff!important;}
+    .akm .ak-live-preview-row,.akm .ak-live-preview-racikan{border-color:#cbd5e1!important;}
+    .akm-stat{border:1px solid #93c5fd!important;background:#f8fbff!important;}
+    .akm-items{gap:10px!important;}
+    .akm-group{border:1px solid #cbd5e1!important;border-left:5px solid var(--akg,#f97316)!important;border-radius:10px!important;background:#fff!important;overflow:hidden!important;}
+    .akm-group-title{margin:0!important;padding:7px 10px!important;background:var(--akgb,#fff7ed)!important;color:var(--akgt,#9a3412)!important;
+      border-bottom:1px solid #e2e8f0!important;font-size:11px!important;}
+    .akm-group .akm-choices{padding:8px!important;}
+    .akm-group:nth-child(6n+1){--akg:#f97316;--akgb:#fff7ed;--akgt:#9a3412;}
+    .akm-group:nth-child(6n+2){--akg:#2563eb;--akgb:#eff6ff;--akgt:#1e40af;}
+    .akm-group:nth-child(6n+3){--akg:#0d9488;--akgb:#f0fdfa;--akgt:#115e59;}
+    .akm-group:nth-child(6n+4){--akg:#7c3aed;--akgb:#f5f3ff;--akgt:#5b21b6;}
+    .akm-group:nth-child(6n+5){--akg:#db2777;--akgb:#fdf2f8;--akgt:#9d174d;}
+    .akm-group:nth-child(6n+6){--akg:#65a30d;--akgb:#f7fee7;--akgt:#3f6212;}
+    .akm .ak-package-choice{border:1px solid #cbd5e1!important;background:#fff!important;}
+    .akm .ak-package-choice:hover{border-color:#f97316!important;background:#fffaf5!important;}
+    .akm .ak-package-choice.akm-suggested{border-color:#a78bfa!important;background:#faf5ff!important;}
+    .akm .ak-package-choice.akm-on{border-color:#ea580c!important;background:#ffedd5!important;color:#7c2d12!important;box-shadow:inset 4px 0 0 #ea580c!important;}
+    .akm-foot{border-top:1px solid #94a3b8!important;background:#f8fafc!important;}
+    .akm-dxc{margin-top:10px!important;}
+    .akm-dxc-title{font:800 11px/1.3 ${AK_FONT}!important;color:#115e59!important;letter-spacing:.3px!important;margin-bottom:6px!important;}
+    .akm-dxc-list{display:flex!important;flex-wrap:wrap!important;gap:6px!important;}
+    .akm-dxc-btn{display:inline-flex!important;align-items:center!important;gap:6px!important;min-height:34px!important;padding:5px 10px!important;
+      border:1px solid #5eead4!important;border-radius:999px!important;background:#f0fdfa!important;color:#134e4a!important;
+      font:600 12.5px/1.25 ${AK_FONT}!important;cursor:pointer!important;text-align:left!important;}
+    .akm-dxc-btn b{font-weight:800!important;color:#0f766e!important;}
+    .akm-dxc-btn:hover{background:#ccfbf1!important;border-color:#14b8a6!important;}
+    .akm-dxc-btn.akm-dxc-on{background:#0d9488!important;border-color:#0d9488!important;color:#fff!important;}
+    .akm-dxc-btn.akm-dxc-on b{color:#fff!important;}
+    .akm-dxc-btn.akm-dxc-icd{border-color:#cbd5e1!important;background:#fff!important;color:#334155!important;border-radius:10px!important;}
+    .akm-dxs{margin-top:10px!important;}
+    .akm-dxs input{display:block!important;width:100%!important;box-sizing:border-box!important;padding:9px 12px!important;border:1px solid #94a3b8!important;
+      border-radius:10px!important;background:#fff!important;color:#0f172a!important;font:500 13px/1.3 ${AK_FONT}!important;}
+    .akm-dxs input:focus{outline:none!important;border-color:#0d9488!important;box-shadow:0 0 0 3px rgba(13,148,136,.15)!important;}
+    .akm-dxs-res:not(:empty){margin-top:8px!important;display:flex!important;flex-direction:column!important;gap:6px!important;}
+    .akm-dxs-res .akm-dxc-list{gap:5px!important;}
+
+    /* ---------- v0.4.3: Paket Resep lebih ringkas & warna lebih tegas ---------- */
+    .ak-rp-card.akm{width:min(1000px,calc(100vw - 24px))!important;max-height:calc(100vh - 24px)!important;border:2px solid #c2410c!important;border-radius:14px!important;}
+    .akm-head{padding:8px 14px!important;background:linear-gradient(135deg,#ea580c,#c2410c)!important;align-items:center!important;}
+    .akm-head .ak-rp-title{font-size:16px!important;}
+    .akm-head .ak-rp-sub{font-size:11.5px!important;margin-top:1px!important;}
+    .akm-head .ak-rp-x{width:30px!important;height:30px!important;font-size:20px!important;}
+    .akm-body{padding:8px!important;gap:8px!important;background:#cbd5e1!important;}
+    .akm-col{gap:8px!important;}
+    .akm-sec,.akm-group{flex:none!important;}
+    .akm-sec > .ak-package-anamnesis{width:calc(100% - 16px)!important;}
+    .akm-sec{border:1px solid var(--akc,#64748b)!important;border-top-width:1px!important;border-radius:10px!important;padding:0 0 8px!important;}
+    .akm-sec > *:not(.akm-sec-title){margin-left:8px!important;margin-right:8px!important;}
+    .akm-sec-title{margin:0 0 7px!important;padding:5px 9px!important;background:var(--akc,#64748b)!important;color:#fff!important;border-bottom:0!important;
+      font:800 12.5px/1.3 ${AK_FONT}!important;}
+    .akm-sec-title .akm-link{color:#fff!important;font-size:11.5px!important;text-decoration:underline!important;}
+    .akm-sec-title .akm-count{background:#fff!important;color:var(--akc,#ea580c)!important;}
+    .akm-hint{margin-top:5px!important;font-size:11px!important;line-height:1.35!important;}
+    .akm-stats{gap:6px!important;}
+    .akm-stat{padding:5px 8px!important;gap:2px!important;border-color:#2563eb!important;border-radius:8px!important;}
+    .akm-stat > span:first-child{font-size:9.5px!important;}
+    .akm-stat b{font-size:14px!important;}
+    .akm-bb input{font-size:14px!important;}
+    .akm-cat{font-size:12px!important;padding:1px 8px!important;}
+    .akm-vitals{margin-top:4px!important;font-size:11.5px!important;}
+    .akm-dxp{margin-top:6px!important;padding:5px 8px!important;font-size:12px!important;border-style:solid!important;border-color:#0d9488!important;background:#f0fdfa!important;color:#134e4a!important;}
+    .akm-dxc{margin-top:6px!important;}
+    .akm-dxc-title{font-size:10px!important;margin-bottom:4px!important;color:#0f766e!important;}
+    .akm-dxc-list{gap:4px!important;}
+    .akm-dxc-btn{min-height:28px!important;padding:3px 9px!important;font-size:12px!important;border-color:#0d9488!important;background:#ccfbf1!important;}
+    .akm-dxs{margin-top:6px!important;}
+    .akm-dxs input{padding:6px 10px!important;font-size:12.5px!important;border-color:#0d9488!important;}
+    .akm .ak-package-anamnesis{min-height:44px!important;padding:6px 9px!important;font-size:12.5px!important;border-color:#7c3aed!important;}
+    .akm .ak-package-suggestion{margin-top:6px!important;}
+    .akm .ak-package-suggestion-box{padding:6px 8px!important;font-size:11.5px!important;border-color:#7c3aed!important;background:#f5f3ff!important;}
+    .akm .ak-package-suggestion-warn{margin-top:4px!important;font-size:10.5px!important;}
+    .akm .ak-preview-empty{padding:6px 8px!important;font-size:11.5px!important;}
+    .akm .ak-live-preview-box{padding:7px 9px!important;border-top-width:1px!important;border-color:#ea580c!important;}
+    .akm .ak-live-preview-title{font-size:12px!important;}
+    .akm .ak-preview-section{margin-top:6px!important;}
+    .akm .ak-live-preview-row,.akm .ak-live-preview-racikan{padding:6px 8px!important;gap:6px!important;font-size:12px!important;}
+    .akm .ak-live-preview-row b,.akm .ak-live-preview-racikan b{font-size:12px!important;}
+    .akm .ak-package-preview-meta{margin:0 0 6px!important;padding:6px 8px!important;font-size:11.5px!important;}
+    .akm-items{gap:7px!important;}
+    .akm-group{border:1px solid var(--akg,#f97316)!important;border-left-width:4px!important;border-radius:8px!important;}
+    .akm-group-title{padding:4px 8px!important;background:var(--akg,#f97316)!important;color:#fff!important;border-bottom:0!important;font-size:10.5px!important;letter-spacing:.4px!important;}
+    .akm-group .akm-choices{padding:5px!important;gap:4px!important;}
+    .akm .ak-package-choice{min-height:30px!important;padding:4px 8px!important;gap:7px!important;border-radius:7px!important;font-size:12.5px!important;border-color:#94a3b8!important;}
+    .akm .ak-package-choice input{width:16px!important;height:16px!important;}
+    .akm .ak-package-choice.akm-on{background:#fed7aa!important;border-color:#c2410c!important;box-shadow:inset 4px 0 0 #c2410c!important;color:#7c2d12!important;}
+    .akm .ak-package-choice.akm-suggested{border-color:#7c3aed!important;}
+    .akm-name small{font-size:10.5px!important;}
+    .ak-suggest-badge{padding:1px 6px!important;font-size:9.5px!important;}
+    .akm-foot{padding:7px 12px!important;gap:8px!important;border-top:2px solid #c2410c!important;}
+    .akm-selected{font-size:11.5px!important;}
+    .akm-btn-ghost,.akm-btn-primary{min-height:36px!important;padding:6px 14px!important;border-radius:9px!important;font-size:13px!important;}
+    .akm-btn-primary{background:#ea580c!important;border-color:#c2410c!important;}
+    @media (max-width:600px){
+      .ak-rp-card.akm{width:100vw!important;max-height:100%!important;border-radius:0!important;border-width:0!important;}
+      .akm-head{padding:7px 10px!important;}
+      .akm-head .ak-rp-sub{display:none!important;}
+      .akm-body{padding:6px!important;gap:6px!important;}
+      .akm-choices{grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+      .akm .ak-package-choice{font-size:12px!important;padding:4px 6px!important;gap:5px!important;}
+      .akm-stat b,.akm-bb input{font-size:13.5px!important;}
+      .akm-foot{flex-direction:row!important;align-items:center!important;padding:6px 8px!important;}
+      .akm-selected{display:none!important;}
+      .akm-actions{flex:1!important;}
+      .akm-actions > *{flex:1!important;}
+    }
+
+    #ak-confirm{position:fixed!important;inset:0!important;z-index:2147483646!important;display:flex!important;align-items:center!important;
+      justify-content:center!important;padding:12px!important;background:rgba(15,23,42,.45)!important;font-family:${AK_FONT}!important;box-sizing:border-box!important;}
+    #ak-confirm .akc-card{width:min(480px,100%)!important;max-height:calc(100vh - 24px)!important;display:flex!important;flex-direction:column!important;gap:10px!important;
+      padding:16px!important;border-radius:16px!important;background:#fff!important;color:#0f172a!important;box-shadow:0 20px 50px rgba(15,23,42,.35)!important;box-sizing:border-box!important;}
+    #ak-confirm .akc-title{font:700 16px/1.3 ${AK_FONT}!important;}
+    #ak-confirm .akc-body{display:flex!important;flex-direction:column!important;gap:4px!important;overflow:auto!important;font:400 13px/1.45 ${AK_FONT}!important;color:#334155!important;}
+    #ak-confirm .akc-foot{display:flex!important;flex-wrap:wrap!important;justify-content:flex-end!important;gap:8px!important;}
+    #ak-confirm .akc-foot button{min-height:38px!important;padding:6px 14px!important;border:1px solid #cbd5e1!important;border-radius:10px!important;
+      background:#fff!important;color:#334155!important;font:600 13px/1 ${AK_FONT}!important;cursor:pointer!important;}
+    #ak-confirm .akc-foot button.akc-primary{background:#ea580c!important;border-color:#ea580c!important;color:#fff!important;}
+  `;
+
+  // ---------------- JALAN OTOMATIS SAAT PASIEN DIBUKA ----------------
+  // (dipanggil MAIN_MENU sebelum bagian ini dimuat -> tanpa const)
+  function autoRunEnabled() {
+    try {
+      return localStorage.getItem("auto-klinik-medisin:otomatis") !== "0";
+    } catch (_) {
+      return true;
+    }
+  }
+  function toggleAutoRun() {
+    const on = !autoRunEnabled();
+    try {
+      localStorage.setItem("auto-klinik-medisin:otomatis", on ? "1" : "0");
+    } catch (_) {}
+    // Menu tetap terbuka; tombol berganti warna (hijau = NYALA, abu-abu = MATI).
+    const b = document.getElementById("auto-klinik-otomatis");
+    if (b) {
+      b.classList.toggle("ak-on", on);
+      b.classList.toggle("ak-off", !on);
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      const s = b.querySelector("small");
+      if (s) s.textContent = autoRunLabel();
+    }
+  }
+  function autoRunLabel() {
+    return `${autoRunEnabled() ? "NYALA" : "MATI"} · RESUME + Paket Resep saat pasien dibuka`;
+  }
+
+  // Sekali per kunjungan, hanya bila belum ada diagnosa/resep tersimpan.
+  const autoRunDone = new Set();
+  let autoRunBusy = false;
+  async function maybeAutoRun() {
+    if (autoRunBusy || !autoRunEnabled() || !isTargetPage()) return;
+    const id = urlKunjunganId();
+    if (!id || autoRunDone.has(id)) return;
+    const p = pasienAktif();
+    const dg = p && findVm("Diagnosa");
+    const rs = p && findVm("Resep");
+    if (!p || !dg || !rs) return;
+    autoRunDone.add(id);
+    let seen = false;
+    try {
+      seen = sessionStorage.getItem("ak-auto:" + id) === "1";
+      sessionStorage.setItem("ak-auto:" + id, "1");
+    } catch (_) {}
+    if (seen) return;
+    const saved = (Array.isArray(dg.data) && dg.data.length) || (p.resep || []).length;
+    if (saved) {
+      LOG("Jalan otomatis dilewati: diagnosa/resep kunjungan ini sudah tersimpan");
+      return;
+    }
+    autoRunBusy = true;
+    try {
+      await sleep(400);
+      await runTemplate("resume-diagnosis");
+    } finally {
+      autoRunBusy = false;
+    }
+  }
+
+  // ---------------- PILIHAN & PENCARIAN DIAGNOSIS (Paket Resep, v0.4.2) ----------------
+  // Kandidat diagnosis dari keluhan: diagnosis utama + yang juga cocok (maks 5). (pure, diuji)
+  function diagnosisCandidates(text, vitals) {
+    const found = detectDiagnosisFromComplaint(text, { vitals });
+    if (!found) return [];
+    return [found.key, ...(found.others || [])]
+      .filter((k, i, a) => a.indexOf(k) === i)
+      .map((k) => DIAGNOSIS_TEMPLATES.find((d) => d.key === k))
+      .filter(Boolean)
+      .slice(0, 5);
+  }
+
+  // Cari diagnosis bawaan dari nama, kode ICD, atau kata keluhan. (pure, diuji)
+  function searchDiagnosisTemplates(query, limit = 8) {
+    const q = String(query || "").trim().toLowerCase();
+    if (q.length < 2) return [];
+    const out = [];
+    const add = (d) => d && !out.includes(d) && out.push(d);
+    for (const d of DIAGNOSIS_TEMPLATES) {
+      const hay = [d.label, d.key.replace(/_/g, " "), d.query || "", ...(d.icd || [])].join(" ").toLowerCase();
+      if (hay.includes(q)) add(d);
+    }
+    const found = detectDiagnosisFromComplaint(q);
+    if (found) for (const k of [found.key, ...(found.others || [])]) add(DIAGNOSIS_TEMPLATES.find((d) => d.key === k));
+    return out.slice(0, limit);
+  }
+
+  // Ganti diagnosis yang diisi SCRIPT (belum disimpan) dengan pilihan dokter.
+  // Diagnosa dokter / yang sudah tersimpan tidak disentuh. TIDAK menyimpan.
+  async function applyDiagnosisChoice(dx) {
+    const page = selectedIcdEntries();
+    if (dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)))) return { dx, note: `${dx.label} sudah terisi` };
+    const dg = needVm("Diagnosa", "Diagnosa");
+    const auto = autoDxForPage();
+    const saved = new Set((Array.isArray(dg.data) ? dg.data : []).map(savedIcdCode));
+    for (const code of [...auto.codes]) {
+      const row = (dg.input_icdx || []).find((r) => r.val && icdOptionCode(r.val) === code);
+      if (row && !saved.has(code)) {
+        row.val = null;
+        row.kasus = null;
+      }
+      auto.codes.delete(code);
+    }
+    const r = await fillDiagnosis(dx);
+    return { dx, note: `${dx.label} (ICD ${r.icdCode})` };
+  }
+
+  // Tambah satu ICD hasil pencarian (pilihan dokter, tidak diganti otomatis). TIDAK menyimpan.
+  async function addIcdOption(opt) {
+    const dg = needVm("Diagnosa", "Diagnosa");
+    const code = icdOptionCode(opt);
+    if (!code) throw new Error("kode ICD tidak terbaca");
+    if (selectedIcdEntries().some((e) => e.code === code)) return { code, skipped: true };
+    let row = (dg.input_icdx || []).find((r) => !r.val);
+    if (!row) {
+      dg.addColom();
+      row = dg.input_icdx[dg.input_icdx.length - 1];
+    }
+    row.val = opt;
+    try {
+      dg.setIcdx(opt, row);
+    } catch (_) {
+      row.kasus = opt.en || row.kasus;
+    }
+    if (!row.kasus && opt.en) row.kasus = opt.en;
+    row.tacc = "-1";
+    LOG(`Diagnosa ditambah dokter: ${code} (belum disimpan)`);
+    return { code, skipped: false };
+  }
+
+  // Cari ICD lewat pencarian Medisin sendiri (PCare untuk BPJS); maks 8 hasil.
+  async function searchIcdOptions(query) {
+    const q = String(query || "").trim();
+    if (q.length < 3) return [];
+    return (await searchIcd(q)).filter((o) => icdOptionCode(o)).slice(0, 8);
+  }
+
+  // >>> AK-WRITE-BLOCK START
+  // Bagian ini SATU-SATUNYA yang boleh menyimpan/mengubah data di Medisin, dan hanya
+  // saat dokter menekan tombolnya sendiri (dijaga tes). Yang TIDAK PERNAH dipanggil:
+  // SUBMIT (saveData), SUBMIT BPJS/SATUSEHAT, PCare, proses kasir/farmasi, racikan.
+
+  // Riwayat kunjungan pasien (hanya membaca; sama dengan halaman RIWAYAT MEDIS).
+  async function loadVisitHistory(p) {
+    const ax = vueRoot()?.$axios;
+    if (!ax || !p?.users_id) throw new Error("riwayat pasien tidak bisa dibaca");
+    // Medisin mewajibkan rentang tanggal; ambil 2 tahun terakhir.
+    const res = await ax.post("admin/pelayanan/pasien/riwayat", {
+      users_id: p.users_id,
+      tgl_awal: addDaysIso(todayIso(), -730),
+      tgl_akhir: todayIso(),
+    });
+    const d = res?.data;
+    return Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+  }
+
+  // RESEP ULANG: diagnosa + obat satuan dari kunjungan lalu, stok sesuai penjamin SEKARANG.
+  // Hanya mengisi baris (tidak menyimpan).
+  function repeatLastVisit() {
+    return runTask("RESEP ULANG", async () => {
+      const p = await waitPasienReady();
+      const rs = needVm("Resep", "Resep");
+      const last = pickLastVisit(await loadVisitHistory(p), p.id_kunjungan);
+      if (!last) {
+        notify("Belum ada kunjungan sebelumnya dengan diagnosa/resep untuk pasien ini.", "warn", 9000);
+        return;
+      }
+      const v = summarizeVisit(last);
+      const lines = [
+        `Kunjungan ${v.date || "terakhir"}`,
+        ...(v.icdx.length ? v.icdx.map((d) => `Diagnosa: ${d.code} ${d.en}`) : ["Diagnosa: -"]),
+        ...(v.drugs.length ? v.drugs.map((d) => `Obat: ${d.base} · ${d.qty} · ${d.signa || "-"}`) : ["Obat: -"]),
+      ];
+      if (v.racikan) lines.push(`Racikan (${v.racikan} bahan) tidak diulang otomatis.`);
+      lines.push(`Obat diambil dari stok penjamin ${currentPenjamin()}. Tidak ada yang disimpan.`);
+      const ok = await askChoice("Resep ulang dari kunjungan lalu?", lines, [
+        { label: "ISI RESEP ULANG", value: "ok", primary: true },
+      ]);
+      if (ok !== "ok") return;
+
+      const notes = [];
+      for (const d of v.icdx) {
+        try {
+          await fillDiagnosis({ key: "ULANG", label: d.en || d.code, icd: [d.code], query: d.en || d.code });
+        } catch (e) {
+          notes.push(`ICD ${d.code}: ${e?.message || e}`);
+        }
+      }
+      const penjamin = currentPenjamin();
+      const lowStock = [];
+      let filled = 0;
+      for (const d of v.drugs) {
+        let opt = null;
+        try {
+          const found = await searchProducts(rs, d.base);
+          opt = pickProductForPenjamin(found, d.base, penjamin);
+        } catch (e) {
+          notes.push(`${d.base}: ${e?.message || e}`);
+          continue;
+        }
+        if (!opt) {
+          notes.push(`${d.base}: tidak ada untuk penjamin ${penjamin}`);
+          continue;
+        }
+        if (productAlreadyInRecipe(rs, opt)) continue;
+        const row = nextEmptyRow(rs, "input_resep");
+        putProductInRow(rs, row, opt, d.qty);
+        if (d.signa) row.signa = matchSignaMaster(rs.signa_opt, d.signa);
+        filled++;
+        const stock = Number(opt.totalStockSystem);
+        if (Number.isFinite(stock) && Number(row.jumlah) > stock) lowStock.push(`${productName(opt)} (stok ${stock})`);
+        await sleep(60);
+      }
+      try {
+        await fillEducation();
+      } catch (_) {}
+      notify(
+        `RESEP ULANG: ${v.icdx.length} diagnosa, ${filled} obat diisi. Periksa lalu SIMPAN SEMUA (Alt+S).` +
+          (lowStock.length ? ` STOK KURANG: ${lowStock.join(", ")}.` : "") +
+          (notes.length ? ` Belum terisi: ${notes.join("; ")}.` : ""),
+        lowStock.length || notes.length ? "warn" : "success",
+        16000,
+      );
+    });
+  }
+
+  // SURAT SAKIT: buka tab Keterangan Dokter (Medisin sendiri membuat/memuat draf surat
+  // saat tab dibuka), lalu isi tanggal & jenis. Dokter yang menekan SIMPAN/CETAK.
+  function fillSickLetter() {
+    return runTask("SURAT SAKIT", async () => {
+      const p = await waitPasienReady();
+      const days = await askChoice("Surat sakit berapa hari?", ["Mulai hari ini. Jenis: Perlu Istirahat, diagnosa ditampilkan."], [
+        { label: "1 hari", value: 1 },
+        { label: "2 hari", value: 2, primary: true },
+        { label: "3 hari", value: 3 },
+      ]);
+      if (!days) return;
+      const root = vueRoot();
+      if (vmName(findVm("KeteranganDokter")) !== "KeteranganDokter")
+        await root.$router.push({ name: "pelayanan-proses", params: { tab: "KeteranganDokter", id_kunjungan: btoa(p.id_kunjungan) } }).catch(() => {});
+      const sk = await waitFor(() => {
+        const v = findVm("KeteranganDokter");
+        return v && v.form && !v.loading && v.form.no_surat ? v : null;
+      }, 20000, 200, "form surat");
+      const start = todayIso();
+      sk.form.jenis_surat = "Perlu Istirahat";
+      sk.form.tgl_mulai = start;
+      sk.form.tgl_selesai = addDaysIso(start, days - 1);
+      sk.form.show_diagnosa = 1;
+      notify(`Surat sakit ${days} hari (${start} s/d ${sk.form.tgl_selesai}) terisi. Periksa lalu tekan SIMPAN / CETAK di surat.`, "success", 12000);
+    });
+  }
+
+  // PASIEN BERIKUTNYA: buka antrean POLI DOKTER, lalu jalankan tombol PELAYANAN milik
+  // Medisin untuk pasien menunggu pertama (status menjadi "Sedang Dilayani").
+  const NEXT_KEY = "ak-next-patient";
+  async function goNextPatient() {
+    const ok = await askChoice(
+      "Panggil pasien berikutnya?",
+      [
+        "Membuka antrean POLI DOKTER lalu menekan PELAYANAN untuk pasien menunggu pertama.",
+        "Pastikan pasien ini sudah SIMPAN dan SUBMIT.",
+      ],
+      [{ label: "PASIEN BERIKUTNYA", value: "ok", primary: true }],
+    );
+    if (ok !== "ok") return;
+    try {
+      sessionStorage.setItem(NEXT_KEY, JSON.stringify({ t: Date.now(), from: urlKunjunganId() }));
+    } catch (_) {}
+    await vueRoot()?.$router.push("/admin/klinik/antrean/poli").catch(() => {});
+  }
+  let nextBusy = false;
+  async function maybeContinueNextPatient() {
+    if (nextBusy || location.pathname !== "/admin/klinik/antrean/poli") return;
+    let job = null;
+    try {
+      job = JSON.parse(sessionStorage.getItem(NEXT_KEY) || "null");
+    } catch (_) {}
+    if (!job || Date.now() - Number(job.t) > 60000) return;
+    nextBusy = true;
+    try {
+      sessionStorage.removeItem(NEXT_KEY);
+      const q = await waitFor(
+        () => allVm().find((v) => v.$data && "dokter_opt" in v.$data && "filter" in v.$data && typeof v.doPelayanan === "function"),
+        15000, 200, "antrean poli",
+      );
+      await sleep(800);
+      await waitFor(() => !q.loading, 15000, 200, "daftar antrean");
+      const row = nextWaitingRow(q.data, job.from);
+      if (!row) {
+        notify("Tidak ada pasien yang menunggu di antrean poli.", "warn", 9000);
+        return;
+      }
+      notify("Membuka pasien berikutnya…", "info", 4000);
+      q.doPelayanan(row);
+    } catch (e) {
+      notify(`PASIEN BERIKUTNYA: ${e?.message || e}`, "error", 10000);
+    } finally {
+      nextBusy = false;
+    }
+  }
+
+  // SIMPAN SEMUA: menjalankan tombol SIMPAN milik Medisin per bagian, berurutan:
+  // Diagnosa -> Resep -> BHP -> Tindakan. Tidak menekan SUBMIT (anamnesa/TTV + PCare).
+  const SAVE_ALLOWED = [
+    /^master\/kunjungan\/diagnosa$/,
+    /^master\/kunjungan\/resep$/,
+    /^master\/kunjungan\/tarif-bhp\/[^/]+$/,
+    /^master\/kunjungan\/tindakan$/,
+  ];
+  // Selama satu simpan, permintaan tulis komponen hanya boleh ke alamat di atas;
+  // PCare (rest2) selalu diblokir. globalThis.__AK_DRY_RUN__ = uji tanpa mengirim.
+  async function withGuard(vm, fn, { waitMs = 4000, allow = SAVE_ALLOWED } = {}) {
+    const log = { calls: [], errors: [] };
+    const dry = !!globalThis.__AK_DRY_RUN__;
+    const klinik = vm.$klinik;
+    const pending = [];
+    const blocked = (url) => {
+      const e = new Error(`diblokir AUTO KLINIK: ${url}`);
+      log.errors.push(e.message);
+      return Promise.reject(e);
+    };
+    const guard = {
+      get: (...a) => klinik.get(...a),
+      post: (url, body, cfg) => {
+        if (!allow.some((re) => re.test(String(url)))) return blocked(url);
+        log.calls.push(String(url));
+        const pr = dry ? Promise.resolve({ data: { message: "UJI: tidak dikirim", data: [] } }) : klinik.post(url, body, cfg);
+        pending.push(
+          pr.catch((e) => {
+            log.errors.push(String(e?.response?.data?.message || e?.message || e));
+          }),
+        );
+        return pr;
+      },
+      put: (url) => blocked(url),
+      patch: (url) => blocked(url),
+      delete: (url) => blocked(url),
+    };
+    const KEYS = ["$klinik", "$rest2", "$parseError", "$socket"];
+    const saved = KEYS.map((k) => Object.getOwnPropertyDescriptor(vm, k));
+    const own = (k, v) => Object.defineProperty(vm, k, { value: v, configurable: true, writable: true });
+    const parseError = vm.$parseError;
+    own("$klinik", guard);
+    own("$rest2", { get: blocked, post: blocked, put: blocked, patch: blocked, delete: blocked });
+    own("$parseError", (e, ...rest) => {
+      log.errors.push(String(e?.response?.data?.message || e?.message || e));
+      return parseError?.call(vm, e, ...rest);
+    });
+    if (dry) own("$socket", { emit: () => {} });
+    try {
+      const r = await fn();
+      // Validasi form Medisin bisa asinkron: tunggu permintaan simpan muncul, lalu selesai.
+      const t0 = Date.now();
+      while (!log.calls.length && !log.errors.length && Date.now() - t0 < waitMs) await sleep(100);
+      await Promise.all(pending);
+      await sleep(300);
+      return { ...log, result: r };
+    } finally {
+      KEYS.forEach((k, i) => {
+        delete vm[k];
+        if (saved[i]) Object.defineProperty(vm, k, saved[i]);
+      });
+    }
+  }
+
+  // SIMPAN di dialog Tambah Racikan (permintaan dokter 2026-11-17): hanya 2 alamat
+  // simpan racikan Medisin. Menunggu dialog tertutup (= tersimpan) maks 15 detik.
+  const RACIKAN_SAVE_ALLOWED = [/^master\/kunjungan\/racikan$/, /^racikan-kunjungan\/add\/[^/]+$/];
+  async function saveRacikanDialog(rk) {
+    return withGuard(
+      rk,
+      async () => {
+        await rk.onSubmitAdd();
+        await waitFor(() => !rk.modal_add, 15000, 200, "racikan tersimpan").catch(() => {});
+      },
+      { allow: RACIKAN_SAVE_ALLOWED },
+    );
+  }
+
+  // Jasa konsultasi diisi lalu LANGSUNG disimpan (permintaan dokter 2026-11-17), seperti
+  // biasanya Medisin. Hanya bila baris Tindakan yang belum tersimpan = jasa konsultasi saja.
+  const serviceAutoSave = { running: false, last: null };
+  async function addServiceAndSave() {
+    const r = await addService();
+    if (r !== true) return r;
+    const want = serviceNameFor(needPasien().penjamin_nm);
+    const s = pendingSections().find((x) => x.key === "tind");
+    if (!s || s.names.some((n) => drugNameKey(n) !== drugNameKey(want))) {
+      LOG("Tindakan lain belum disimpan -> jasa konsultasi tidak disimpan otomatis");
+      return r;
+    }
+    serviceAutoSave.running = true;
+    serviceAutoSave.last = saveSection(s)
+      .then(() => {
+        notify(`${globalThis.__AK_DRY_RUN__ ? "[UJI, tidak dikirim] " : ""}Tindakan ${want} tersimpan otomatis.`, "success", 8000);
+        return true;
+      })
+      .catch((e) => {
+        notify(`Tindakan ${want} BELUM tersimpan: ${e?.message || e}. Tekan SIMPAN di bagian Tindakan.`, "error", 15000);
+        return false;
+      })
+      .finally(() => {
+        serviceAutoSave.running = false;
+      });
+    return r;
+  }
+
+  // Bagian yang terisi tetapi belum disimpan. (dipakai juga oleh tes)
+  function pendingSections() {
+    const out = [];
+    const dg = findVm("Diagnosa");
+    const rs = findVm("Resep");
+    const td = findVm("Tindakan");
+    const dx = (dg?.input_icdx || []).filter((r) => r?.val);
+    if (dx.length) out.push({ key: "dx", label: `Diagnosa (${dx.map((r) => icdOptionCode(r.val)).join(", ")})`, vm: dg, n: dx.length });
+    const resep = (rs?.input_resep || []).filter((r) => r?.val);
+    if (resep.length) out.push({ key: "resep", label: `Resep (${resep.length} obat)`, vm: rs, n: resep.length });
+    const bhp = (rs?.input_bhp || []).filter((r) => r?.produk_id?.produk_id);
+    if (bhp.length) out.push({ key: "bhp", label: `BHP (${bhp.length})`, vm: rs, n: bhp.length });
+    const tind = (td?.input_tindakan || []).filter((r) => r?.val);
+    if (tind.length)
+      out.push({ key: "tind", label: `Tindakan (${tind.map((r) => tindakanRowName(td, r)).join(", ")})`, vm: td, n: tind.length, names: tind.map((r) => tindakanRowName(td, r)) });
+    return out;
+  }
+
+  async function saveSection(s) {
+    const vm = s.vm;
+    if (s.key === "dx") {
+      const ok = await Promise.resolve(vm.$refs?.form_diagnosa?.validate?.() ?? true);
+      if (ok === false) throw new Error("kolom diagnosa belum lengkap");
+      const g = await withGuard(vm, () => vm.onSaveDiagnosa());
+      return check(g, "master/kunjungan/diagnosa");
+    }
+    if (s.key === "resep") {
+      vm.limit = 0;
+      const g = await withGuard(vm, () => vm.onSaveResep());
+      return check(g, "master/kunjungan/resep");
+    }
+    if (s.key === "bhp") {
+      const g = await withGuard(vm, () => vm.onSaveBhp());
+      return check(g, "master/kunjungan/tarif-bhp/");
+    }
+    if (s.key === "tind") {
+      const g = await withGuard(vm, () => vm.onSaveTindakan());
+      return check(g, "master/kunjungan/tindakan");
+    }
+    throw new Error("bagian tidak dikenal");
+  }
+  function check(g, url) {
+    if (g.errors.length) throw new Error(g.errors.join("; "));
+    if (!g.calls.some((c) => c.startsWith(url))) throw new Error("tidak tersimpan (periksa kolom wajib di bagian ini)");
+    return true;
+  }
+
+  async function saveSections(list) {
+    const done = [];
+    const failed = [];
+    for (const s of list) {
+      const name = s.label.split(" (")[0];
+      setBusy(true, `Simpan ${name}`);
+      try {
+        await saveSection(s);
+        done.push(name);
+      } catch (e) {
+        failed.push(`${name}: ${String(e?.message || e).replace(/\.$/, "")}`);
+      }
+    }
+    return { done, failed };
+  }
+
+  function saveAll({ confirm = true } = {}) {
+    return runTask("SIMPAN SEMUA", async () => {
+      await waitPasienReady();
+      if (findRacikanModal()) throw new Error("dialog racikan masih terbuka. SIMPAN atau tutup racikan dulu.");
+      const list = pendingSections();
+      if (!list.length) {
+        notify("Tidak ada isian baru yang perlu disimpan (Diagnosa/Resep/BHP/Tindakan).", "info", 7000);
+        return;
+      }
+      if (confirm) {
+        const ok = await askChoice(
+          "Simpan semua bagian?",
+          [
+            ...list.map((s) => "• " + s.label),
+            "Berurutan: Diagnosa → Resep → BHP → Tindakan (tindakan ±30 detik).",
+            "SUBMIT / SUBMIT BPJS tetap ditekan dokter setelahnya.",
+          ],
+          [{ label: "SIMPAN SEMUA", value: "ok", primary: true }],
+        );
+        if (ok !== "ok") return;
+      }
+      const { done, failed } = await saveSections(list);
+      notify(
+        (globalThis.__AK_DRY_RUN__ ? "[UJI, tidak dikirim] " : "") +
+          (done.length ? `Tersimpan: ${done.join(", ")}. ` : "") +
+          (failed.length ? `GAGAL: ${failed.join("; ")}. ` : "") +
+          "Lanjutkan SUBMIT untuk anamnesa/TTV (dan kirim BPJS).",
+        failed.length ? "error" : "success",
+        failed.length ? 25000 : 12000,
+      );
+    });
+  }
+  // <<< AK-WRITE-BLOCK END
+
+  // ---------------- SHORTCUT KEYBOARD ----------------
+  const SHORTCUTS = {
+    KeyR: () => runTemplate("resume-diagnosis"),
+    KeyP: () => whenPasienReady(() => renderMedicationGroupPackagePicker()),
+    KeyS: () => saveAll(),
+    KeyN: () => goNextPatient(),
+  };
+  function onShortcut(ev) {
+    if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    const fn = SHORTCUTS[ev.code];
+    if (!fn || !isTargetPage() || akLocked()) return;
+    if (document.getElementById("ak-confirm") || document.getElementById("ak-drugmap")) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeMainSubmenu();
+    Promise.resolve()
+      .then(fn)
+      .catch((e) => notify(`AUTO KLINIK: ${e?.message || e}`, "error", 12000));
+  }
+
+  // ---------------- v0.6.0: TOMBOL DI SEMUA HALAMAN, BISA DIGESER, KUNCI JARAK JAUH ----------------
+  // Tombol muncul di semua halaman app.medisin.id; menu yang butuh pasien hanya jalan di
+  // halaman pelayanan. Posisi tombol disimpan per perangkat (localStorage).
+  function isMedisinPage() {
+    return location.hostname === MEDISIN_HOST && !/^\/(?:login|auth|register)/i.test(location.pathname);
+  }
+
+  const POS_KEY = "auto-klinik-medisin:posisi-tombol";
+  // Posisi = titik tengah tombol sebagai pecahan layar (0..1), aman saat layar diputar. (pure, diuji)
+  function clampLauncherPos(p) {
+    const c = (n, d) => (Number.isFinite(Number(n)) ? Math.min(0.97, Math.max(0.03, Number(n))) : d);
+    return { x: c(p?.x, 0.9), y: c(p?.y, 0.88) };
+  }
+  function readLauncherPos() {
+    try {
+      const p = JSON.parse(localStorage.getItem(POS_KEY) || "null");
+      return p ? clampLauncherPos(p) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function applyLauncherPos(box, pos = readLauncherPos()) {
+    if (!box || !pos) return;
+    const btn = box.querySelector("#auto-klinik-main");
+    const w = btn?.offsetWidth || 150;
+    const h = btn?.offsetHeight || 44;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cx = Math.min(vw - w / 2 - 4, Math.max(w / 2 + 4, pos.x * vw));
+    const cy = Math.min(vh - h / 2 - 4, Math.max(h / 2 + 4, pos.y * vh));
+    const set = (k, v) => box.style.setProperty(k, v, "important");
+    const bottomHalf = pos.y >= 0.5;
+    const rightHalf = pos.x >= 0.5;
+    set("top", bottomHalf ? "auto" : `${Math.round(cy - h / 2)}px`);
+    set("bottom", bottomHalf ? `${Math.round(vh - cy - h / 2)}px` : "auto");
+    set("left", rightHalf ? "auto" : `${Math.round(cx - w / 2)}px`);
+    set("right", rightHalf ? `${Math.round(vw - cx - w / 2)}px` : "auto");
+    // Menu dibuka ke arah tengah layar agar tidak keluar layar.
+    box.classList.toggle("ak-pos-top", !bottomHalf);
+    box.classList.toggle("ak-pos-left", !rightHalf);
+  }
+
+  // Tekan-tahan lalu geser tombol (mouse & sentuh). Geser >8 px = pindah, bukan klik.
+  function makeLauncherDraggable(box) {
+    const btn = box.querySelector("#auto-klinik-main");
+    if (!btn || btn.dataset.akDrag) return;
+    btn.dataset.akDrag = "1";
+    let start = null;
+    let moved = false;
+    const onMove = (ev) => {
+      if (!start || ev.pointerId !== start.id) return;
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 8) return;
+      if (!moved) {
+        moved = true;
+        closeMainSubmenu();
+        box.classList.add("ak-dragging");
+      }
+      ev.preventDefault();
+      applyLauncherPos(box, clampLauncherPos({ x: ev.clientX / window.innerWidth, y: ev.clientY / window.innerHeight }));
+    };
+    const end = (ev) => {
+      if (!start || ev.pointerId !== start.id) return;
+      start = null;
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
+      box.classList.remove("ak-dragging");
+      if (!moved) return;
+      const pos = clampLauncherPos({ x: ev.clientX / window.innerWidth, y: ev.clientY / window.innerHeight });
+      try {
+        localStorage.setItem(POS_KEY, JSON.stringify(pos));
+      } catch (_) {}
+      applyLauncherPos(box, pos);
+      // Klik yang mengikuti geseran tidak membuka menu.
+      const swallow = (e) => (e.preventDefault(), e.stopImmediatePropagation());
+      btn.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => btn.removeEventListener("click", swallow, { capture: true }), 400);
+    };
+    // Gerakan dipantau di seluruh jendela, jadi geser cepat pun tidak lepas dari tombol.
+    btn.addEventListener("pointerdown", (ev) => {
+      if (ev.button > 0) return;
+      start = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
+      moved = false;
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", end, true);
+      window.addEventListener("pointercancel", end, true);
+    });
+  }
+
+  // ---- Kunci jarak jauh ----
+  // Dokter mengubah file kunci.json di GitHub (dari HP): "aktif": false = AUTO KLINIK
+  // dikunci di semua perangkat. Dicek saat mulai, tiap 2 menit, dan saat tab dibuka lagi.
+  // Bila internet/GitHub gagal, status terakhir yang diketahui tetap dipakai.
+  const LOCK_URL =
+    "https://raw.githubusercontent.com/taufanmtknight-debug/medisin-auto-klinik/claude/project-thread-cg0a4l/kunci.json";
+  const LOCK_KEY = "auto-klinik-medisin:kunci";
+  // (pure, diuji) Teks kunci.json -> { locked, pesan } atau null bila tidak terbaca.
+  function parseLockText(text) {
+    const t = String(text || "").trim();
+    if (!t) return null;
+    try {
+      const j = JSON.parse(t);
+      if (j && typeof j === "object" && "aktif" in j) {
+        const off = j.aktif === false || /^(?:false|tidak|mati|off|0|kunci)$/i.test(String(j.aktif).trim());
+        // stamp = isi file; bila file diubah lagi (mis. pesan / kunci_ke), buka-PIN batal.
+        return { locked: off, pesan: String(j.pesan || ""), stamp: JSON.stringify(j) };
+      }
+    } catch (_) {}
+    const m = t.match(/"?aktif"?\s*:\s*"?(\w+)"?/i);
+    if (m) return { locked: /^(?:false|tidak|mati|off|0|kunci)$/i.test(m[1]), pesan: "", stamp: t.replace(/\s+/g, "") };
+    return null;
+  }
+  let lockState = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(LOCK_KEY) || "null") || { locked: false, pesan: "" };
+    } catch (_) {
+      return { locked: false, pesan: "" };
+    }
+  })();
+  // v0.6.1: saat dikunci jarak jauh, perangkat ini bisa dibuka dengan PIN dokter
+  // (disimpan hanya sebagai hash SHA-256) dan dikunci lagi kapan saja dari menu.
+  // Buka-PIN berlaku sampai dokter menekan "Kunci lagi" atau kunci jarak jauh dibuka.
+  const PIN_HASH = "ab3c5ba5484877e28875f458dbdfcd9b74aeb6a787bd8e251782e7ae2741125b";
+  const LOCAL_OPEN_KEY = "auto-klinik-medisin:buka-pin";
+  // Buka-PIN berlaku hanya untuk isi kunci.json yang sama seperti saat PIN dimasukkan.
+  function readLocalOpen() {
+    try {
+      const v = localStorage.getItem(LOCAL_OPEN_KEY);
+      return !!v && v === String(lockState?.stamp || "lama");
+    } catch (_) {
+      return false;
+    }
+  }
+  function setLocalOpen(on) {
+    try {
+      if (on) localStorage.setItem(LOCAL_OPEN_KEY, String(lockState?.stamp || "lama"));
+      else localStorage.removeItem(LOCAL_OPEN_KEY);
+    } catch (_) {}
+  }
+  // (pure, diuji) Terkunci = dikunci jarak jauh DAN belum dibuka PIN di perangkat ini.
+  function lockEffective(remoteLocked, localOpen) {
+    return !!remoteLocked && !localOpen;
+  }
+  function remoteLocked() {
+    return !!lockState?.locked;
+  }
+  function akLocked() {
+    return lockEffective(remoteLocked(), readLocalOpen());
+  }
+  async function pinMatches(pin) {
+    const digits = String(pin || "").replace(/\s+/g, "");
+    if (!/^\d{4,8}$/.test(digits) || !window.crypto?.subtle) return false;
+    const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(digits));
+    const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return hex === PIN_HASH;
+  }
+  function remountLauncher() {
+    document.getElementById("auto-klinik-box")?.remove();
+    ensureButtonMounted();
+  }
+  // Panel kecil di atas tombol terkunci: isi PIN lalu BUKA.
+  function showPinPanel(box) {
+    if (box.querySelector(".ak-pin")) return box.querySelector(".ak-pin input")?.focus();
+    const panel = document.createElement("form");
+    panel.className = "ak-pin";
+    panel.innerHTML =
+      '<div class="ak-pin-msg"></div>' +
+      '<div class="ak-pin-row"><input type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="PIN" aria-label="PIN">' +
+      '<button type="submit">BUKA</button><button type="button" class="ak-pin-x" aria-label="Tutup">✕</button></div>';
+    panel.querySelector(".ak-pin-msg").textContent = lockMessage() + " Masukkan PIN untuk membuka di perangkat ini.";
+    panel.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    panel.addEventListener("click", (ev) => ev.stopPropagation());
+    panel.querySelector(".ak-pin-x").addEventListener("click", () => panel.remove());
+    panel.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const input = panel.querySelector("input");
+      if (await pinMatches(input.value)) {
+        setLocalOpen(true);
+        remountLauncher();
+        notify("AUTO KLINIK dibuka dengan PIN di perangkat ini. Kunci lagi lewat menu bila perlu.", "success", 8000);
+      } else {
+        input.value = "";
+        panel.querySelector(".ak-pin-msg").textContent = "PIN salah.";
+        input.focus();
+      }
+    });
+    box.querySelector(".ak-menu").insertBefore(panel, box.querySelector("#auto-klinik-main"));
+    panel.querySelector("input").focus();
+  }
+  function lockMessage() {
+    return "AUTO KLINIK sedang dikunci dokter." + (lockState?.pesan ? " " + lockState.pesan : "");
+  }
+  let lockChecking = false;
+  async function refreshRemoteLock() {
+    if (lockChecking) return;
+    lockChecking = true;
+    try {
+      const res = await fetch(`${LOCK_URL}?t=${Date.now()}`, { method: "GET", cache: "no-store", credentials: "omit" });
+      if (!res.ok) return;
+      const next = parseLockText(await res.text());
+      if (!next) return;
+      const before = akLocked();
+      lockState = { ...next, t: Date.now() };
+      // Kunci jarak jauh dibuka → buka-PIN dihapus, jadi kunci berikutnya berlaku lagi.
+      if (!next.locked) setLocalOpen(false);
+      const changed = before !== akLocked();
+      try {
+        localStorage.setItem(LOCK_KEY, JSON.stringify(lockState));
+      } catch (_) {}
+      if (changed) {
+        remountLauncher();
+        notify(next.locked ? lockMessage() : "AUTO KLINIK dibuka kembali.", next.locked ? "warn" : "success", 8000);
+      }
+    } catch (e) {
+      LOG("Cek kunci jarak jauh gagal (status terakhir dipakai):", e?.message || e);
+    } finally {
+      lockChecking = false;
+    }
+  }
+
+  const LAUNCHER_STYLES = `
+    #auto-klinik-main{touch-action:none!important;user-select:none!important;-webkit-user-select:none!important;}
+    #auto-klinik-box.ak-dragging #auto-klinik-main{cursor:grabbing!important;opacity:.85!important;transform:scale(1.06)!important;}
+    #auto-klinik-box.ak-pos-top,#auto-klinik-box.ak-pos-top .ak-menu{flex-direction:column-reverse!important;}
+    #auto-klinik-box.ak-pos-left,#auto-klinik-box.ak-pos-left .ak-menu{align-items:flex-start!important;}
+    #auto-klinik-box .ak-pin{pointer-events:auto!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:12px!important;
+      padding:10px!important;box-shadow:0 8px 24px rgba(15,23,42,.18)!important;max-width:260px!important;font-size:13px!important;color:#0f172a!important;}
+    #auto-klinik-box .ak-pin-msg{margin-bottom:8px!important;line-height:1.35!important;}
+    #auto-klinik-box .ak-pin-row{display:flex!important;gap:6px!important;}
+    #auto-klinik-box .ak-pin input{flex:1!important;min-width:0!important;width:110px!important;padding:8px!important;border:1px solid #94a3b8!important;border-radius:8px!important;font-size:16px!important;letter-spacing:4px!important;}
+    #auto-klinik-box .ak-pin button{padding:8px 12px!important;border:0!important;border-radius:8px!important;background:#ea580c!important;color:#fff!important;font-weight:700!important;cursor:pointer!important;}
+    #auto-klinik-box .ak-pin button.ak-pin-x{background:#e2e8f0!important;color:#334155!important;}
+    #auto-klinik-box .ak-relock{display:block!important;width:100%!important;margin-top:6px!important;padding:8px!important;border:1px dashed #64748b!important;border-radius:10px!important;
+      background:#f1f5f9!important;color:#334155!important;font-weight:700!important;font-size:12px!important;cursor:pointer!important;}
+    #auto-klinik-box.ak-locked #auto-klinik-main{background:#64748b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important;}
+  `;
+
+  function start() {
+    // v10.0.8: cegah eksekusi ganda bila ada dua salinan script aktif.
+    const root = document.documentElement;
+    if (root?.hasAttribute("data-auto-klinik")) {
+      LOG(`Script lain (v${root.getAttribute("data-auto-klinik")}) sudah aktif -> salinan ini tidak dijalankan.`);
+      return;
+    }
+    root?.setAttribute("data-auto-klinik", VERSION);
+    addStyle(STYLES + DRUGMAP_STYLES + ALUR_STYLES + LAUNCHER_STYLES);
+    refreshRemoteLock();
+    setInterval(refreshRemoteLock, 120000);
+    window.addEventListener("resize", () => applyLauncherPos(document.getElementById("auto-klinik-box")));
+    document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refreshRemoteLock());
+    hookSpaNavigation();
+    ensureButtonMounted();
+
+    // Aplikasi dapat mengganti <body> setelah halaman dimuat; coba ulang beberapa kali.
+    [50, 150, 350, 700, 1200, 2000].forEach((ms) => setTimeout(ensureButtonMounted, ms));
+
+    // Pasang ulang launcher bila aplikasi menghapusnya.
+    const observer = new MutationObserver(() => {
+      if (isMedisinPage() && !document.getElementById("auto-klinik-box")) {
+        setTimeout(ensureButtonMounted, 30);
+      }
+    });
+    const observe = () => {
+      const root = document.body || document.documentElement;
+      if (!root) return setTimeout(observe, 50);
+      try {
+        observer.observe(root, { childList: true, subtree: true });
+      } catch (_) {}
+      ensureButtonMounted();
+    };
+    observe();
+
+    // Jaring pengaman ringan (langsung kembali bila launcher sudah ada).
+    setInterval(ensureButtonMounted, 1500);
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        ensureButtonMounted();
+        setTimeout(ensureButtonMounted, 100);
+        setTimeout(ensureButtonMounted, 500);
+      }, { once: true });
+    }
+
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeMainSubmenu();
+    });
+    // v0.4.0: shortcut Alt+huruf, jalan otomatis, lanjutan "pasien berikutnya".
+    document.addEventListener("keydown", onShortcut, true);
+    setInterval(() => {
+      if (akLocked()) return;
+      maybeAutoRun().catch((e) => LOG("Jalan otomatis gagal:", e?.message || e));
+      maybeContinueNextPatient();
+    }, 1000);
+
+    // Klik di luar launcher menutup submenu.
+    document.addEventListener("click", (ev) => {
+      const box = document.getElementById("auto-klinik-box");
+      if (box && !box.contains(ev.target)) closeMainSubmenu();
+    }, true);
+
+    LOG(`Launcher v${VERSION} aktif | URL:`, location.href);
+  }
+
+  // Mode test (Node): ekspos data & fungsi murni tanpa menyentuh DOM.
+  if (globalThis.__AUTO_KLINIK_TEST__) {
+    Object.assign(globalThis.__AUTO_KLINIK_TEST__, {
+      VERSION,
+      SCRIPT_VERSION_FALLBACK,
+      ITEMS,
+      TEMPLATE,
+      RECIPE_TEMPLATES,
+      RACIKAN_TEMPLATES,
+      CHILD_SYRUP_SERIES,
+      CHILD_PUYER_SERIES,
+      SALEP_RACIKAN,
+      PACKAGE_ACTIONS,
+      MEDICATION_GROUP_PACKAGES,
+      MEDICATION_ITEMS_FLAT,
+      weightBands,
+      bandLabel,
+      isWeightInBand,
+      getWeightTemplate,
+      getWeightRecipeTemplate,
+      parseWeightKg,
+      parseWeightFromVitalsText,
+      isSyrupMedication,
+      buildDrugForItem,
+      ANAMNESIS_SUGGESTION_RULES,
+      DIAGNOSIS_TEMPLATES,
+      DIAGNOSIS_FROM_COMPLAINT,
+      detectDiagnoses,
+      DX_BANDING,
+      DX_FAMILY,
+      fillDiagnoses,
+      pageDiagnosisTemplates,
+      removeUnsavedDiagnosis,
+      addDiagnosisChoice,
+      parseLockText,
+      lockEffective,
+      clampLauncherPos,
+      LOCK_URL,
+      RED_FLAGS,
+      detectRedFlags,
+      redFlagHtml,
+      detectDiagnosisFromComplaint,
+      assessVitals,
+      formatVitalsSummary,
+      parseStockText,
+      suggestMedicationsFromAnamnesis,
+      parsePatientAge,
+      formatPatientAge,
+      auditMedicationPackageDefinitions,
+      auditMedicationPackageRuntimeResolvers,
+      resolveMedicationItem,
+      getMedicationPackageGroup,
+      buildMedicationPackagePreview,
+      buildLivePreviewHtml,
+      makeNyeriUluHatiAnakRecipe,
+      makeZincChildRecipe,
+      collectBhpForActions,
+      kunjunganIdFromPath,
+      icdCodeMatches,
+      pickIcdOption,
+      signaText,
+      buildSigna,
+      matchSignaMaster,
+      drugSearchWord,
+      splitProductPrefix,
+      penjaminPrefix,
+      pickProductForPenjamin,
+      serviceNameFor,
+      itemBaseName,
+      racikanJenisFor,
+      racikanQtyFor,
+      racikanSignaFor,
+      parseMedisinAge,
+      // pengisi form (diuji dengan tiruan state Vue Medisin)
+      pasienAktif,
+      getPatientAgeFromIdentity,
+      getPatientWeightFromLatestVitals,
+      readVitalsFromPage,
+      readChiefComplaintFromPage,
+      selectedIcdEntries,
+      fillDiagnosis,
+      updateDiagnosisFromComplaint,
+      copyChiefComplaintToAnamnesis,
+      setConsciousness,
+      setPrognosis,
+      setDischarge,
+      addRecipeItems,
+      addBhpItems,
+      addService,
+      addRacikan,
+      // v0.4.0 alur cepat
+      EDUKASI,
+      educationForCodes,
+      fillEducation,
+      pickLastVisit,
+      summarizeVisit,
+      addDaysIso,
+      nextWaitingRow,
+      pendingSections,
+      saveSections,
+      withGuard,
+      saveRacikanDialog,
+      saveAll,
+      repeatLastVisit,
+      fillSickLetter,
+      maybeAutoRun,
+      goNextPatient,
+      maybeContinueNextPatient,
+      toggleAutoRun,
+      SAVE_ALLOWED,
+      addServiceAndSave,
+      serviceAutoSave,
+      diagnosisCandidates,
+      searchDiagnosisTemplates,
+      applyDiagnosisChoice,
+      addIcdOption,
+    });
+    return;
+  }
+
+  start();
+})();

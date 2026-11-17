@@ -709,3 +709,54 @@ test("Paket Resep: 9 golongan ringkas, tiap obat tepat di satu golongan, tanpa '
   assert.ok(keys.includes("PARACETAMOL_DEWASA") && keys.includes("IBUPROFEN_400"));
   assert.equal(g[0].items.some((i) => i.key === "IBUPROFEN_400"), true);
 });
+
+// ---------------- v0.7.0 banyak diagnosis + hapus ----------------
+test("v0.7.0: keluhan berbeda -> 2 diagnosis terisi; hapus hanya yang belum tersimpan", async () => {
+  const { api, Diagnosa, saveCalls } = makeApp({ pasien: { keluhan: "batuk pilek, darah tinggi" } });
+  const r = await api.updateDiagnosisFromComplaint("batuk pilek, darah tinggi");
+  assert.deepEqual(plain(r.dxs).map((d) => d.key), ["ISPA", "HT"]);
+  assert.deepEqual([...api.selectedIcdEntries()].map((e) => e.code), ["J06.9", "I10"]);
+  assert.deepEqual(plain(api.pageDiagnosisTemplates()).map((d) => d.key), ["ISPA", "HT"]);
+  // Hapus HT (belum disimpan): baris dibuang dengan removeColom milik Medisin.
+  let removed = null;
+  Diagnosa.removeColom = (row) => {
+    removed = row;
+    Diagnosa.input_icdx.splice(Diagnosa.input_icdx.indexOf(row), 1);
+  };
+  assert.equal(api.removeUnsavedDiagnosis("I10").removed, true);
+  assert.equal(removed.val.icd_kode, "I10");
+  assert.deepEqual([...api.selectedIcdEntries()].map((e) => e.code), ["J06.9"]);
+  // Satu baris tersisa: dikosongkan, bukan dibuang.
+  assert.equal(api.removeUnsavedDiagnosis("J06.9").removed, true);
+  assert.equal(Diagnosa.input_icdx.length, 1);
+  assert.equal(Diagnosa.input_icdx[0].val, null);
+  // Diagnosa yang sudah tersimpan tidak dihapus script.
+  Diagnosa.data = [{ icd_kode: "I10", en: "Essential (primary) hypertension" }];
+  assert.deepEqual(plain(api.removeUnsavedDiagnosis("I10")), { code: "I10", removed: false, saved: true });
+  assert.deepEqual(saveCalls, []);
+});
+
+test("v0.7.0: diagnosis banding ditambahkan tanpa mengganti yang ada, tidak ikut diganti otomatis", async () => {
+  const { api, saveCalls } = makeApp();
+  const ispa = api.DIAGNOSIS_TEMPLATES.find((d) => d.key === "ISPA");
+  const ht = api.DIAGNOSIS_TEMPLATES.find((d) => d.key === "HT");
+  await api.fillDiagnosis(ispa);
+  const r = await api.addDiagnosisChoice(ht);
+  assert.equal(r.added, true);
+  assert.deepEqual([...api.selectedIcdEntries()].map((e) => e.code), ["J06.9", "I10"]);
+  assert.equal((await api.addDiagnosisChoice(ht)).added, false);
+  // Keluhan diubah ke batuk saja: HT pilihan dokter tetap ada.
+  await api.updateDiagnosisFromComplaint("batuk pilek");
+  assert.deepEqual([...api.selectedIcdEntries()].map((e) => e.code), ["J06.9", "I10"]);
+  assert.deepEqual(saveCalls, []);
+});
+
+test("v0.7.0: obat disarankan dari semua diagnosis", () => {
+  const { api } = makeApp();
+  const t = (k) => api.DIAGNOSIS_TEMPLATES.find((d) => d.key === k);
+  const one = api.suggestMedicationsFromAnamnesis("", "adult", { diagnosis: t("HT") });
+  const two = api.suggestMedicationsFromAnamnesis("", "adult", { diagnoses: [t("HT"), t("GEA")] });
+  for (const k of one.keys) assert.ok(two.keys.includes(k));
+  for (const k of t("GEA").adult) assert.ok(two.keys.includes(k), k);
+  assert.equal(plain(two.matches).filter((m) => /^Diagnosis /.test(m.label)).length, 2);
+});
