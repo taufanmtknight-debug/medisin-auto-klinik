@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.3 — 2026-11-18
+
+- **Obat stok 0 tidak bisa dipilih** di panel Paket Resep Golongan (permintaan dokter). Pilihannya tampil abu-abu dengan keterangan merah "stok 0: NAMA OBAT".
+  - Stok dibaca sekali saat panel dibuka, lewat satu GET daftar produk Medisin (hanya baca). Stok sesuai penjamin pasien, hanya lokasi non-gudang, sama seperti pencarian obat Medisin.
+  - Racikan dikunci bila salah satu bahannya stok 0. Bahan yang tidak dipakai untuk umur itu (mis. CTM untuk bayi) tidak dihitung.
+  - Obat yang tidak ditemukan di daftar tidak dikunci; dokter tetap memilih lewat dialog seperti biasa.
+
 ## v0.8.2 — 2026-11-18
 
 - Keluhan **"bintik", "bintil", "bercak", "bintik merah", "kemerahan kulit"** saja sekarang menjadi diagnosis **Dermatitis (L30.9)** dan otomatis mendapat obatnya (salep racikan + cetirizine), bukan lagi "Ruam kulit" tanpa obat (permintaan dokter). Ruam kulit (R21) hanya untuk bercak hitam/coklat/ungu dan "ruam tidak gatal"; Ruam kulit menjadi diagnosis banding dermatitis.
