@@ -650,6 +650,6 @@ test("pilihan & pencarian diagnosis", async () => {
   assert.equal(a.Diagnosa.input_icdx[0].val.icd_kode, "J06.9");
   const r = await a.api.applyDiagnosisChoice(a.api.DIAGNOSIS_TEMPLATES.find((d) => d.key === "HT"));
   assert.match(r.note, /I10/);
-  assert.deepEqual(a.api.selectedIcdEntries().map((e) => e.code), ["I10"]);
+  assert.deepEqual(plain(a.api.selectedIcdEntries().map((e) => e.code)), ["I10"]);
   assert.deepEqual(a.saveCalls, []);
 });
