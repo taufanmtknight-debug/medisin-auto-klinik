@@ -4912,7 +4912,12 @@
   async function loadVisitHistory(p) {
     const ax = vueRoot()?.$axios;
     if (!ax || !p?.users_id) throw new Error("riwayat pasien tidak bisa dibaca");
-    const res = await ax.post("admin/pelayanan/pasien/riwayat", { users_id: p.users_id });
+    // Medisin mewajibkan rentang tanggal; ambil 2 tahun terakhir.
+    const res = await ax.post("admin/pelayanan/pasien/riwayat", {
+      users_id: p.users_id,
+      tgl_awal: addDaysIso(todayIso(), -730),
+      tgl_akhir: todayIso(),
+    });
     const d = res?.data;
     return Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
   }
