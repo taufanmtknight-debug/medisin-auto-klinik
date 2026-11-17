@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.7.1
+// @version      0.8.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.7.1";
+  const SCRIPT_VERSION_FALLBACK = "0.8.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -362,11 +362,58 @@
       : weightKg > band.minKg && weightKg <= band.maxKg;
   }
 
+  // v0.8.0 (permintaan dokter 2026-11-18): dosis anak dihitung per mg/kg.
+  // Rentang BB lebih rapat (2-3, >3-4, ... kg); jumlah tablet per 10 bungkus
+  // dibulatkan ke 1/4 tablet, dosis di batas BB terendah TIDAK melebihi batas atas.
+  // perKg = target mg/kg/dosis, lo-hi = rentang wajar, maxDose = mg maksimal per dosis.
+  const PEDIATRIC_DOSE_RULES = {
+    PARACETAMOL_500: { mg: 500, perKg: 12.5, lo: 10, hi: 15, maxDose: 500, text: "10-15 mg/kg/dosis" },
+    IBUPROFEN_400: { mg: 400, perKg: 7.5, lo: 5, hi: 10, maxDose: 400, text: "5-10 mg/kg/dosis" },
+    DOMPERIDONE_10: { mg: 10, perKg: 0.2, lo: 0.15, hi: 0.25, maxDose: 10, text: "maks 0,25 mg/kg/dosis" },
+    DOMPERIDONE_SYRUP: { mg: 1, perKg: 0.2, lo: 0.15, hi: 0.25, maxDose: 10, inc: 0.5, text: "maks 0,25 mg/kg/dosis (1 mg/mL)" },
+    CTM_4: { mg: 4, perKg: 0.1, lo: 0.08, hi: 0.12, maxDose: 2, text: "0,1 mg/kg/dosis (0,3 mg/kg/hari), maks 2 mg" },
+    DEXAMETHASONE_05: { mg: 0.5, perKg: 0.015, lo: 0.01, hi: 0.02, maxDose: 0.5, text: "0,015 mg/kg/dosis, maks 0,5 mg" },
+    GUAIFENESIN_100: { mg: 100, perKg: 4, lo: 3, hi: 5, maxDose: 100, text: "4 mg/kg/dosis (12 mg/kg/hari), maks 100 mg" },
+    AMBROXOL_30: { mg: 30, perKg: 0.5, lo: 0.4, hi: 0.6, maxDose: 30, text: "0,5 mg/kg/dosis (1,5 mg/kg/hari)" },
+    CETIRIZINE_10: { mg: 10, perKg: 0.25, lo: 0.2, hi: 0.3, maxDose: 10, text: "0,25 mg/kg/hari 1x sehari" },
+    RANITIDINE_HCL: { mg: 150, perKg: 1.5, lo: 1.2, hi: 2, maxDose: 150, text: "1,5 mg/kg/dosis 2x sehari" },
+    // Antasida DOEN (Al(OH)3 200 mg + Mg(OH)2 200 mg): dalam tablet/kg.
+    ANTASIDA_TABLET: { mg: 1, perKg: 0.025, lo: 0.02, hi: 0.03, maxDose: 1, text: "1/40 tablet/kg/dosis, maks 1 tablet" },
+  };
+  // Umur minimal (tahun) tiap bahan untuk anak. Bahan di bawah umur ini
+  // tidak dimasukkan (racikan campuran dibuat tanpa bahan tsb.).
+  const PEDIATRIC_MIN_AGE = {
+    IBUPROFEN_400: 0.5,
+    CTM_4: 0.5,
+    DOMPERIDONE_10: 0.5,
+    DOMPERIDONE_SYRUP: 0.5,
+    RANITIDINE_HCL: 2,
+    ANTASIDA_TABLET: 4,
+  };
+  const DOSE_BANDS_KG = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 25, 28, 31, 35, 40, 45, 50];
+  function dosedBands(maxKg) {
+    const edges = DOSE_BANDS_KG.filter((k) => k <= maxKg);
+    return edges.slice(1).map((b, i) => ({ index: i + 1, minKg: edges[i], maxKg: b }));
+  }
+  // Jumlah tablet (racikan, per `perPack` bungkus) atau mL (sirup, perPack 1). (pure, diuji)
+  function pediatricQty(itemKey, band, perPack = 10) {
+    const r = PEDIATRIC_DOSE_RULES[itemKey];
+    if (!r || !band) return null;
+    const inc = r.inc || 0.25;
+    const unitsPerMg = perPack / r.mg;
+    const mid = Math.sqrt(band.minKg * band.maxKg);
+    const target = Math.round((r.perKg * mid * unitsPerMg) / inc) * inc;
+    const safe = Math.floor((r.hi * band.minKg * unitsPerMg) / inc + 1e-9) * inc;
+    const cap = Math.floor((r.maxDose * unitsPerMg) / inc + 1e-9) * inc;
+    const q = Math.max(inc, Math.min(target, safe, cap));
+    return Math.round(q * 100) / 100;
+  }
+
   // Syrup anak (non-racikan) berbasis BB. dose = nomor rentang (ml).
   // days/total kosong = sengaja tidak diisi agar dokter menentukan sendiri.
   const CHILD_SYRUP_SERIES = [
     // Domperidone syrup: tiap 5 kg -> +1 ml, 3x sehari sebelum makan, 3 hari, 1 botol.
-    { prefix: "MUAL_MUNTAH_SYRUP_ANAK_", title: "MUAL MUNTAH SYRUP", step: 5, maxKg: 50, item: "DOMPERIDONE_SYRUP", freq: "3", days: "3", total: "1", instruction: "SEBELUM MAKAN" },
+    { prefix: "MUAL_MUNTAH_SYRUP_ANAK_", title: "MUAL MUNTAH SYRUP", step: 5, maxKg: 50, dosed: true, item: "DOMPERIDONE_SYRUP", freq: "3", days: "3", total: "1", instruction: "SEBELUM MAKAN" },
     // Amoxicillin syrup: tiap 2,5 kg -> +1 ml, 3x sehari setelah makan, 1 botol (v10.0.6).
     { prefix: "ANTIBIOTIK_SYRUP_ANAK_", title: "ANTIBIOTIK SYRUP", step: 2.5, maxKg: 50, item: "AMOXICILLIN_SYRUP", freq: "3", days: "", total: "1", instruction: "SETELAH MAKAN" },
     // Cefadroxil syrup: pola dosis sama dengan Amoxicillin syrup, tetapi 2x sehari.
@@ -374,12 +421,12 @@
   ];
 
   for (const s of CHILD_SYRUP_SERIES) {
-    for (const band of weightBands(s.step, s.maxKg)) {
+    for (const band of s.dosed ? dosedBands(s.maxKg) : weightBands(s.step, s.maxKg)) {
       RECIPE_TEMPLATES[s.prefix + bandKey(band)] = {
         title: `${s.title} ${bandLabel(band)}`,
         band,
         medicines: [
-          { item: s.item, freq: s.freq, dose: String(band.index), days: s.days, total: s.total, instruction: s.instruction },
+          { item: s.item, freq: s.freq, dose: String(s.dosed ? pediatricQty(s.item, band, 1) : band.index), days: s.days, total: s.total, instruction: s.instruction },
         ],
       };
     }
@@ -390,26 +437,28 @@
   // v9.3: semua kolom racikan wajib terisi. Durasi = 10 bungkus / frekuensi per hari
   // (3x -> 3 hari, 2x -> 5 hari, 1x -> 10 hari), sama dengan pola Racikan ISPA.
   const CHILD_PUYER_SERIES = [
-    { prefix: "ISPA_ANAK_", title: "RACIKAN ISPA", name: "puyer batuk", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["GUAIFENESIN_100", "CTM_4", "DEXAMETHASONE_05"] },
-    { prefix: "DEMAM_ANAK_", title: "DEMAM ANAK", name: "puyer demam", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["PARACETAMOL_500"] },
+    { prefix: "ISPA_ANAK_", dosed: true, title: "RACIKAN ISPA", name: "puyer batuk", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["GUAIFENESIN_100", "CTM_4", "DEXAMETHASONE_05"] },
+    { prefix: "DEMAM_ANAK_", dosed: true, title: "DEMAM ANAK", name: "puyer demam", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["PARACETAMOL_500"] },
     // v10.0.9 (permintaan dokter): Ibuprofen 400 mg, tiap 7 kg -> +1 tablet, buat 10 puyer, 3x sehari.
-    { prefix: "IBUPROFEN_ANAK_", title: "IBUPROFEN ANAK", name: "puyer ibuprofen", step: 7, maxKg: 49, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["IBUPROFEN_400"] },
+    { prefix: "IBUPROFEN_ANAK_", dosed: true, title: "IBUPROFEN ANAK", name: "puyer ibuprofen", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["IBUPROFEN_400"] },
     { prefix: "ANTIBIOTIK_ANAK_", title: "ANTIBIOTIK ANAK", name: "puyer antibiotik", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
-    { prefix: "MUAL_MUNTAH_ANAK_", title: "MUAL MUNTAH ANAK", name: "puyer mual muntah", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DOMPERIDONE_10"] },
+    { prefix: "MUAL_MUNTAH_ANAK_", dosed: true, title: "MUAL MUNTAH ANAK", name: "puyer mual muntah", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DOMPERIDONE_10"] },
     // Cefadroxil puyer: pola jumlah tablet sama seperti Amoxicillin, tetapi 2x sehari.
     { prefix: "CEFADROXIL_ANAK_", title: "CEFADROXIL", name: "cefadroxil", maxKg: 40, duration: "5", doseFreq: "2", instruction: "setelah makan", items: ["CEFADROXIL_500"] },
     // v7.4.2: racikan "baru" (BB <= 40 kg). Dosis/instruksi mengikuti input pengguna.
     // v0.5.2 (permintaan dokter): ranitidin 1,5 mg/kg/dosis 2x sehari = 1/2 tablet 150 mg per 5 kg dalam 10 bungkus (5 hari).
-    { prefix: "BARU_LAMBUNG_MUAL_", title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
-    { prefix: "BARU_MUAL_MUNTAH_", title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
+    { prefix: "BARU_LAMBUNG_MUAL_", dosed: true, title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
+    { prefix: "BARU_MUAL_MUNTAH_", dosed: true, title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
     { prefix: "BARU_AMOXICILLIN_", title: "AMOXICILLIN", name: "amoxicillin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
-    { prefix: "BARU_CETIRIZINE_", title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },
-    { prefix: "BARU_BAPIL2_", title: "BAPIL 2", name: "batuk pilek 2", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DEXAMETHASONE_05", "CTM_4", "AMBROXOL_30"] },
+    { prefix: "BARU_CETIRIZINE_", dosed: true, title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },
+    { prefix: "BARU_BAPIL2_", dosed: true, title: "BAPIL 2", name: "batuk pilek 2", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DEXAMETHASONE_05", "CTM_4", "AMBROXOL_30"] },
+    // v0.8.0 (permintaan dokter): puyer antasida anak >=4 tahun, 3x sehari sebelum makan.
+    { prefix: "BARU_ANTASIDA_", dosed: true, title: "ANTASIDA ANAK", name: "antasida", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET"] },
   ];
 
   const RACIKAN_TEMPLATES = {};
   for (const s of CHILD_PUYER_SERIES) {
-    for (const band of weightBands(s.step || 5, s.maxKg)) {
+    for (const band of s.dosed ? dosedBands(s.maxKg) : weightBands(s.step || 5, s.maxKg)) {
       RACIKAN_TEMPLATES[s.prefix + bandKey(band)] = {
         title: `${s.title} ${bandLabel(band)}`,
         band,
@@ -420,7 +469,11 @@
         unit: "Pulvis",
         instruction: s.instruction,
         compoundInstruction: "buat 10",
-        ingredients: s.items.map((it) => (typeof it === "string" ? { item: it, quantity: String(band.index) } : { item: it.item, quantity: String(band.index * it.perBand) })),
+        ingredients: s.items.map((it) => {
+          const key = typeof it === "string" ? it : it.item;
+          if (s.dosed) return { item: key, quantity: String(pediatricQty(key, band, 10)) };
+          return typeof it === "string" ? { item: it, quantity: String(band.index) } : { item: it.item, quantity: String(band.index * it.perBand) };
+        }),
       };
     }
   }
@@ -541,6 +594,7 @@
           prefix: "IBUPROFEN_ANAK_",
           title: "RACIKAN IBUPROFEN ANAK",
           population: "child",
+          minAgeYears: 0.5,
         },
         {
           key: "DICLOFENAC_50",
@@ -704,9 +758,19 @@
         },
         {
           key: "ANTASIDA_ANAK",
-          label: "Antasida DOEN — Anak (umur)",
+          label: "Antasida DOEN tablet — Anak ≥4 th (umur)",
           type: "age-antacid",
           population: "child",
+          minAgeYears: 4,
+        },
+        {
+          key: "ANTASIDA_PUYER_ANAK",
+          label: "Racikan Antasida — Anak ≥4 th (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_ANTASIDA_",
+          title: "RACIKAN ANTASIDA ANAK",
+          population: "child",
+          minAgeYears: 4,
         },
         {
           key: "AKITA",
@@ -749,6 +813,7 @@
           prefix: "MUAL_MUNTAH_SYRUP_ANAK_",
           title: "DOMPERIDONE SYRUP ANAK",
           population: "child",
+          minAgeYears: 0.5,
         },
         {
           key: "DOMPERIDONE_10_DEWASA",
@@ -771,6 +836,7 @@
           prefix: "BARU_LAMBUNG_MUAL_",
           title: "RACIKAN LAMBUNG + MUAL",
           population: "child",
+          minAgeYears: 2,
         },
         {
           key: "MUAL_MUNTAH_RACIKAN_BARU",
@@ -779,6 +845,7 @@
           prefix: "BARU_MUAL_MUNTAH_",
           title: "RACIKAN MUAL MUNTAH",
           population: "child",
+          minAgeYears: 0.5,
         },
       ],
     },
@@ -1104,7 +1171,7 @@
       ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
       ["ALERGI_STEROID", "Antihistamin / Kortikosteroid", ["CETIRIZINE_10_DEWASA", "CETIRIZINE_RACIKAN_BARU", "LORATADINE_10_DEWASA", "CTM_4_DEWASA", "DEXAMETHASONE_05", "METHYLPREDNISOLONE_4_DEWASA"]],
       ["ANTIINFEKSI", "Antibiotik / Antivirus", ["AMOXICILLIN_500_DEWASA", "AMOXICILLIN_SYRUP", "AMOXICILLIN_500_RACIKAN_BARU", "CEFADROXIL_500_DEWASA", "CEFADROXIL_SYRUP", "CEFADROXIL_PUYER_ANAK", "CIPROFLOXACIN_500_DEWASA", "METRONIDAZOLE_500_DEWASA", "ACYCLOVIR_400_DEWASA"]],
-      ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
+      ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "ANTASIDA_PUYER_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
       ["KRONIS", "Obat Kronis (HT, DM, Kolesterol, Asam Urat)", ["AMLODIPINE_5", "AMLODIPINE_10", "CAPTOPRIL_12_5", "CAPTOPRIL_25", "METFORMIN_500", "GLIMEPIRIDE_1", "GLIMEPIRIDE_2", "SIMVASTATIN_10", "ALLOPURINOL_100"]],
       ["VITAMIN_SARAF", "Vitamin / Saraf", ["VITAMIN_B_COMPLEX", "CALCIUM_500", "TABLET_TAMBAH_DARAH", "MECOBALAMIN_500_DEWASA", "BETAHISTIN_6_DEWASA"]],
       ["MATA_TELINGA", "Mata / Telinga", ["CENDO_XITROL_TETES", "CENDO_LYTEERS_TETES", "RECO_SALEP_MATA", "RECO_TETES_TELINGA"]],
@@ -4007,12 +4074,7 @@
 
   // v0.7.1: peringatan obat untuk bayi <6 bulan atau <7 kg (dosis TIDAK diubah). (pure, diuji)
   const INFANT_CAUTIONS = [
-    { re: /IBUPROFEN/, text: "Ibuprofen tidak dianjurkan untuk bayi <6 bulan; pilih paracetamol." },
-    { re: /\bCTM\b|CHLORPHENIRAMIN|CETIRIZIN/, text: "Antihistamin (CTM/cetirizine) tidak dianjurkan untuk bayi <6 bulan (CTM: <2 tahun)." },
-    { re: /GUAIFENESIN|AMBROXOL|DEXTROMETHORPHAN|GLYCERYL/, text: "Obat batuk-pilek (guaifenesin/ambroxol) tidak dianjurkan untuk anak <2 tahun." },
-    { re: /DEXAMETHASON/, text: "Deksametason tidak rutin untuk batuk-pilek bayi." },
-    { re: /DOMPERIDON/, text: "Domperidon tidak dianjurkan untuk bayi <6 bulan (maks 0,25 mg/kg/dosis)." },
-    { re: /RANITIDIN|ANTASIDA/, text: "Antasida/ranitidin tidak dianjurkan untuk bayi <6 bulan." },
+    // v0.8.0: ibuprofen/CTM/domperidon (<6 bln), ranitidin (<2 th), antasida (<4 th) sudah dikunci umur.
     { re: /BETAMETHASON/, text: "Salep steroid kuat (betametason): hindari wajah & area popok bayi." },
     { re: /XITROL/, text: "Tetes mata ber-steroid (Xitrol) pada bayi: hati-hati; mata bernanah pada neonatus dirujuk." },
   ];
@@ -4038,7 +4100,7 @@
       ...(preview.notes || []),
     ];
     const cautionHtml = cautions.length
-      ? `<div class="akr-caution"><b>⚠ Bayi &lt;6 bulan / &lt;7 kg:</b>${cautions.map((c) => `<div>• ${escapePreviewHtml(c)}</div>`).join("")}</div>`
+      ? `<div class="akr-caution"><b>⚠ Bayi:</b>${cautions.map((c) => `<div>• ${escapePreviewHtml(c)}</div>`).join("")}</div>`
       : "";
     return `${cautionHtml}<div class="ak-live-preview-box"><div class="ak-live-preview-head"><div><div class="ak-live-preview-title">${escapePreviewHtml(title)}</div></div><div class="ak-live-preview-count">${(preview.medicines || []).length + (preview.racikans || []).length} pilihan</div></div><div class="ak-preview-section"><div class="ak-rp-label">OBAT NON-RACIKAN (${(preview.medicines || []).length})</div>${medRows || '<div class="ak-preview-empty">Belum ada obat non-racikan yang dipilih.</div>'}</div><div class="ak-preview-section"><div class="ak-rp-label">RACIKAN (${(preview.racikans || []).length})</div>${racikanRows || '<div class="ak-preview-empty">Belum ada racikan yang dipilih.</div>'}</div>${notes.length ? `<div class="ak-preview-notes"><b>Catatan:</b><br>${notes.map((n) => `• ${escapePreviewHtml(n)}`).join("<br>")}</div>` : ""}</div>`;
   }
@@ -4195,6 +4257,19 @@
         group,
       ),
     );
+    // v0.8.0: obat anak yang belum boleh untuk umur ini tidak disarankan.
+    if (group === "child" && "ageYears" in options) {
+      const blocked = result.keys.filter((k) => itemAgeBlock(MEDICATION_ITEMS_FLAT.find((x) => x.key === k), options.ageYears));
+      if (blocked.length) {
+        result.keys = result.keys.filter((k) => !blocked.includes(k));
+        for (const m of result.matches) m.keys = m.keys.filter((k) => !blocked.includes(k));
+        if (blocked.includes("IBUPROFEN_ANAK") && !result.keys.includes("PARACETAMOL_ANAK")) result.keys.push("PARACETAMOL_ANAK");
+        result.notes.push(
+          `Tidak disarankan untuk umur ini: ${blocked.map((k) => MEDICATION_ITEMS_FLAT.find((x) => x.key === k)?.label || k).join(", ")}.` +
+            (blocked.includes("IBUPROFEN_ANAK") ? " Demam/nyeri: pakai paracetamol." : ""),
+        );
+      }
+    }
     return result;
   }
 
@@ -4439,6 +4514,31 @@
     return !(Number.isFinite(ageYears) && ageYears > 17);
   }
 
+  // v0.8.0: umur minimal pilihan obat anak. Umur tak terbaca = dianggap belum cukup. (pure, diuji)
+  function ageLabelYears(y) {
+    return y < 1 ? `${Math.round(y * 12)} bulan` : `${String(y).replace(".", ",")} tahun`;
+  }
+  function itemAgeBlock(item, ageYears) {
+    const min = item?.minAgeYears;
+    if (!min) return "";
+    if (Number.isFinite(ageYears) && ageYears > 17) return "";
+    if (!Number.isFinite(ageYears)) return `${item.label}: umur belum terbaca (hanya untuk umur ≥${ageLabelYears(min)})`;
+    return ageYears < min ? `${item.label}: hanya untuk umur ≥${ageLabelYears(min)}` : "";
+  }
+  // Racikan campuran: bahan di bawah umur minimal dibuang (mis. ISPA tanpa CTM untuk bayi <6 bulan).
+  function stripIngredientsForAge(tpl, ageYears) {
+    if (!tpl || (Number.isFinite(ageYears) && ageYears > 17)) return { tpl, dropped: [] };
+    const ok = (i) => !PEDIATRIC_MIN_AGE[i.item] || (Number.isFinite(ageYears) && ageYears >= PEDIATRIC_MIN_AGE[i.item]);
+    const dropped = tpl.ingredients.filter((i) => !ok(i)).map((i) => i.item);
+    if (!dropped.length) return { tpl, dropped };
+    const names = dropped.map((k) => shortDrugName(ITEMS[k]?.target || k));
+    return {
+      tpl: { ...tpl, title: `${tpl.title} (tanpa ${names.join(", ")})`, ingredients: tpl.ingredients.filter(ok) },
+      dropped,
+      names,
+    };
+  }
+
   function isMedicationItemAllowedForGroup(item, group) {
     return !!item && (item.population === group || item.population === "all");
   }
@@ -4451,6 +4551,8 @@
         note: "Pilihan obat tidak ditemukan.",
       };
 
+    const ageBlock = itemAgeBlock(item, ageYears);
+    if (ageBlock) return { medicines: [], racikans: [], note: ageBlock };
     switch (item.type) {
       case "recipe":
         return {
@@ -4474,6 +4576,16 @@
             };
       case "weight-racikan": {
         const found = getWeightTemplate(item.prefix, weightKg);
+        if (found) {
+          const st = stripIngredientsForAge(found.tpl, ageYears);
+          if (!st.tpl.ingredients.length)
+            return { medicines: [], racikans: [], note: `${item.label}: tidak untuk umur ini` };
+          return {
+            medicines: [],
+            racikans: [{ tpl: st.tpl }],
+            ...(st.dropped.length ? { info: `${item.label}: ${st.names.join(", ")} tidak dimasukkan (umur <${ageLabelYears(Math.max(...st.dropped.map((k) => PEDIATRIC_MIN_AGE[k])))})` } : {}),
+          };
+        }
         return found
           ? { medicines: [], racikans: [{ tpl: found.tpl }] }
           : {
@@ -4574,6 +4686,7 @@
         preview.notes.push(r.note);
         continue;
       }
+      if (r.info) preview.notes.push(r.info);
       const meds = [];
       for (const m of r.medicines || []) {
         const id = identity(m, item.label);
@@ -4966,7 +5079,7 @@
       for (const k of autoAdded) selectedMedicationKeys.delete(k);
       autoAdded.clear();
       if (reset) dismissed.clear();
-      const s = suggestMedicationsFromAnamnesis(anamnesisEl.value, group, { diagnoses: medDiagnoses(), vitals: vitalsAssessment });
+      const s = suggestMedicationsFromAnamnesis(anamnesisEl.value, group, { diagnoses: medDiagnoses(), vitals: vitalsAssessment, ageYears });
       suggestedKeys = new Set(s.keys);
       // v0.5.0: tanda bahaya / hamil / alergi obat -> obat tidak dicentang otomatis.
       const akFlags = detectRedFlags(anamnesisEl.value, vitalsAssessment);
@@ -5010,6 +5123,11 @@
     const renderItemsForGroup = (group) => {
       const choice = (i) => {
         const [name, sub] = String(i.label).split(" — ");
+        const blocked = group === "child" && itemAgeBlock(i, ageYears);
+        if (blocked) {
+          selectedMedicationKeys.delete(i.key);
+          return `<label class="ak-package-choice akm-age-blocked" title="${escapePreviewHtml(blocked)}"><input type="checkbox" disabled><span class="akm-name">${escapePreviewHtml(name)}<small>${escapePreviewHtml(Number.isFinite(ageYears) ? `hanya umur ≥${ageLabelYears(i.minAgeYears)}` : "umur belum terbaca")}</small></span></label>`;
+        }
         return `<label class="ak-package-choice${suggestedKeys.has(i.key) ? " akm-suggested" : ""}"><input data-med-item="${i.key}" type="checkbox" value="${i.key}" ${selectedMedicationKeys.has(i.key) ? "checked" : ""}><span class="akm-name">${escapePreviewHtml(name)}${sub ? `<small>${escapePreviewHtml(sub)}</small>` : ""}</span>${suggestedKeys.has(i.key) ? '<em class="ak-suggest-badge">saran</em>' : ""}</label>`;
       };
       // Dikelompokkan per golongan supaya mudah dicari; semua pilihan tetap tampil.
@@ -5939,6 +6057,7 @@
     .akm-cat.akm-missing{background:#fef3c7!important;}
     .akm .ak-package-anamnesis{margin-top:0!important;min-height:64px!important;}
     .akm-items{display:flex!important;flex-direction:column!important;gap:12px!important;}
+    .ak-package-choice.akm-age-blocked{opacity:.45!important;cursor:not-allowed!important;}
     .akm-group-title{margin:0 0 6px!important;font:800 10.5px ${AK_FONT}!important;color:#64748b!important;text-transform:uppercase!important;letter-spacing:.5px!important;}
     .akm-choices{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important;}
     .akm .ak-package-choice{min-height:40px!important;padding:7px 10px!important;gap:9px!important;font:600 13px/1.3 ${AK_FONT}!important;color:#1e293b!important;}
@@ -7275,6 +7394,13 @@
       pageDiagnosisTemplates,
       removeUnsavedDiagnosis,
       toggleSavedDiagnosisDelete,
+      PEDIATRIC_DOSE_RULES,
+      PEDIATRIC_MIN_AGE,
+      DOSE_BANDS_KG,
+      dosedBands,
+      pediatricQty,
+      itemAgeBlock,
+      stripIngredientsForAge,
       drugStrengthMg,
       racikanIngredientDose,
       infantCautions,

@@ -53,13 +53,14 @@ test("rentang BB bersambung: setiap BB 1 kg s.d. batas atas punya tepat satu tem
   ];
   for (const s of series) {
     const tpls = Object.entries(s.source).filter(([k]) => k.startsWith(s.prefix));
-    for (let w10 = 10; w10 <= s.maxKg * 10; w10++) {
+    const minKg = s.dosed ? api.DOSE_BANDS_KG[0] : 1; // v0.8.0: series per mg/kg mulai 2 kg
+    for (let w10 = minKg * 10; w10 <= s.maxKg * 10; w10++) {
       const w = w10 / 10;
       const hits = tpls.filter(([, t]) => api.isWeightInBand(t.band, w));
       assert.equal(hits.length, 1, `${s.prefix} BB ${w} kg -> ${hits.length} template`);
     }
     // Di luar rentang: tidak ada template (tidak menebak dosis).
-    assert.equal(tpls.filter(([, t]) => api.isWeightInBand(t.band, 0.9)).length, 0);
+    assert.equal(tpls.filter(([, t]) => api.isWeightInBand(t.band, minKg - 0.1)).length, 0);
     assert.equal(tpls.filter(([, t]) => api.isWeightInBand(t.band, s.maxKg + 0.1)).length, 0);
   }
 });
@@ -69,20 +70,16 @@ test("regresi dosis berbasis BB sama dengan v8.1.6", () => {
   const qty = (prefix, kg) => api.getWeightTemplate(prefix, kg).tpl.ingredients.map((i) => i.quantity);
   const dose = (prefix, kg) => api.getWeightRecipeTemplate(prefix, kg).tpl.medicines[0].dose;
 
-  assert.deepEqual(plain(qty("ISPA_ANAK_", 4)), ["1", "1", "1"]);
-  assert.deepEqual(plain(qty("ISPA_ANAK_", 7)), ["2", "2", "2"]);
-  assert.deepEqual(plain(qty("DEMAM_ANAK_", 12)), ["3"]);
+  // Antibiotik tidak berubah.
   assert.deepEqual(plain(qty("ANTIBIOTIK_ANAK_", 50)), ["10"]);
-  assert.deepEqual(plain(qty("MUAL_MUNTAH_ANAK_", 20)), ["4"]);
   assert.deepEqual(plain(qty("CEFADROXIL_ANAK_", 40)), ["8"]);
-  assert.deepEqual(plain(qty("BARU_BAPIL2_", 9)), ["2", "2", "2"]);
-  assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 33)), ["7", "3.5"]); // v0.5.1: ranitidin dosis terendah
-  assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 4)), ["1", "0.5"]);
+  // v0.8.0: per mg/kg (lihat tes "v0.8.0: dosis anak per mg/kg").
+  assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 33)), ["8.25", "3.25"]);
   const lm = api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 4).tpl;
   assert.deepEqual([lm.doseFreq, lm.duration], ["2", "5"]); // v0.5.2: 1,5 mg/kg 2x sehari
+  assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 3), "0.5");
+  assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 10), "2");
 
-  assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 3), "1");
-  assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 9), "2");
   assert.equal(dose("ANTIBIOTIK_SYRUP_ANAK_", 2), "1");
   assert.equal(dose("ANTIBIOTIK_SYRUP_ANAK_", 4), "2");
   assert.equal(dose("ANTIBIOTIK_SYRUP_ANAK_", 10), "4");
@@ -97,9 +94,8 @@ test("regresi dosis berbasis BB sama dengan v8.1.6", () => {
 
 test("BB yang dulu jatuh di celah rentang sekarang mendapat template", () => {
   // v8.1.6: rentang 1-5 lalu 6-10 → BB 5,1–6 kg tidak punya template.
-  assert.equal(api.getWeightTemplate("ISPA_ANAK_", 6).tpl.ingredients[0].quantity, "2");
-  assert.equal(api.getWeightTemplate("DEMAM_ANAK_", 5.5).tpl.ingredients[0].quantity, "2");
-  assert.equal(api.getWeightTemplate("DEMAM_ANAK_", 11).tpl.ingredients[0].quantity, "3");
+  assert.ok(api.getWeightTemplate("ISPA_ANAK_", 5.5));
+  assert.ok(api.getWeightTemplate("DEMAM_ANAK_", 11));
   // v8.1.6: 1-2,5 lalu 3,5-5 → BB 3 kg tidak punya template.
   assert.equal(api.getWeightRecipeTemplate("ANTIBIOTIK_SYRUP_ANAK_", 3).tpl.medicines[0].dose, "2");
 });
@@ -565,11 +561,8 @@ test("v10.0.9: obat batuk & puyer Ibuprofen anak (permintaan dokter)", () => {
   assert.deepEqual(s("batuk", "child"), ["ISPA_ANAK"]);
   const ispaAnak = api.CHILD_PUYER_SERIES.find((x) => x.prefix === "ISPA_ANAK_");
   assert.deepEqual(plain(ispaAnak.items), ["GUAIFENESIN_100", "CTM_4", "DEXAMETHASONE_05"]);
-  // Ibuprofen anak: tiap 7 kg +1 tablet 400 mg, buat 10 puyer, 3x sehari.
+  // v0.8.0: Ibuprofen anak 5-10 mg/kg/dosis, buat 10 puyer, 3x sehari.
   const ibu = (kg) => api.getWeightTemplate("IBUPROFEN_ANAK_", kg).tpl;
-  for (const [kg, tab] of [[3, "1"], [7, "1"], [7.1, "2"], [14, "2"], [15, "3"], [21, "3"], [28, "4"], [35, "5"], [40, "6"]]) {
-    assert.equal(ibu(kg).ingredients[0].quantity, tab, kg + " kg");
-  }
   const t = ibu(10);
   assert.deepEqual([t.ingredients[0].item, t.doseFreq, t.doseAmount, t.duration, t.unit, t.compoundInstruction],
     ["IBUPROFEN_400", "3", "1", "3", "Pulvis", "buat 10"]);
@@ -577,7 +570,65 @@ test("v10.0.9: obat batuk & puyer Ibuprofen anak (permintaan dokter)", () => {
   assert.equal(item.population, "child");
   const r = plain(api.resolveMedicationItem(item, 12, 4));
   assert.equal(r.racikans.length, 1);
-  assert.equal(r.racikans[0].tpl.ingredients[0].quantity, "2");
+  assert.equal(r.racikans[0].tpl.ingredients[0].quantity, "2.25");
+});
+
+// v0.8.0 (permintaan dokter 2026-11-18): dosis anak per mg/kg & batas umur.
+test("v0.8.0: dosis anak per mg/kg tetap di rentang wajar untuk tiap BB", () => {
+  const S = { PARACETAMOL_500: 500, IBUPROFEN_400: 400, DOMPERIDONE_10: 10, CTM_4: 4, DEXAMETHASONE_05: 0.5, GUAIFENESIN_100: 100, AMBROXOL_30: 30, CETIRIZINE_10: 10, RANITIDINE_HCL: 150, ANTASIDA_TABLET: 1 };
+  for (const s of api.CHILD_PUYER_SERIES.filter((x) => x.dosed)) {
+    for (let kg = 2; kg <= s.maxKg; kg += 0.5) {
+      const t = api.getWeightTemplate(s.prefix, kg).tpl;
+      for (const ing of t.ingredients) {
+        const r = api.PEDIATRIC_DOSE_RULES[ing.item];
+        const mg = (S[ing.item] * Number(ing.quantity)) / 10;
+        assert.ok(mg / kg <= r.hi + 1e-9, `${s.prefix} ${kg} kg ${ing.item}: ${mg / kg} > ${r.hi}`);
+        assert.ok(mg <= r.maxDose + 1e-9, `${s.prefix} ${kg} kg ${ing.item}: ${mg} mg > maks`);
+        if (mg < r.maxDose - 1e-9 && kg >= 4) assert.ok(mg / kg >= r.lo * 0.75, `${s.prefix} ${kg} kg ${ing.item}: ${mg / kg} terlalu rendah`);
+      }
+    }
+  }
+  const q = (p, kg) => plain(api.getWeightTemplate(p, kg).tpl.ingredients.map((i) => i.quantity));
+  assert.deepEqual(q("DEMAM_ANAK_", 10), ["2.25"]); // 112,5 mg = 11,3-12,5 mg/kg
+  assert.deepEqual(q("IBUPROFEN_ANAK_", 8), ["1.5"]); // 60 mg = 7,5-8,6 mg/kg
+  assert.deepEqual(q("MUAL_MUNTAH_ANAK_", 6.5), ["1.25"]); // 1,25 mg <= 0,25 mg/kg
+  assert.deepEqual(q("BARU_CETIRIZINE_", 10), ["2.25"]);
+  // Sirup domperidon 1 mg/mL: maks 0,25 mg/kg/dosis.
+  for (let kg = 2; kg <= 50; kg += 0.5) {
+    const ml = Number(api.getWeightRecipeTemplate("MUAL_MUNTAH_SYRUP_ANAK_", kg).tpl.medicines[0].dose);
+    assert.ok(ml / kg <= 0.25 + 1e-9 && ml <= 10, `${kg} kg: ${ml} mL`);
+  }
+});
+
+test("v0.8.0: ibuprofen/CTM/domperidon <6 bln, ranitidin <2 th, antasida <4 th tidak dipilih", () => {
+  const it = (k) => api.MEDICATION_ITEMS_FLAT.find((x) => x.key === k);
+  const res = (k, kg, age) => plain(api.resolveMedicationItem(it(k), kg, age));
+  for (const k of ["IBUPROFEN_ANAK", "DOMPERIDONE_SYRUP", "MUAL_MUNTAH_RACIKAN_BARU"]) {
+    assert.match(res(k, 5, 0.4).note, /hanya untuk umur ≥6 bulan/, k);
+    assert.equal(res(k, 7, 0.5).note, undefined, k + " 6 bulan boleh");
+    assert.match(res(k, 7, null).note, /umur belum terbaca/, k);
+  }
+  assert.match(res("ANTASIDA_ANAK", 14, 3.9).note, /≥4 tahun/);
+  assert.match(res("ANTASIDA_PUYER_ANAK", 14, 3.9).note, /≥4 tahun/);
+  assert.equal(res("ANTASIDA_PUYER_ANAK", 16, 4).racikans[0].tpl.ingredients[0].item, "ANTASIDA_TABLET");
+  assert.match(res("LAMBUNG_MUAL_RACIKAN_BARU", 10, 1.9).note, /≥2 tahun/);
+  // 2-4 th: ranitidin saja (antasida dibuang); >=4 th: keduanya.
+  const lm3 = res("LAMBUNG_MUAL_RACIKAN_BARU", 13, 3);
+  assert.deepEqual(lm3.racikans[0].tpl.ingredients.map((i) => i.item), ["RANITIDINE_HCL"]);
+  assert.match(lm3.info, /ANTASIDA .*umur <4 tahun/);
+  assert.equal(res("LAMBUNG_MUAL_RACIKAN_BARU", 17, 5).racikans[0].tpl.ingredients.length, 2);
+  // Bayi <6 bulan: ISPA & Bapil 2 tetap, tanpa CTM; guaifenesin/dexa/ambroxol/cetirizine tetap.
+  const ispa = res("ISPA_ANAK", 5, 0.3).racikans[0].tpl;
+  assert.deepEqual(ispa.ingredients.map((i) => i.item), ["GUAIFENESIN_100", "DEXAMETHASONE_05"]);
+  const bapil = res("BAPIL_2_ANAK", 5, 0.3).racikans[0].tpl;
+  assert.deepEqual(bapil.ingredients.map((i) => i.item), ["DEXAMETHASONE_05", "AMBROXOL_30"]);
+  assert.equal(res("CETIRIZINE_RACIKAN_BARU", 5, 0.3).racikans.length, 1);
+  assert.equal(res("ISPA_ANAK", 8, 1).racikans[0].tpl.ingredients.length, 3);
+  // Saran: bayi 4 bulan demam -> paracetamol, bukan ibuprofen; muntah -> tanpa domperidon.
+  const sg = plain(api.suggestMedicationsFromAnamnesis("demam muntah", "child", { ageYears: 0.33 }));
+  assert.ok(sg.keys.includes("PARACETAMOL_ANAK"));
+  assert.ok(!sg.keys.some((k) => /IBUPROFEN|DOMPERIDONE|MUAL_MUNTAH/.test(k)), sg.keys.join());
+  assert.ok(sg.notes.some((n) => /Tidak disarankan untuk umur ini/.test(n)));
 });
 
 test("v10.1.0: tindakan diinput sebagai BHP (jumlah dijumlahkan antar-tindakan)", () => {
