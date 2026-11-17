@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.4.0
+// @version      0.4.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.4.0";
+  const SCRIPT_VERSION_FALLBACK = "0.4.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -4296,20 +4296,6 @@
       run: () => whenPasienReady(() => renderMedicationGroupPackagePicker()),
     },
     {
-      id: "auto-klinik-ulang",
-      icon: "🔁",
-      label: "RESEP ULANG",
-      desc: "Diagnosa + obat dari kunjungan lalu · Alt+U",
-      run: () => repeatLastVisit(),
-    },
-    {
-      id: "auto-klinik-surat",
-      icon: "📝",
-      label: "SURAT SAKIT",
-      desc: "Isi surat istirahat 1–3 hari · Alt+K",
-      run: () => fillSickLetter(),
-    },
-    {
       id: "auto-klinik-simpan",
       icon: "💾",
       label: "SIMPAN SEMUA",
@@ -4328,6 +4314,8 @@
       icon: "⚙️",
       label: "JALAN OTOMATIS",
       desc: autoRunLabel(),
+      toggle: true,
+      keepOpen: true,
       run: () => toggleAutoRun(),
     },
   ];
@@ -4355,9 +4343,10 @@
     box.setAttribute("data-auto-klinik", "1");
     // v10.0.8: menu muncul DI ATAS tombol utama, jadi tombol tidak bergeser saat menu dibuka.
     const menuButton = (m) =>
-      `<button id="${m.id}" type="button"${m.primary ? ' class="ak-primary"' : ""}>` +
+      `<button id="${m.id}" type="button"${m.primary ? ' class="ak-primary"' : m.toggle ? ` class="ak-toggle ${autoRunEnabled() ? "ak-on" : "ak-off"}" role="switch" aria-checked="${autoRunEnabled()}"` : ""}>` +
       `<span class="ak-ico">${m.icon}</span>` +
       `<span class="ak-txt"><span>${escapePreviewHtml(m.label)}</span><small>${escapePreviewHtml(m.desc)}</small></span>` +
+      (m.toggle ? '<span class="ak-sw" aria-hidden="true"></span>' : "") +
       `</button>`;
     box.innerHTML = `
       <div class="ak-menu">
@@ -4384,7 +4373,7 @@
       box.querySelector(`#${item.id}`)?.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        closeMainSubmenu();
+        if (!item.keepOpen) closeMainSubmenu();
         try {
           Promise.resolve(item.run()).catch((e) => notify(`${item.label}: ${e?.message || e}`, "error", 12000));
         } catch (e) {
@@ -4837,6 +4826,60 @@
   }
 
   const ALUR_STYLES = `
+    /* ---------- Menu: saklar JALAN OTOMATIS ---------- */
+    #auto-klinik-submenu button.ak-toggle{position:relative!important;padding-right:62px!important;}
+    #auto-klinik-submenu button.ak-toggle .ak-sw{position:absolute!important;right:12px!important;top:50%!important;transform:translateY(-50%)!important;
+      width:40px!important;height:22px!important;border-radius:999px!important;background:#cbd5e1!important;transition:background .15s!important;}
+    #auto-klinik-submenu button.ak-toggle .ak-sw::after{content:""!important;position:absolute!important;top:3px!important;left:3px!important;width:16px!important;height:16px!important;
+      border-radius:50%!important;background:#fff!important;box-shadow:0 1px 3px rgba(15,23,42,.3)!important;transition:left .15s!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on{background:#dcfce7!important;border-color:#22c55e!important;color:#14532d!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on small{color:#15803d!important;font-weight:700!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on .ak-sw{background:#16a34a!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-on .ak-sw::after{left:21px!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-off{background:#f1f5f9!important;border-color:#cbd5e1!important;color:#475569!important;}
+    #auto-klinik-submenu button.ak-toggle.ak-off small{color:#64748b!important;font-weight:700!important;}
+
+    /* ---------- Paket Resep: tampilan berwarna, batas kolom jelas ---------- */
+    .ak-rp-card.akm{border:1px solid #94a3b8!important;}
+    .akm-head{background:linear-gradient(135deg,#f97316,#ea580c)!important;border-bottom:0!important;}
+    .akm-head .ak-rp-title{color:#fff!important;}
+    .akm-head .ak-rp-sub{color:#ffedd5!important;}
+    .akm-head .ak-rp-x{background:rgba(255,255,255,.22)!important;color:#fff!important;}
+    .akm-head .ak-rp-x:hover{background:rgba(255,255,255,.35)!important;}
+    .akm-head .ak-suggest-badge{background:#fff!important;color:#6d28d9!important;}
+    .akm-body{background:#e2e8f0!important;}
+    .akm-sec{border:1px solid #94a3b8!important;border-top:4px solid var(--akc,#64748b)!important;border-radius:12px!important;
+      box-shadow:0 1px 2px rgba(15,23,42,.08)!important;padding:0 0 12px!important;overflow:hidden!important;}
+    .akm-sec > *:not(.akm-sec-title){margin-left:12px!important;margin-right:12px!important;}
+    .akm-sec-title{margin:0 0 10px!important;padding:9px 12px!important;background:var(--akb,#f8fafc)!important;
+      border-bottom:1px solid #cbd5e1!important;color:var(--akt,#0f172a)!important;font-size:13px!important;letter-spacing:.2px!important;}
+    .akm-pasien{--akc:#2563eb;--akb:#eff6ff;--akt:#1e3a8a;}
+    .akm-diagnosis{--akc:#0d9488;--akb:#f0fdfa;--akt:#134e4a;}
+    .akm-anamnesa{--akc:#7c3aed;--akb:#f5f3ff;--akt:#4c1d95;}
+    .akm-obat{--akc:#ea580c;--akb:#fff7ed;--akt:#7c2d12;}
+    .akm-tindakan{--akc:#16a34a;--akb:#f0fdf4;--akt:#14532d;}
+    .akm-sec.akm-preview{border:0!important;box-shadow:none!important;padding:0!important;overflow:visible!important;background:transparent!important;}
+    .akm-sec.akm-preview > *{margin:0!important;}
+    .akm .ak-live-preview-box{border:1px solid #fb923c!important;border-top:4px solid #ea580c!important;border-radius:12px!important;background:#fff!important;}
+    .akm .ak-live-preview-row,.akm .ak-live-preview-racikan{border-color:#cbd5e1!important;}
+    .akm-stat{border:1px solid #93c5fd!important;background:#f8fbff!important;}
+    .akm-items{gap:10px!important;}
+    .akm-group{border:1px solid #cbd5e1!important;border-left:5px solid var(--akg,#f97316)!important;border-radius:10px!important;background:#fff!important;overflow:hidden!important;}
+    .akm-group-title{margin:0!important;padding:7px 10px!important;background:var(--akgb,#fff7ed)!important;color:var(--akgt,#9a3412)!important;
+      border-bottom:1px solid #e2e8f0!important;font-size:11px!important;}
+    .akm-group .akm-choices{padding:8px!important;}
+    .akm-group:nth-child(6n+1){--akg:#f97316;--akgb:#fff7ed;--akgt:#9a3412;}
+    .akm-group:nth-child(6n+2){--akg:#2563eb;--akgb:#eff6ff;--akgt:#1e40af;}
+    .akm-group:nth-child(6n+3){--akg:#0d9488;--akgb:#f0fdfa;--akgt:#115e59;}
+    .akm-group:nth-child(6n+4){--akg:#7c3aed;--akgb:#f5f3ff;--akgt:#5b21b6;}
+    .akm-group:nth-child(6n+5){--akg:#db2777;--akgb:#fdf2f8;--akgt:#9d174d;}
+    .akm-group:nth-child(6n+6){--akg:#65a30d;--akgb:#f7fee7;--akgt:#3f6212;}
+    .akm .ak-package-choice{border:1px solid #cbd5e1!important;background:#fff!important;}
+    .akm .ak-package-choice:hover{border-color:#f97316!important;background:#fffaf5!important;}
+    .akm .ak-package-choice.akm-suggested{border-color:#a78bfa!important;background:#faf5ff!important;}
+    .akm .ak-package-choice.akm-on{border-color:#ea580c!important;background:#ffedd5!important;color:#7c2d12!important;box-shadow:inset 4px 0 0 #ea580c!important;}
+    .akm-foot{border-top:1px solid #94a3b8!important;background:#f8fafc!important;}
+
     #ak-confirm{position:fixed!important;inset:0!important;z-index:2147483646!important;display:flex!important;align-items:center!important;
       justify-content:center!important;padding:12px!important;background:rgba(15,23,42,.45)!important;font-family:${AK_FONT}!important;box-sizing:border-box!important;}
     #ak-confirm .akc-card{width:min(480px,100%)!important;max-height:calc(100vh - 24px)!important;display:flex!important;flex-direction:column!important;gap:10px!important;
@@ -4863,12 +4906,18 @@
     try {
       localStorage.setItem("auto-klinik-medisin:otomatis", on ? "1" : "0");
     } catch (_) {}
-    notify(`Jalan otomatis saat membuka pasien: ${on ? "NYALA" : "MATI"}.`, "info", 6000);
-    const b = document.querySelector("#auto-klinik-otomatis small");
-    if (b) b.textContent = autoRunLabel();
+    // Menu tetap terbuka; tombol berganti warna (hijau = NYALA, abu-abu = MATI).
+    const b = document.getElementById("auto-klinik-otomatis");
+    if (b) {
+      b.classList.toggle("ak-on", on);
+      b.classList.toggle("ak-off", !on);
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      const s = b.querySelector("small");
+      if (s) s.textContent = autoRunLabel();
+    }
   }
   function autoRunLabel() {
-    return `Sekarang ${autoRunEnabled() ? "NYALA" : "MATI"} · RESUME + Paket Resep saat pasien dibuka`;
+    return `${autoRunEnabled() ? "NYALA" : "MATI"} · RESUME + Paket Resep saat pasien dibuka`;
   }
 
   // Sekali per kunjungan, hanya bila belum ada diagnosa/resep tersimpan.
@@ -5232,9 +5281,7 @@
   const SHORTCUTS = {
     KeyR: () => runTemplate("resume-diagnosis"),
     KeyP: () => whenPasienReady(() => renderMedicationGroupPackagePicker()),
-    KeyU: () => repeatLastVisit(),
     KeyS: () => saveAll(),
-    KeyK: () => fillSickLetter(),
     KeyN: () => goNextPatient(),
   };
   function onShortcut(ev) {
