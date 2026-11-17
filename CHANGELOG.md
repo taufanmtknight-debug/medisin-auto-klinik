@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.3 — 2026-11-17 (Paket Resep ringkas)
+
+- Warna lebih tegas: judul tiap bagian dan tiap golongan obat berwarna penuh (teks putih), pilihan tercentang oranye tua, batas kotak lebih jelas.
+- Kata-kata diringkas (judul, petunjuk, saran, preview).
+- Ukuran lebih kecil: panel maks 1000 px, jarak & tombol lebih rapat. Di HP pilihan obat 2 kolom, tombol Tutup/INPUT RESEP sebaris.
+- Perbaikan: di layar sempit (HP) kotak Pasien/Diagnosis/Keluhan/Pilih obat bisa tertekan menjadi garis tipis; kolom keluhan tidak lagi melebar keluar kotak.
+
 ## v0.4.2 — 2026-11-17 (masukan dokter dari HP)
 
 - **Jasa konsultasi langsung tersimpan**: RESUME mengisi "BPJS - Dokter Umum Jasa Konsultasi" (atau tarif UMUM) lalu langsung menekan SIMPAN Tindakan milik Medisin (disetujui dokter), hanya bila tidak ada tindakan lain yang belum disimpan.
