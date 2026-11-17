@@ -6377,28 +6377,23 @@
     btn.dataset.akDrag = "1";
     let start = null;
     let moved = false;
-    btn.addEventListener("pointerdown", (ev) => {
-      if (ev.button > 0) return;
-      start = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
-      moved = false;
-    });
-    btn.addEventListener("pointermove", (ev) => {
+    const onMove = (ev) => {
       if (!start || ev.pointerId !== start.id) return;
       if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 8) return;
       if (!moved) {
         moved = true;
         closeMainSubmenu();
         box.classList.add("ak-dragging");
-        try {
-          btn.setPointerCapture(ev.pointerId);
-        } catch (_) {}
       }
       ev.preventDefault();
       applyLauncherPos(box, clampLauncherPos({ x: ev.clientX / window.innerWidth, y: ev.clientY / window.innerHeight }));
-    });
+    };
     const end = (ev) => {
-      if (!start) return;
+      if (!start || ev.pointerId !== start.id) return;
       start = null;
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
       box.classList.remove("ak-dragging");
       if (!moved) return;
       const pos = clampLauncherPos({ x: ev.clientX / window.innerWidth, y: ev.clientY / window.innerHeight });
@@ -6407,11 +6402,19 @@
       } catch (_) {}
       applyLauncherPos(box, pos);
       // Klik yang mengikuti geseran tidak membuka menu.
-      btn.addEventListener("click", (e) => (e.preventDefault(), e.stopImmediatePropagation()), { capture: true, once: true });
-      setTimeout(() => (moved = false), 0);
+      const swallow = (e) => (e.preventDefault(), e.stopImmediatePropagation());
+      btn.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => btn.removeEventListener("click", swallow, { capture: true }), 400);
     };
-    btn.addEventListener("pointerup", end);
-    btn.addEventListener("pointercancel", end);
+    // Gerakan dipantau di seluruh jendela, jadi geser cepat pun tidak lepas dari tombol.
+    btn.addEventListener("pointerdown", (ev) => {
+      if (ev.button > 0) return;
+      start = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
+      moved = false;
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", end, true);
+      window.addEventListener("pointercancel", end, true);
+    });
   }
 
   // ---- Kunci jarak jauh ----
