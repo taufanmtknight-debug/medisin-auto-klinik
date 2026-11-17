@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.2.1
+// @version      0.3.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.2.1";
+  const SCRIPT_VERSION_FALLBACK = "0.3.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -77,6 +77,10 @@
       unit: "tube",
       usageUnit: "OLES",
     },
+    // v0.3.0 (Medisin): tetes mata/telinga pilihan dokter. Satuan minidose = 1 ampul tetes.
+    CENDO_XITROL: { keyword: "BPJS -- CENDO XITROL MINIDOSE", target: "BPJS -- CENDO XITROL MINIDOSE", unit: "minidose", usageUnit: "TETES" },
+    CENDO_LYTEERS: { keyword: "BPJS -- CENDO LYTEERS MINIDOSE", target: "BPJS -- CENDO LYTEERS MINIDOSE", unit: "minidose", usageUnit: "TETES" },
+    RECO_TETES_TELINGA: { keyword: "BPJS -- RECO TETES TELINGA", target: "BPJS -- RECO TETES TELINGA", unit: "botol", usageUnit: "TETES" },
     POT_PLASTIK: { keyword: "BPJS -- POT PLASTIK 30 CC", target: "BPJS -- POT PLASTIK 30 CC", unit: "pcs" },
     CETIRIZINE_10: { keyword: "BPJS -- CETIRIZINE HCL 10 MG", target: "BPJS -- CETIRIZINE HCL 10 MG", unit: "tablet" },
     ANTASIDA_TABLET: { keyword: "BPJS -- ANTASIDA DOEN TABLET", target: "BPJS -- ANTASIDA DOEN TABLET", unit: "tablet" },
@@ -925,6 +929,33 @@
       ],
     },
     {
+      key: "MATA_TELINGA",
+      label: "Tetes Mata / Telinga",
+      items: [
+        {
+          key: "CENDO_XITROL_TETES",
+          label: "Cendo Xitrol (tetes mata antibiotik)",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "CENDO_XITROL", freq: "4", dose: "1", days: "5", total: "5", instruction: "PADA MATA YANG SAKIT" },
+        },
+        {
+          key: "CENDO_LYTEERS_TETES",
+          label: "Cendo Lyteers (tetes mata non-infeksi)",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "CENDO_LYTEERS", freq: "4", dose: "1", days: "5", total: "5", instruction: "PADA MATA YANG SAKIT" },
+        },
+        {
+          key: "RECO_TETES_TELINGA",
+          label: "Reco tetes telinga",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "RECO_TETES_TELINGA", freq: "3", dose: "3", days: "7", total: "1", instruction: "PADA TELINGA YANG SAKIT" },
+        },
+      ],
+    },
+    {
       key: "TOPIKAL",
       label: "Topikal / Salep",
       items: [
@@ -1073,8 +1104,22 @@
     {
       label: "Sakit telinga",
       pattern: /(?:sakit|nyeri)\s+telinga|telinga\b[^.,;\n]{0,15}?(?:sakit|nyeri|berair|bernanah|cairan)|otitis|congek|kopok/,
-      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA"],
-      child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK"],
+      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA", "RECO_TETES_TELINGA"],
+      child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK", "RECO_TETES_TELINGA"],
+    },
+    {
+      // v0.3.0: mata merah/belekan (infeksi) -> Cendo Xitrol.
+      label: "Mata merah / belekan",
+      pattern: /mata\s+(?:\w+\s+)?(?:merah|belek\w*|bernanah)|belekan|\bbelek\b|konjungtiv\w*/,
+      adult: ["CENDO_XITROL_TETES"],
+      child: ["CENDO_XITROL_TETES"],
+    },
+    {
+      // v0.3.0: mata kering/perih/lelah/kelilipan tanpa tanda infeksi -> Cendo Lyteers.
+      label: "Mata kering / perih",
+      pattern: /mata\s+(?:\w+\s+)?(?:kering|perih|lelah|capek|kemasukan|kelilipan)|kelilipan|iritasi\s+mata/,
+      adult: ["CENDO_LYTEERS_TETES"],
+      child: ["CENDO_LYTEERS_TETES"],
     },
     {
       label: "Sinusitis",
@@ -1272,13 +1317,13 @@
     { key: "SINUSITIS", label: "Sinusitis akut", icd: ["J01.9", "J01"], query: "acute sinusitis",
       adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK"] },
     { key: "OMA", label: "Otitis media akut", icd: ["H66.9", "H66.0", "H66"], query: "otitis media",
-      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK"] },
+      adult: ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA", "RECO_TETES_TELINGA"], child: ["AMOXICILLIN_500_RACIKAN_BARU", "PARACETAMOL_ANAK", "RECO_TETES_TELINGA"] },
     { key: "RINITIS_ALERGI", label: "Rinitis alergi", icd: ["J30.4", "J30.3"], query: "allergic rhinitis",
       adult: ["LORATADINE_10_DEWASA"], child: ["CETIRIZINE_RACIKAN_BARU"] },
     { key: "ASMA", label: "Asma", icd: ["J45.9", "J45"], query: "asthma",
       adult: ["METHYLPREDNISOLONE_4_DEWASA"], child: [] },
     { key: "KONJUNGTIVITIS", label: "Konjungtivitis", icd: ["H10.9", "H10"], query: "conjunctivitis",
-      adult: [], child: [] },
+      adult: ["CENDO_XITROL_TETES"], child: ["CENDO_XITROL_TETES"] },
     { key: "GASTRITIS", label: "Gastritis", icd: ["K29.7", "K29"], query: "gastritis",
       adult: ["OMEPRAZOLE_20_DEWASA", "ANTASIDA_DEWASA"], child: ["ANTASIDA_ANAK"] },
     { key: "KONSTIPASI", label: "Konstipasi", icd: ["K59.0", "K59"], query: "constipation",
@@ -1327,7 +1372,7 @@
     { key: "ASMA", tier: 1, pattern: /\basma\b|asthma|mengi|\bsesak\b/ },
     { key: "RINITIS_ALERGI", tier: 1, pattern: /rinitis|rhinitis|alergi\s+(?:debu|dingin|cuaca)|bersin[\s-]+bersin\s+(?:tiap|setiap|saat|kalau|jika)/ },
     { key: "ISPA", tier: 1, pattern: /batuk|pilek|\bbat?pil\b|\bflu\b|influenza|bersin|hidung\s+(?:tersumbat|mampet|meler)|ingus|\bispa\b|common cold|tenggorok\w*\s+(?:sakit|nyeri|perih|gatal)|(?:nyeri|sakit|perih|gatal)\s+(?:saat\s+)?(?:menelan|telan|tenggorok\w*)|radang\s+tenggorok\w*/ },
-    { key: "KONJUNGTIVITIS", tier: 1, pattern: /mata\s+(?:merah|belek\w*|gatal|berair)|belekan|konjungtiv\w*|\bbelek\b/ },
+    { key: "KONJUNGTIVITIS", tier: 1, pattern: /mata\s+(?:\w+\s+)?(?:merah|belek\w*|gatal|berair|sakit|nyeri)|(?:sakit|nyeri)\s+mata|belekan|konjungtiv\w*|\bbelek\b/ },
     { key: "GEA", tier: 1, pattern: /diare|mencret|muntaber|(?:bab|berak|buang air besar)\s+(?:cair|encer)|gastroenteritis|\bgea\b/ },
     { key: "HELMINTHIASIS", tier: 1, pattern: /cacing\w*|kremi/ },
     { key: "GASTRITIS", tier: 1, pattern: /gastritis/ },

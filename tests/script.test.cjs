@@ -300,7 +300,7 @@ test("v9.4: saran dari keluhan utama — keluhan baru", () => {
   assert.deepEqual(s("nyeri haid hari pertama"), ["ASAM_MEFENAMAT_500_DEWASA"]);
   assert.deepEqual(s("anyang-anyangan, kencing perih"), ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"]);
   assert.deepEqual(s("bisul di ketiak"), ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"]);
-  assert.deepEqual(s("telinga kanan sakit dan berair"), ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA"]);
+  assert.deepEqual(s("telinga kanan sakit dan berair"), ["AMOXICILLIN_500_DEWASA", "PARACETAMOL_DEWASA", "RECO_TETES_TELINGA"]);
   assert.deepEqual(s("nyeri lutut saat jalan"), ["DICLOFENAC_50", "CALCIUM_500"]);
   assert.deepEqual(s("sariawan"), []);
   assert.deepEqual(s("cacar air", "child"), ["PARACETAMOL_ANAK", "CETIRIZINE_RACIKAN_BARU"]);
@@ -590,4 +590,21 @@ test("v10.1.0: tindakan diinput sebagai BHP (jumlah dijumlahkan antar-tindakan)"
     assert.match(api.ITEMS[key].target, /^BPJS -- /);
   assert.equal(api.ITEMS.STRIP_ASAM_URAT.target, "STRIP ASAM URAT");
   assert.equal(api.ITEMS.STRIP_KOLESTEROL.target, "STRIP KOLESTEROL");
+});
+
+test("v0.3.0 Medisin: tetes mata/telinga pilihan dokter", () => {
+  const s = (t, g = "adult") => plain(api.suggestMedicationsFromAnamnesis(t, g)).keys;
+  assert.deepEqual(s("mata kanan merah dan belekan"), ["CENDO_XITROL_TETES"]);
+  assert.deepEqual(s("belekan 2 hari", "child"), ["CENDO_XITROL_TETES"]);
+  assert.deepEqual(s("mata kering dan perih"), ["CENDO_LYTEERS_TETES"]);
+  assert.deepEqual(s("kelilipan debu"), ["CENDO_LYTEERS_TETES"]);
+  assert.ok(s("congek", "child").includes("RECO_TETES_TELINGA"));
+});
+
+test("v0.3.0 Medisin: 'sakit mata ... gatal' = konjungtivitis, bukan dermatitis", () => {
+  const d = (t) => api.detectDiagnosisFromComplaint(t)?.key || null;
+  assert.equal(d("sakit mata 4 hari, gatal dan nyeri"), "KONJUNGTIVITIS");
+  assert.equal(d("mata kanan merah"), "KONJUNGTIVITIS");
+  assert.equal(d("gatal di tangan"), "DERMATITIS");
+  assert.equal(d("mata kering"), null);
 });

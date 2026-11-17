@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0 — 2026-11-17 (tetes mata & telinga pilihan dokter)
+
+Nama persis dicek di master obat klinik: "BPJS -- CENDO XITROL MINIDOSE", "BPJS -- CENDO LYTEERS MINIDOSE", "BPJS -- RECO TETES TELINGA" (pasien umum otomatis memakai nama tanpa awalan).
+
+- Paket Resep: grup baru **Tetes Mata / Telinga** — Cendo Xitrol (antibiotik) 4 x 1 tetes pada mata yang sakit, 5 minidose; Cendo Lyteers (non-infeksi) 4 x 1 tetes, 5 minidose; Reco tetes telinga 3 x 3 tetes pada telinga yang sakit, 1 botol.
+- Diagnosis Konjungtivitis → Cendo Xitrol dicentang. Otitis media / "sakit telinga" → Reco ikut dicentang.
+- Saran dari keluhan: "mata merah/belekan" → Xitrol; "mata kering/perih/lelah/kelilipan" → Lyteers.
+- Deteksi diagnosis: "sakit mata / mata sakit / nyeri mata" kini dibaca Konjungtivitis (sebelumnya "sakit mata …, gatal" terbaca Dermatitis karena kata "gatal").
+
 ## v0.2.1 — 2026-11-17
 
 - Pesan akhir RESUME dan PAKET RESEP kini mengingatkan bila baris Tindakan (jasa konsultasi) sudah diisi: "tekan SIMPAN di bagian Tindakan" (bagian Tindakan punya SIMPAN sendiri, terpisah dari Resep).
