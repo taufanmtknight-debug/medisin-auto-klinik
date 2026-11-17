@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.1 — 2026-11-18
+
+- **Info obat & racikan lebih ringkas**: racikan ditulis "Puyer 10 bungkus", signa satu baris ("3 × 1 bungkus/hari · 3 hari · setelah makan"), tiap bahan "PARACETAMOL 500 MG 1 tab → 50 mg/bungkus = 12,5 mg/kg". Obat biasa satu baris ("1 sachet × 1/hari · 1 hari → 4 sachet"), sirup dengan mg/kg. Awalan "BPJS --" disembunyikan di tampilan.
+- **Peringatan bayi <6 bulan / <7 kg** (kotak kuning, dosis tidak diubah): ibuprofen, CTM/cetirizine, obat batuk-pilek, deksametason, domperidon, antasida/ranitidin, salep steroid kuat, tetes mata ber-steroid.
+- **✕ juga untuk diagnosa tersimpan**: ditandai "akan dihapus" (↺ untuk batal) dan dihapus saat SIMPAN SEMUA lewat alamat hapus diagnosa Medisin sendiri. Obat tidak lagi mengikuti diagnosa yang akan dihapus.
+- **Panel Diagnosis sinkron otomatis** dengan bagian Diagnosa Medisin (tersimpan / akan ditulis / akan dihapus), diperbarui tiap 1,5 detik.
+
 ## v0.7.0 — 2026-11-18
 
 - **Keluhan kulit**: bintik, bintik merah, bintik berair/lenting, bintik bernanah, bercak putih/merah/hitam, bercak bersisik, dll. dikenali. Diagnosis baru: Ruam kulit (R21), Dermatitis venenata/tomcat, Folikulitis, Pitiriasis rosea, Pitiriasis alba, Vitiligo, Melasma, Moluskum, Kandidiasis kulit, Intertrigo.

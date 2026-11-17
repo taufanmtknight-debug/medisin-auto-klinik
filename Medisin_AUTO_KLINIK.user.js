@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.7.0
+// @version      0.7.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.7.0";
+  const SCRIPT_VERSION_FALLBACK = "0.7.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -2969,9 +2969,28 @@
     return { filled, failed };
   }
 
-  // Template diagnosis untuk ICD yang terisi di halaman (urut Primer, Sekunder).
+  // v0.7.1: diagnosa TERSIMPAN yang ditandai ✕ di panel ("akan dihapus"); dihapus
+  // saat dokter menekan SIMPAN SEMUA. Tanda hanya di memori halaman ini.
+  const dxDeleteMarks = { href: "", codes: new Set() };
+  function dxDeleteMarksForPage() {
+    if (dxDeleteMarks.href !== location.pathname) {
+      dxDeleteMarks.href = location.pathname;
+      dxDeleteMarks.codes.clear();
+    }
+    return dxDeleteMarks.codes;
+  }
+  function toggleSavedDiagnosisDelete(code) {
+    const marks = dxDeleteMarksForPage();
+    if (marks.has(code)) marks.delete(code);
+    else marks.add(code);
+    return marks.has(code);
+  }
+
+  // Template diagnosis untuk ICD yang terisi di halaman (urut Primer, Sekunder), tanpa yang akan dihapus.
   function pageDiagnosisTemplates() {
+    const marks = dxDeleteMarksForPage();
     return selectedIcdEntries()
+      .filter((e) => !marks.has(e.code))
       .map((e) => DIAGNOSIS_TEMPLATES.find((d) => d.icd.some((c) => icdCodeMatches(c, e.code))))
       .filter((d, i, a) => d && a.indexOf(d) === i);
   }
@@ -3908,73 +3927,109 @@
     );
   }
 
-  function formatPreviewMedicineRow(m) {
-    const info = ITEMS[m.item] || {};
-    const masterUnit = String(
-      info.unit || getItemUnit(m.item || "") || "",
-    ).trim();
-    const syrup = isSyrupMedication(m) || norm(masterUnit) === "bottle";
-    const doseText = String(m.dose ?? "").trim() || "-";
-    const freqText = String(m.freq ?? "").trim() || "-";
-    const daysText = String(m.days ?? "").trim();
-    const totalText = String(m.total ?? "").trim();
-    const doseUnit = syrup ? "mL" : masterUnit;
-    const durationText = daysText
-      ? `Durasi: ${escapePreviewHtml(daysText)} hari`
-      : "";
-    const quantityText = syrup
-      ? totalText
-        ? `Jumlah resep: ${escapePreviewHtml(totalText)} botol`
-        : ""
-      : totalText
-        ? `Jumlah: ${escapePreviewHtml(totalText)} ${escapePreviewHtml(masterUnit)}`
-        : "";
-    const detail = syrup
-      ? [
-          `Dosis: ${escapePreviewHtml(doseText)} ${escapePreviewHtml(doseUnit)}`,
-          `Frekuensi: ${escapePreviewHtml(freqText)}×/hari`,
-          durationText,
-          quantityText,
-        ]
-          .filter(Boolean)
-          .join("<br>")
-      : [
-          `${escapePreviewHtml(doseText)} ${escapePreviewHtml(doseUnit)} · ${escapePreviewHtml(freqText)}×/hari`,
-          durationText,
-          quantityText,
-        ]
-          .filter(Boolean)
-          .join("<br>");
-    return `<div class="ak-live-preview-row"><div><b>${escapePreviewHtml(info.target || m.item)}</b><small>${escapePreviewHtml(m.sourceLabel || "")}</small></div><div>${detail}<br><small>${escapePreviewHtml(m.instruction || "")}</small></div></div>`;
+  // v0.7.1: kekuatan obat (mg) dari nama produk; ranitidin tanpa kekuatan = 150 mg. (pure, diuji)
+  function drugStrengthMg(name) {
+    const t = String(name || "").toUpperCase();
+    const per = t.match(/(\d+(?:[.,]\d+)?)\s*MG\s*\/\s*(\d+(?:[.,]\d+)?)?\s*ML/);
+    if (per) return { mg: parseFloat(per[1].replace(",", ".")), perMl: parseFloat((per[2] || "1").replace(",", ".")) };
+    const m = t.match(/(\d+(?:[.,]\d+)?)\s*(MG|MCG)\b/);
+    if (m) return { mg: parseFloat(m[1].replace(",", ".")) / (m[2] === "MCG" ? 1000 : 1), perMl: null };
+    if (/RANITIDIN/.test(t)) return { mg: 150, perMl: null, assumed: true };
+    return null;
+  }
+  const fmtNum = (n, d = 1) => {
+    const r = Math.round(n * 10 ** d) / 10 ** d;
+    return String(r).replace(".", ",");
+  };
+  const shortDrugName = (name) => splitProductPrefix(name).base;
+  // Dosis per kali minum (mg) & per kg untuk satu bahan racikan puyer/kapsul. (pure, diuji)
+  function racikanIngredientDose(tpl, ing, weightKg) {
+    const jenis = racikanJenisFor(tpl);
+    if (jenis !== "kertas_puyer" && jenis !== "kapsul") return null;
+    const st = drugStrengthMg(ITEMS[ing.item]?.target || ing.item);
+    const q = Number(String(ing.quantity ?? "").replace(",", "."));
+    if (!st || st.perMl || !Number.isFinite(q) || q <= 0) return null;
+    const amount = Number(String(tpl.doseAmount || 1).replace(",", ".")) || 1;
+    const mg = (st.mg * q * amount) / racikanQtyFor(tpl);
+    return { mg, mgKg: Number.isFinite(weightKg) && weightKg > 0 ? mg / weightKg : null, assumed: !!st.assumed };
   }
 
-  function formatPreviewRacikanRow(r) {
+  function formatPreviewMedicineRow(m, weightKg) {
+    const info = ITEMS[m.item] || {};
+    const masterUnit = String(info.unit || getItemUnit(m.item || "") || "").trim();
+    const syrup = isSyrupMedication(m) || norm(masterUnit) === "bottle";
+    const dose = String(m.dose ?? "").trim() || "-";
+    const freq = String(m.freq ?? "").trim() || "-";
+    const days = String(m.days ?? "").trim();
+    const total = String(m.total ?? "").trim();
+    const unit = syrup ? "mL" : masterUnit;
+    let perKg = "";
+    const st = drugStrengthMg(info.target || m.item);
+    const d = Number(String(dose).replace(",", "."));
+    if (st && Number.isFinite(d) && Number.isFinite(weightKg) && weightKg > 0) {
+      const mg = syrup && st.perMl ? (st.mg / st.perMl) * d : !syrup && !st.perMl ? st.mg * d : null;
+      if (mg != null) perKg = ` <span class="akr-kg">${fmtNum(mg)} mg = ${fmtNum(mg / weightKg, 2)} mg/kg</span>`;
+    }
+    const line = [`${escapePreviewHtml(dose)} ${escapePreviewHtml(unit)} × ${escapePreviewHtml(freq)}/hari`, days ? `${escapePreviewHtml(days)} hari` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    const qty = total ? ` → <b>${escapePreviewHtml(total)} ${escapePreviewHtml(syrup ? "botol" : masterUnit)}</b>` : "";
+    return `<div class="ak-live-preview-row akr-compact"><div class="akr-name"><b>${escapePreviewHtml(shortDrugName(info.target || m.item))}</b></div><div class="akr-signa">${line}${qty}${perKg}${m.instruction ? ` · <small>${escapePreviewHtml(String(m.instruction).toLowerCase())}</small>` : ""}</div></div>`;
+  }
+
+  function formatPreviewRacikanRow(r, weightKg) {
     const tpl = r.tpl || {};
     const ingredients = Array.isArray(tpl.ingredients) ? tpl.ingredients : [];
+    const n = racikanQtyFor(tpl);
+    const jenis = racikanJenisFor(tpl);
+    const unitWord = { kertas_puyer: "bungkus", kapsul: "kapsul", botol_sirup: "mL", pot_salep: "oles" }[jenis];
+    const form = { kertas_puyer: `Puyer ${n} bungkus`, kapsul: `Kapsul ${n}`, botol_sirup: "Sirup racikan", pot_salep: "Salep racikan" }[jenis];
     const ing = ingredients
-      .map(
-        (i) =>
-          `${escapePreviewHtml(ITEMS[i.item]?.target || i.item)}: ${escapePreviewHtml(i.quantity)}`,
-      )
-      .join("<br>");
-    const details = [
-      tpl.doseFreq ? `Frekuensi: ${escapePreviewHtml(tpl.doseFreq)}` : "",
-      tpl.doseAmount ? `Dosis: ${escapePreviewHtml(tpl.doseAmount)}` : "",
-      tpl.duration ? `Durasi: ${escapePreviewHtml(tpl.duration)} hari` : "",
+      .map((i) => {
+        const info = ITEMS[i.item] || {};
+        const qUnit = String(info.unit || "").replace(/^tablet$/i, "tab");
+        const dose = racikanIngredientDose(tpl, i, weightKg);
+        const doseText = dose
+          ? ` <span class="akr-kg">→ ${fmtNum(dose.mg)} mg/${unitWord}${dose.mgKg != null ? ` = ${fmtNum(dose.mgKg, 2)} mg/kg` : ""}${dose.assumed ? " (anggap 150 mg)" : ""}</span>`
+          : "";
+        return `<div>• ${escapePreviewHtml(shortDrugName(info.target || i.item))} <b>${escapePreviewHtml(String(i.quantity).replace(".", ","))} ${escapePreviewHtml(qUnit)}</b>${doseText}</div>`;
+      })
+      .join("");
+    const signa = [
+      tpl.doseFreq ? `${escapePreviewHtml(tpl.doseFreq)} × ${escapePreviewHtml(tpl.doseAmount || 1)} ${unitWord}/hari` : "",
+      tpl.duration ? `${escapePreviewHtml(tpl.duration)} hari` : "",
       tpl.instruction ? escapePreviewHtml(tpl.instruction) : "",
     ]
       .filter(Boolean)
-      .join("<br>");
-    return `<div class="ak-live-preview-racikan"><b>${escapePreviewHtml(tpl.title || tpl.name || r.sourceLabel || "RACIKAN")}</b><div>${ing || "<span>Komponen racikan tidak tersedia.</span>"}</div><small>${details}${r.sourceLabel ? `<br>${escapePreviewHtml(r.sourceLabel)}` : ""}</small></div>`;
+      .join(" · ");
+    return `<div class="ak-live-preview-racikan"><div class="akr-head"><b>${escapePreviewHtml(tpl.title || tpl.name || r.sourceLabel || "RACIKAN")}</b><span class="akr-form">${escapePreviewHtml(form)}</span></div><div class="akr-signa">${signa}</div><div class="akr-ing">${ing || "<span>Komponen racikan tidak tersedia.</span>"}</div></div>`;
+  }
+
+  // v0.7.1: peringatan obat untuk bayi <6 bulan atau <7 kg (dosis TIDAK diubah). (pure, diuji)
+  const INFANT_CAUTIONS = [
+    { re: /IBUPROFEN/, text: "Ibuprofen tidak dianjurkan untuk bayi <6 bulan; pilih paracetamol." },
+    { re: /\bCTM\b|CHLORPHENIRAMIN|CETIRIZIN/, text: "Antihistamin (CTM/cetirizine) tidak dianjurkan untuk bayi <6 bulan (CTM: <2 tahun)." },
+    { re: /GUAIFENESIN|AMBROXOL|DEXTROMETHORPHAN|GLYCERYL/, text: "Obat batuk-pilek (guaifenesin/ambroxol) tidak dianjurkan untuk anak <2 tahun." },
+    { re: /DEXAMETHASON/, text: "Deksametason tidak rutin untuk batuk-pilek bayi." },
+    { re: /DOMPERIDON/, text: "Domperidon tidak dianjurkan untuk bayi <6 bulan (maks 0,25 mg/kg/dosis)." },
+    { re: /RANITIDIN|ANTASIDA/, text: "Antasida/ranitidin tidak dianjurkan untuk bayi <6 bulan." },
+    { re: /BETAMETHASON/, text: "Salep steroid kuat (betametason): hindari wajah & area popok bayi." },
+    { re: /XITROL/, text: "Tetes mata ber-steroid (Xitrol) pada bayi: hati-hati; mata bernanah pada neonatus dirujuk." },
+  ];
+  function infantCautions(preview, ageYears, weightKg) {
+    const infant = (Number.isFinite(ageYears) && ageYears < 0.5) || (Number.isFinite(weightKg) && weightKg < 7);
+    if (!infant || !preview) return [];
+    const names = [
+      ...(preview.medicines || []).map((m) => ITEMS[m.item]?.target || m.item),
+      ...(preview.racikans || []).flatMap((r) => (r.tpl?.ingredients || []).map((i) => ITEMS[i.item]?.target || i.item)),
+    ].map((x) => String(x).toUpperCase());
+    return INFANT_CAUTIONS.filter((c) => names.some((n) => c.re.test(n))).map((c) => c.text);
   }
 
   function buildLivePreviewHtml(preview, title = "PREVIEW OBAT TERPILIH") {
-    const medRows = (preview.medicines || [])
-      .map(formatPreviewMedicineRow)
-      .join("");
-    const racikanRows = (preview.racikans || [])
-      .map(formatPreviewRacikanRow)
-      .join("");
+    const medRows = (preview.medicines || []).map((m) => formatPreviewMedicineRow(m, preview.weightKg)).join("");
+    const racikanRows = (preview.racikans || []).map((r) => formatPreviewRacikanRow(r, preview.weightKg)).join("");
+    const cautions = infantCautions(preview, preview.ageYears, preview.weightKg);
     const notes = [
       ...(preview.skipped || []),
       ...(preview.skippedDuplicates || []).map(
@@ -3982,7 +4037,10 @@
       ),
       ...(preview.notes || []),
     ];
-    return `<div class="ak-live-preview-box"><div class="ak-live-preview-head"><div><div class="ak-live-preview-title">${escapePreviewHtml(title)}</div></div><div class="ak-live-preview-count">${(preview.medicines || []).length + (preview.racikans || []).length} pilihan</div></div><div class="ak-preview-section"><div class="ak-rp-label">OBAT NON-RACIKAN (${(preview.medicines || []).length})</div>${medRows || '<div class="ak-preview-empty">Belum ada obat non-racikan yang dipilih.</div>'}</div><div class="ak-preview-section"><div class="ak-rp-label">RACIKAN (${(preview.racikans || []).length})</div>${racikanRows || '<div class="ak-preview-empty">Belum ada racikan yang dipilih.</div>'}</div>${notes.length ? `<div class="ak-preview-notes"><b>Catatan:</b><br>${notes.map((n) => `• ${escapePreviewHtml(n)}`).join("<br>")}</div>` : ""}</div>`;
+    const cautionHtml = cautions.length
+      ? `<div class="akr-caution"><b>⚠ Bayi &lt;6 bulan / &lt;7 kg:</b>${cautions.map((c) => `<div>• ${escapePreviewHtml(c)}</div>`).join("")}</div>`
+      : "";
+    return `${cautionHtml}<div class="ak-live-preview-box"><div class="ak-live-preview-head"><div><div class="ak-live-preview-title">${escapePreviewHtml(title)}</div></div><div class="ak-live-preview-count">${(preview.medicines || []).length + (preview.racikans || []).length} pilihan</div></div><div class="ak-preview-section"><div class="ak-rp-label">OBAT NON-RACIKAN (${(preview.medicines || []).length})</div>${medRows || '<div class="ak-preview-empty">Belum ada obat non-racikan yang dipilih.</div>'}</div><div class="ak-preview-section"><div class="ak-rp-label">RACIKAN (${(preview.racikans || []).length})</div>${racikanRows || '<div class="ak-preview-empty">Belum ada racikan yang dipilih.</div>'}</div>${notes.length ? `<div class="ak-preview-notes"><b>Catatan:</b><br>${notes.map((n) => `• ${escapePreviewHtml(n)}`).join("<br>")}</div>` : ""}</div>`;
   }
 
   function updateMedicationGroupLivePreview(shade, ageYears) {
@@ -4017,6 +4075,8 @@
         ageYears,
         actionKeys,
       );
+      preview.weightKg = weightKg;
+      preview.ageYears = ageYears;
       const group = getMedicationPackageGroup(weightKg, ageYears);
       const groupText = group === "adult" ? "DEWASA" : "ANAK";
       box.innerHTML = `<div class="ak-package-preview-meta"><b>Kategori:</b> ${groupText} · <b>BB:</b> ${weightKg == null ? "tidak diperlukan" : `${escapePreviewHtml(String(weightKg).replace(".", ","))} kg`}</div>${buildLivePreviewHtml(preview, "PREVIEW OBAT TERPILIH")}`;
@@ -4813,10 +4873,12 @@
       const savedCodes = savedIcdCodesOnPage();
       const rows = icdList.map(
         (e) =>
-          `<div class="akm-dx-row"><span><b>${escapePreviewHtml(e.code)}</b> <span class="akm-dx-role">${e.role}</span> ${escapePreviewHtml(e.name)}</span>` +
-          (savedCodes.has(e.code)
-            ? '<span class="akm-dx-saved" title="Sudah tersimpan; hapus lewat ikon hapus di bagian Diagnosa Medisin">tersimpan</span>'
-            : `<button type="button" class="akm-dx-del" data-dx-del="${escapePreviewHtml(e.code)}" title="Hapus diagnosa ini (belum disimpan)" aria-label="Hapus ${escapePreviewHtml(e.code)}">✕</button>`) +
+          `<div class="akm-dx-row${savedCodes.has(e.code) && dxDeleteMarksForPage().has(e.code) ? " akm-dx-deleting" : ""}"><span><b>${escapePreviewHtml(e.code)}</b> <span class="akm-dx-role">${e.role}</span> ${escapePreviewHtml(e.name)}</span>` +
+          (savedCodes.has(e.code) && dxDeleteMarksForPage().has(e.code)
+            ? `<button type="button" class="akm-dx-undo" data-dx-del="${escapePreviewHtml(e.code)}" title="Batal hapus">akan dihapus · ↺ batal</button>`
+            : savedCodes.has(e.code)
+              ? `<span class="akm-dx-saved">tersimpan</span><button type="button" class="akm-dx-del" data-dx-del="${escapePreviewHtml(e.code)}" title="Tandai hapus (dihapus saat SIMPAN SEMUA)" aria-label="Hapus ${escapePreviewHtml(e.code)}">✕</button>`
+              : `<button type="button" class="akm-dx-del" data-dx-del="${escapePreviewHtml(e.code)}" title="Hapus diagnosa ini (belum disimpan)" aria-label="Hapus ${escapePreviewHtml(e.code)}">✕</button>`) +
           `</div>`,
       );
       if (diagText) rows.push(`<div class="akm-hint">Diagnosa: ${escapePreviewHtml(diagText)}</div>`);
@@ -5181,11 +5243,15 @@
           return;
         }
         if (presetDiagnosis?.icd.some((c) => icdCodeMatches(c, code))) presetDiagnosis = pageDiagnosisTemplates()[0] || null;
+        const marked = r.saved ? toggleSavedDiagnosisDelete(code) : false;
+        if (r.saved && marked && presetDiagnosis?.icd.some((c) => icdCodeMatches(c, code))) presetDiagnosis = pageDiagnosisTemplates()[0] || null;
         if (syncStatusEl)
           syncStatusEl.textContent = r.removed
             ? `✓ Diagnosa ${code} dihapus (belum disimpan).`
             : r.saved
-              ? `${code} sudah TERSIMPAN: hapus lewat ikon hapus di bagian Diagnosa Medisin.`
+              ? marked
+                ? `${code} akan dihapus saat SIMPAN SEMUA (ketuk ↺ untuk batal).`
+                : `${code} batal dihapus.`
               : `${code} tidak ditemukan di isian Diagnosa.`;
         renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
         renderDxPreview();
@@ -5208,6 +5274,21 @@
       });
     });
     renderDxChoices();
+    // v0.7.1: daftar diagnosis panel = Diagnosa di Medisin (tersimpan / akan ditulis / akan
+    // dihapus), diperbarui otomatis bila diubah langsung di halaman.
+    const dxSig = () => JSON.stringify([selectedIcdEntries().map((e) => e.code), [...dxDeleteMarksForPage()], [...savedIcdCodesOnPage()]]);
+    let lastDxSig = dxSig();
+    const dxSyncTimer = setInterval(() => {
+      if (!shade.isConnected) return clearInterval(dxSyncTimer);
+      if (taskRunning) return;
+      const sig = dxSig();
+      if (sig === lastDxSig) return;
+      lastDxSig = sig;
+      renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
+      renderDxPreview();
+      renderDxChoices();
+      resuggest();
+    }, 1500);
     let dxChoiceTimer = null;
     anamnesisEl.addEventListener("input", () => {
       clearTimeout(dxChoiceTimer);
@@ -5906,6 +5987,16 @@
     .ak-live-preview-sub{font:500 11px/1.4 ${AK_FONT}!important;color:#64748b!important;margin-top:2px!important;}
     .ak-live-preview-count{flex:none!important;padding:3px 9px!important;border-radius:999px!important;background:#f97316!important;color:#fff!important;font:800 11px ${AK_FONT}!important;}
     .ak-preview-section{margin-top:12px!important;}
+    .ak-live-preview-row.akr-compact{grid-template-columns:minmax(0,1fr)!important;gap:2px!important;}
+    .akr-name b{font-size:13px!important;}
+    .akr-signa{font-size:12.5px!important;color:#334155!important;line-height:1.45!important;}
+    .akr-kg{display:inline-block!important;font-size:11.5px!important;color:#0f766e!important;font-weight:600!important;}
+    .akr-head{display:flex!important;justify-content:space-between!important;align-items:baseline!important;gap:8px!important;flex-wrap:wrap!important;}
+    .akr-form{font-size:11.5px!important;font-weight:700!important;color:#9a3412!important;background:#ffedd5!important;border-radius:999px!important;padding:1px 8px!important;}
+    .akr-ing{margin-top:4px!important;font-size:12.5px!important;color:#0f172a!important;line-height:1.5!important;}
+    .akr-caution{margin:0 0 8px!important;padding:8px 10px!important;border:1px solid #fcd34d!important;background:#fffbeb!important;border-radius:10px!important;font-size:12px!important;color:#78350f!important;line-height:1.45!important;}
+    .akm-dx-row.akm-dx-deleting > span:first-child{text-decoration:line-through!important;color:#94a3b8!important;}
+    .akm-dx-undo{flex:none!important;border:1px solid #cbd5e1!important;border-radius:999px!important;background:#fff!important;color:#334155!important;font-size:11px!important;padding:3px 8px!important;cursor:pointer!important;}
     .ak-live-preview-row{display:grid!important;grid-template-columns:minmax(0,1.35fr) minmax(180px,.85fr)!important;gap:12px!important;
       padding:11px 12px!important;border:1px solid #e2e8f0!important;border-radius:10px!important;background:#fff!important;margin-top:7px!important;
       font:500 12px/1.45 ${AK_FONT}!important;color:#334155!important;}
@@ -6633,7 +6724,17 @@
       },
       put: (url) => blocked(url),
       patch: (url) => blocked(url),
-      delete: (url) => blocked(url),
+      delete: (url, cfg) => {
+        if (!allow.some((re) => re.test(String(url)))) return blocked(url);
+        log.calls.push(String(url));
+        const pr = dry ? Promise.resolve({ data: { message: "UJI: tidak dikirim" } }) : klinik.delete(url, cfg);
+        pending.push(
+          pr.catch((e) => {
+            log.errors.push(String(e?.response?.data?.message || e?.message || e));
+          }),
+        );
+        return pr;
+      },
     };
     const KEYS = ["$klinik", "$rest2", "$parseError", "$socket"];
     const saved = KEYS.map((k) => Object.getOwnPropertyDescriptor(vm, k));
@@ -6705,9 +6806,15 @@
   }
 
   // Bagian yang terisi tetapi belum disimpan. (dipakai juga oleh tes)
+  // v0.7.1 (permintaan dokter 2026-11-18): hapus diagnosa tersimpan bertanda ✕, hanya
+  // lewat alamat hapus diagnosa Medisin sendiri (sama dengan ikon hapus Medisin).
+  const DX_DELETE_ALLOWED = [/^master\/kunjungan\/diagnosa\/[^/]+$/];
   function pendingSections() {
     const out = [];
     const dg = findVm("Diagnosa");
+    const marks = dxDeleteMarksForPage();
+    const del = (Array.isArray(dg?.data) ? dg.data : []).filter((d) => d?.id_icdx_kunjungan && marks.has(savedIcdCode(d)));
+    if (del.length) out.push({ key: "dxdel", label: `Hapus diagnosa (${del.map(savedIcdCode).join(", ")})`, vm: dg, items: del, n: del.length });
     const rs = findVm("Resep");
     const td = findVm("Tindakan");
     const dx = (dg?.input_icdx || []).filter((r) => r?.val);
@@ -6724,6 +6831,16 @@
 
   async function saveSection(s) {
     const vm = s.vm;
+    if (s.key === "dxdel") {
+      for (const d of s.items) {
+        const url = `master/kunjungan/diagnosa/${d.id_icdx_kunjungan}`;
+        const g = await withGuard(vm, () => vm.$klinik.delete(url), { allow: DX_DELETE_ALLOWED, waitMs: 0 });
+        if (g.errors.length) throw new Error(g.errors.join("; "));
+        dxDeleteMarksForPage().delete(savedIcdCode(d));
+      }
+      if (!globalThis.__AK_DRY_RUN__) await Promise.resolve(vm.getDiagnosa?.()).catch(() => {});
+      return true;
+    }
     if (s.key === "dx") {
       const ok = await Promise.resolve(vm.$refs?.form_diagnosa?.validate?.() ?? true);
       if (ok === false) throw new Error("kolom diagnosa belum lengkap");
@@ -7157,6 +7274,12 @@
       fillDiagnoses,
       pageDiagnosisTemplates,
       removeUnsavedDiagnosis,
+      toggleSavedDiagnosisDelete,
+      drugStrengthMg,
+      racikanIngredientDose,
+      infantCautions,
+      formatPreviewRacikanRow,
+      formatPreviewMedicineRow,
       addDiagnosisChoice,
       parseLockText,
       lockEffective,

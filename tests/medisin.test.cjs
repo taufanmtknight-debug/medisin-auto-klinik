@@ -760,3 +760,71 @@ test("v0.7.0: obat disarankan dari semua diagnosis", () => {
   for (const k of t("GEA").adult) assert.ok(two.keys.includes(k), k);
   assert.equal(plain(two.matches).filter((m) => /^Diagnosis /.test(m.label)).length, 2);
 });
+
+// ---------------- v0.7.1 ----------------
+test("v0.7.1: ✕ diagnosa TERSIMPAN = tanda 'akan dihapus'; dihapus saat SIMPAN SEMUA lewat alamat hapus Medisin saja", async () => {
+  const a = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  const sent = [];
+  const base = fakeSavers(a, sent);
+  base.delete = async (url) => sent.push("DELETE " + url);
+  a.Diagnosa.data = [{ id_icdx_kunjungan: 77, icd_kode: "I10", en: "Essential (primary) hypertension" }];
+  let refreshed = 0;
+  a.Diagnosa.getDiagnosa = () => {
+    refreshed++;
+    a.Diagnosa.data = [];
+  };
+  // Belum ditandai: tidak ada yang dihapus.
+  assert.deepEqual(plain(a.api.pendingSections().map((x) => x.key)), []);
+  assert.equal(a.api.toggleSavedDiagnosisDelete("I10"), true);
+  assert.equal(a.api.toggleSavedDiagnosisDelete("I10"), false, "↺ batal");
+  a.api.toggleSavedDiagnosisDelete("I10");
+  assert.deepEqual(plain(a.api.pageDiagnosisTemplates()).map((d) => d.key), [], "obat tidak mengikuti diagnosa yang akan dihapus");
+  const list = a.api.pendingSections();
+  assert.deepEqual(plain(list.map((x) => x.key)), ["dxdel"]);
+  const r = await a.api.saveSections(list);
+  assert.deepEqual(plain(r.failed), []);
+  assert.deepEqual(sent, ["DELETE master/kunjungan/diagnosa/77"]);
+  assert.equal(refreshed, 1);
+  assert.equal(a.Diagnosa.$klinik, base, "penjaga dilepas");
+  // Hapus ke alamat lain tetap diblokir pada simpan biasa.
+  fillForSave(a);
+  a.Diagnosa.onSaveDiagnosa = function () {
+    return this.$klinik.delete("master/kunjungan/" + ID).catch(() => {});
+  };
+  const r2 = await a.api.saveSections(a.api.pendingSections().filter((x) => x.key === "dx"));
+  assert.match(plain(r2.failed)[0], /diblokir/);
+  assert.ok(!sent.includes("DELETE master/kunjungan/" + ID));
+});
+
+test("v0.7.1: mode uji: hapus diagnosa tidak dikirim", async () => {
+  const a = makeApp({ extra: { __AK_DRY_RUN__: true } });
+  const sent = [];
+  const base = fakeSavers(a, sent);
+  base.delete = async (url) => sent.push("DELETE " + url);
+  a.Diagnosa.data = [{ id_icdx_kunjungan: 5, icd_kode: "I10" }];
+  a.api.toggleSavedDiagnosisDelete("I10");
+  const r = await a.api.saveSections(a.api.pendingSections());
+  assert.deepEqual(plain(r.failed), []);
+  assert.deepEqual(sent, []);
+});
+
+test("v0.7.1: info racikan ringkas: bentuk, signa, mg per bungkus & mg/kg; peringatan bayi", () => {
+  const { api } = makeApp();
+  assert.deepEqual(plain(api.drugStrengthMg("BPJS -- PARACETAMOL 500 MG")), { mg: 500, perMl: null });
+  assert.deepEqual(plain(api.drugStrengthMg("BPJS -- AMOXICILLIN TRIHYDRATE 125 MG/5ML SYRUP")), { mg: 125, perMl: 5 });
+  assert.equal(api.drugStrengthMg("BPJS -- RANITIDINE HCL").mg, 150);
+  const p = api.buildMedicationPackagePreview(["PARACETAMOL_ANAK", "ISPA_ANAK"], 4, 0.3, []);
+  const demam = p.racikans.find((r) => /DEMAM/.test(r.tpl.title));
+  const d = api.racikanIngredientDose(demam.tpl, demam.tpl.ingredients[0], 4);
+  assert.equal(d.mg, 50);
+  assert.equal(d.mgKg, 12.5);
+  const html = api.formatPreviewRacikanRow(demam, 4);
+  assert.match(html, /Puyer 10 bungkus/);
+  assert.match(html, /3 × 1 bungkus\/hari · 3 hari · setelah makan/);
+  assert.match(html, /PARACETAMOL 500 MG <b>1 tab<\/b>.*50 mg\/bungkus = 12,5 mg\/kg/);
+  assert.doesNotMatch(html, /Frekuensi:|Dosis:|BPJS --/);
+  const c = plain(api.infantCautions(p, 0.3, 4)).join(" ");
+  assert.match(c, /CTM/);
+  assert.match(c, /batuk-pilek/);
+  assert.deepEqual(plain(api.infantCautions(p, 3, 14)), [], "bukan bayi: tanpa peringatan");
+});
