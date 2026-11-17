@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.2 — 2026-11-17 (masukan dokter dari HP)
+
+- **Jasa konsultasi langsung tersimpan**: RESUME mengisi "BPJS - Dokter Umum Jasa Konsultasi" (atau tarif UMUM) lalu langsung menekan SIMPAN Tindakan milik Medisin (disetujui dokter), hanya bila tidak ada tindakan lain yang belum disimpan.
+- **Perbaikan**: kolom Jenis Tindakan sebelumnya diisi objek, padahal Medisin memakai tarif_id → validasi "Jenis Tindakan tidak boleh kosong". Sekarang diisi tarif_id.
+- **Diagnosis terinput** di Paket Resep: tombol "Pilihan diagnosis paling mungkin" (maks 5, dari keluhan) untuk mengganti diagnosis isian script, dan kolom **cari diagnosis** (nama, kata keluhan, atau kode ICD): diagnosis bawaan (dengan paket obat) dan ICD 10 dari pencarian Medisin (ditambahkan sebagai diagnosa).
+- **Keluhan** di Paket Resep kini dibaca dari **Anamnesa** (Keluhan Utama hanya cadangan); bila diedit di panel, Keluhan Utama DAN Anamnesa di halaman diganti teks itu. Diagnosis otomatis RESUME juga membaca Anamnesa.
+
 ## v0.4.1 — 2026-11-17 (permintaan dokter)
 
 - RESEP ULANG dan SURAT SAKIT dihapus dulu dari menu dan shortcut (Alt+U, Alt+K).

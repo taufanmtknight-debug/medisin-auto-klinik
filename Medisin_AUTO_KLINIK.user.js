@@ -4009,7 +4009,13 @@
     const chooseDx = (d) =>
       runTask("PILIH DIAGNOSIS", async () => {
         if (syncStatusEl) syncStatusEl.textContent = `⏳ Memilih ${d.label}…`;
-        const r = await applyDiagnosisChoice(d);
+        let r;
+        try {
+          r = await applyDiagnosisChoice(d);
+        } catch (e) {
+          if (syncStatusEl) syncStatusEl.textContent = `✕ ${d.label} belum terisi: ${e?.message || e}. Isi manual di bagian Diagnosa.`;
+          throw e;
+        }
         presetDiagnosis = d;
         dxSyncedText = String(anamnesisEl.value || "").trim();
         if (syncStatusEl) syncStatusEl.textContent = `✓ Diagnosis: ${r.note}. Saran obat mengikuti diagnosis ini.`;

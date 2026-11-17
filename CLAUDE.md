@@ -3,7 +3,7 @@
 Pengguna adalah dokter; balas dalam Bahasa Indonesia sederhana. Website: `https://app.medisin.id` (Vue 2 + Quasar v1 + Vuex, "App Sintasi"). Baca `docs/medisin/00-RINGKASAN.md` sebelum mengubah apa pun.
 
 ## Aturan tetap (dibawa dari versi Klinik Pintar)
-- Script hanya **mengisi**; dokter selalu mereview. Pengecualian (disetujui dokter 2026-11-17): tombol **SIMPAN SEMUA** yang ditekan dokter boleh menjalankan SIMPAN Medisin untuk Diagnosa/Resep/BHP/Tindakan, hanya di blok `AK-WRITE-BLOCK` dengan penjaga alamat. Tidak pernah: SUBMIT (`saveData` → PUT kunjungan + PCare), SUBMIT BPJS, SUBMIT SATUSEHAT, PROSES KASIR, simpan racikan.
+- Script hanya **mengisi**; dokter selalu mereview. Pengecualian (disetujui dokter 2026-11-17): tombol **SIMPAN SEMUA** yang ditekan dokter boleh menjalankan SIMPAN Medisin untuk Diagnosa/Resep/BHP/Tindakan, hanya di blok `AK-WRITE-BLOCK` dengan penjaga alamat. Juga (disetujui dokter 2026-11-17): jasa konsultasi yang diisi RESUME langsung disimpan (SIMPAN Tindakan) bila tidak ada tindakan lain yang belum disimpan. Tidak pernah: SUBMIT (`saveData` → PUT kunjungan + PCare), SUBMIT BPJS, SUBMIT SATUSEHAT, PROSES KASIR, simpan racikan.
 - Menguji SIMPAN SEMUA di pasien asli: pakai `window.__AK_DRY_RUN__ = true` + blok XHR non-GET; simpan sungguhan hanya pada pasien yang ditunjuk dokter.
 - Isian dokter tidak ditimpa (isi hanya kolom kosong).
 - Dosis/obat baru yang Claude tentukan sendiri harus disebutkan ke dokter untuk dievaluasi.
