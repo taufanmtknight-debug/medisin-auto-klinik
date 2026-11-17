@@ -341,7 +341,7 @@ test("v9.5: contoh Keluhan Utama asli dari screenshot klinik", () => {
 
 test("menu DIAGNOSIS: diagnosis dengan kode ICD-10 yang sah", () => {
   const byKey = plain(Object.fromEntries(api.DIAGNOSIS_TEMPLATES.slice(0, 15).map((d) => [d.key, d.icd[0]])));
-  assert.equal(api.DIAGNOSIS_TEMPLATES.length, 36);
+  assert.equal(api.DIAGNOSIS_TEMPLATES.length, 45);
   assert.deepEqual(byKey, {
     ISPA: "J06", FARINGITIS: "J02.9", TONSILITIS: "J03.9", GEA: "A09", DISPEPSIA: "K30", FEVER: "R50.9",
     MYALGIA: "M79.1", LBP: "M54.5", CEPHALGIA: "R51", VERTIGO: "R42", DERMATITIS: "L30.9", URTIKARIA: "L50.9",
@@ -607,4 +607,30 @@ test("v0.3.0 Medisin: 'sakit mata ... gatal' = konjungtivitis, bukan dermatitis"
   assert.equal(d("mata kanan merah"), "KONJUNGTIVITIS");
   assert.equal(d("gatal di tangan"), "DERMATITIS");
   assert.equal(d("mata kering"), null);
+});
+
+test("v0.3.1 Medisin: keluhan baru -> diagnosis & obat", () => {
+  const d = (t) => api.detectDiagnosisFromComplaint(t)?.key || null;
+  const s = (t, g = "adult") => plain(api.suggestMedicationsFromAnamnesis(t, g)).keys;
+  assert.equal(d("bintitan mata kiri 3 hari"), "HORDEOLUM");
+  assert.equal(d("kelopak mata bengkak dan merah"), "HORDEOLUM");
+  assert.equal(d("wasir keluar saat bab"), "HEMOROID");
+  assert.equal(d("diare berlendir dan berdarah"), "DISENTRI");
+  assert.equal(d("diare 3x cair"), "GEA");
+  assert.equal(d("demam 7 hari, curiga tipes"), "TIFOID");
+  assert.equal(d("jempol kaki bengkak merah, asam urat kambuh"), "GOUT");
+  assert.equal(d("lepuh di bibir"), "HERPES_LABIALIS");
+  assert.equal(d("biang keringat di leher, gatal"), "MILIARIA");
+  assert.equal(d("lemas, kurang darah"), "ANEMIA");
+  assert.equal(d("kesemutan di kaki"), "PARESTESIA");
+  assert.deepEqual(s("bintitan"), ["RECO_SALEP_MATA"]);
+  assert.deepEqual(s("ambeien"), ["SUPERHOID_SUPP"]);
+  assert.ok(s("cacar api di pinggang").includes("ACYCLOVIR_400_DEWASA"));
+  assert.ok(s("panu di punggung").includes("MICONAZOLE_SALEP"));
+  assert.ok(s("sesak napas, mengi").includes("SALBUTAMOL_2_DEWASA"));
+  // Obat yang hanya untuk dewasa tidak disarankan untuk anak.
+  assert.ok(!s("sesak napas", "child").includes("SALBUTAMOL_2_DEWASA"));
+  // 1 minidose saja (permintaan dokter).
+  const x = api.MEDICATION_ITEMS_FLAT.find((i) => i.key === "CENDO_XITROL_TETES");
+  assert.equal(x.medicine.total, "1");
 });

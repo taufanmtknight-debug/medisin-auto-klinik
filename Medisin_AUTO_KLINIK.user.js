@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.3.0
+// @version      0.3.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.3.0";
+  const SCRIPT_VERSION_FALLBACK = "0.3.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -81,6 +81,16 @@
     CENDO_XITROL: { keyword: "BPJS -- CENDO XITROL MINIDOSE", target: "BPJS -- CENDO XITROL MINIDOSE", unit: "minidose", usageUnit: "TETES" },
     CENDO_LYTEERS: { keyword: "BPJS -- CENDO LYTEERS MINIDOSE", target: "BPJS -- CENDO LYTEERS MINIDOSE", unit: "minidose", usageUnit: "TETES" },
     RECO_TETES_TELINGA: { keyword: "BPJS -- RECO TETES TELINGA", target: "BPJS -- RECO TETES TELINGA", unit: "botol", usageUnit: "TETES" },
+    RECO_SALEP_MATA: { keyword: "BPJS -- RECO SALEP MATA", target: "BPJS -- RECO SALEP MATA", unit: "tube", usageUnit: "OLES" },
+    MICONAZOLE_SALEP: { keyword: "BPJS -- MICONAZOLE 10GR SALEP", target: "BPJS -- MICONAZOLE 10GR SALEP", unit: "tube", usageUnit: "OLES" },
+    ACYCLOVIR_SALEP: { keyword: "BPJS -- ACYCLOVIR 5GR SALEP", target: "BPJS -- ACYCLOVIR 5GR SALEP", unit: "tube", usageUnit: "OLES" },
+    BEDAK_SALICYL: { keyword: "BPJS -- BEDAK SALICYL", target: "BPJS -- BEDAK SALICYL", unit: "pcs", usageUnit: "TABUR" },
+    ACYCLOVIR_400: { keyword: "BPJS -- ACYCLOVIR 400 MG", target: "BPJS -- ACYCLOVIR 400 MG", unit: "tablet" },
+    SCOPMA: { keyword: "BPJS -- SCOPMA", target: "BPJS -- SCOPMA", unit: "tablet" },
+    SALBUTAMOL_2: { keyword: "BPJS -- SALBUTAMOL 2 MG", target: "BPJS -- SALBUTAMOL 2 MG", unit: "tablet" },
+    TABLET_TAMBAH_DARAH: { keyword: "BPJS -- TABLET TAMBAH DARAH", target: "BPJS -- TABLET TAMBAH DARAH", unit: "tablet" },
+    MECOBALAMIN_500: { keyword: "BPJS -- MECOBALAMIN 500 MG", target: "BPJS -- MECOBALAMIN 500 MG", unit: "tablet" },
+    SUPERHOID_SUPP: { keyword: "BPJS -- SUPERHOID SUPP", target: "BPJS -- SUPERHOID SUPP", unit: "suppositoria", usageUnit: "SUPP" },
     POT_PLASTIK: { keyword: "BPJS -- POT PLASTIK 30 CC", target: "BPJS -- POT PLASTIK 30 CC", unit: "pcs" },
     CETIRIZINE_10: { keyword: "BPJS -- CETIRIZINE HCL 10 MG", target: "BPJS -- CETIRIZINE HCL 10 MG", unit: "tablet" },
     ANTASIDA_TABLET: { keyword: "BPJS -- ANTASIDA DOEN TABLET", target: "BPJS -- ANTASIDA DOEN TABLET", unit: "tablet" },
@@ -937,14 +947,14 @@
           label: "Cendo Xitrol (tetes mata antibiotik)",
           type: "recipe-inline",
           population: "all",
-          medicine: { item: "CENDO_XITROL", freq: "4", dose: "1", days: "5", total: "5", instruction: "PADA MATA YANG SAKIT" },
+          medicine: { item: "CENDO_XITROL", freq: "4", dose: "1", days: "1", total: "1", instruction: "PADA MATA YANG SAKIT" },
         },
         {
           key: "CENDO_LYTEERS_TETES",
           label: "Cendo Lyteers (tetes mata non-infeksi)",
           type: "recipe-inline",
           population: "all",
-          medicine: { item: "CENDO_LYTEERS", freq: "4", dose: "1", days: "5", total: "5", instruction: "PADA MATA YANG SAKIT" },
+          medicine: { item: "CENDO_LYTEERS", freq: "4", dose: "1", days: "1", total: "1", instruction: "PADA MATA YANG SAKIT" },
         },
         {
           key: "RECO_TETES_TELINGA",
@@ -953,6 +963,37 @@
           population: "all",
           medicine: { item: "RECO_TETES_TELINGA", freq: "3", dose: "3", days: "7", total: "1", instruction: "PADA TELINGA YANG SAKIT" },
         },
+        {
+          key: "RECO_SALEP_MATA",
+          label: "Reco salep mata",
+          type: "recipe-inline",
+          population: "all",
+          medicine: { item: "RECO_SALEP_MATA", freq: "3", dose: "1", days: "5", total: "1", instruction: "PADA MATA YANG SAKIT" },
+        },
+      ],
+    },
+    {
+      key: "TAMBAHAN_MEDISIN",
+      label: "Obat Lain (tambahan)",
+      items: [
+        { key: "MICONAZOLE_SALEP", label: "Miconazole salep (jamur)", type: "recipe-inline", population: "all",
+          medicine: { item: "MICONAZOLE_SALEP", freq: "2", dose: "1", days: "14", total: "1", instruction: "DI LESI" } },
+        { key: "ACYCLOVIR_SALEP", label: "Acyclovir salep", type: "recipe-inline", population: "all",
+          medicine: { item: "ACYCLOVIR_SALEP", freq: "5", dose: "1", days: "5", total: "1", instruction: "DI LESI" } },
+        { key: "ACYCLOVIR_400_DEWASA", label: "Acyclovir 400 mg (zoster/varisela)", type: "recipe-inline", population: "adult",
+          medicine: { item: "ACYCLOVIR_400", freq: "5", dose: "2", days: "7", total: "70", instruction: "" } },
+        { key: "BEDAK_SALICYL", label: "Bedak salicyl", type: "recipe-inline", population: "all",
+          medicine: { item: "BEDAK_SALICYL", freq: "2", dose: "1", days: "7", total: "1", instruction: "DI KULIT YANG GATAL" } },
+        { key: "SCOPMA_DEWASA", label: "Scopma (kolik/kram perut)", type: "recipe-inline", population: "adult",
+          medicine: { item: "SCOPMA", freq: "3", dose: "1", days: "3", total: "9", instruction: "JIKA NYERI PERUT" } },
+        { key: "SALBUTAMOL_2_DEWASA", label: "Salbutamol 2 mg", type: "recipe-inline", population: "adult",
+          medicine: { item: "SALBUTAMOL_2", freq: "3", dose: "1", days: "3", total: "9", instruction: "JIKA SESAK" } },
+        { key: "TABLET_TAMBAH_DARAH", label: "Tablet tambah darah", type: "recipe-inline", population: "adult",
+          medicine: { item: "TABLET_TAMBAH_DARAH", freq: "1", dose: "1", days: "30", total: "30", instruction: "SETELAH MAKAN" } },
+        { key: "MECOBALAMIN_500_DEWASA", label: "Mecobalamin (kesemutan)", type: "recipe-inline", population: "adult",
+          medicine: { item: "MECOBALAMIN_500", freq: "3", dose: "1", days: "5", total: "15", instruction: "SETELAH MAKAN" } },
+        { key: "SUPERHOID_SUPP", label: "Superhoid supp (wasir)", type: "recipe-inline", population: "adult",
+          medicine: { item: "SUPERHOID_SUPP", freq: "2", dose: "1", days: "5", total: "10", instruction: "DI ANUS" } },
       ],
     },
     {
@@ -1120,6 +1161,85 @@
       pattern: /mata\s+(?:\w+\s+)?(?:kering|perih|lelah|capek|kemasukan|kelilipan)|kelilipan|iritasi\s+mata/,
       adult: ["CENDO_LYTEERS_TETES"],
       child: ["CENDO_LYTEERS_TETES"],
+    },
+    {
+      // v0.3.1: bintitan -> Reco salep mata.
+      label: "Bintitan",
+      pattern: /bintit\w*|timbil|hordeol\w*|kelopak\s+mata\s+(?:bengkak|benjol\w*)|benjolan\s+(?:di\s+)?kelopak/,
+      adult: ["RECO_SALEP_MATA"],
+      child: ["RECO_SALEP_MATA"],
+    },
+    {
+      label: "Wasir",
+      pattern: /wasir|ambei?y?en|hemoroid\w*|haemoroid\w*|benjolan\s+(?:di\s+)?(?:anus|dubur)/,
+      adult: ["SUPERHOID_SUPP"],
+      child: [],
+    },
+    {
+      label: "Disentri (BAB berlendir/berdarah)",
+      pattern: /disentri|(?:bab|berak|diare|mencret)\s+(?:\w+\s+)?(?:berlendir|lendir|berdarah|darah)/,
+      adult: ["METRONIDAZOLE_500_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Tifoid",
+      pattern: /tifus|tipes|tifoid|typhoid|thypoid|demam\s+tifoid/,
+      adult: ["CIPROFLOXACIN_500_DEWASA", "PARACETAMOL_DEWASA"],
+      child: ["PARACETAMOL_ANAK"],
+    },
+    {
+      label: "Kram / kolik perut",
+      pattern: /melilit|kolik|kram\s+perut|perut\s+(?:kram|mules|melilit)/,
+      adult: ["SCOPMA_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Asam urat kambuh (gout)",
+      pattern: /\bgout\b|pirai|asam\s+urat\s+(?:kambuh|nyeri|sakit|bengkak)|jempol\s+kaki\s+(?:bengkak|nyeri|sakit|merah)/,
+      adult: ["DICLOFENAC_50"],
+      child: [],
+    },
+    {
+      label: "Sesak / mengi",
+      pattern: /\basma\b|mengi|\bsesak\b/,
+      adult: ["SALBUTAMOL_2_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Kurap / panu / jamur",
+      pattern: /kurap|kadas|tinea|jamur|kutu\s+air|\bpanu\b|versikolor|gatal\s+selangkangan/,
+      adult: ["MICONAZOLE_SALEP"],
+      child: ["MICONAZOLE_SALEP"],
+    },
+    {
+      label: "Herpes zoster",
+      pattern: /herpes\s+zoster|\bzoster\b|cacar\s+(?:ular|api)|dompo/,
+      adult: ["ACYCLOVIR_400_DEWASA", "PARACETAMOL_DEWASA"],
+      child: [],
+    },
+    {
+      label: "Herpes bibir",
+      pattern: /herpes\s+(?:bibir|labial\w*)|lepuh\w*\s+(?:di\s+)?bibir|bibir\s+(?:melepuh|lepuh)/,
+      adult: ["ACYCLOVIR_SALEP"],
+      child: ["ACYCLOVIR_SALEP"],
+    },
+    {
+      label: "Biang keringat",
+      pattern: /biang\s+keringat|keringat\s+buntet|miliaria/,
+      adult: ["BEDAK_SALICYL"],
+      child: ["BEDAK_SALICYL"],
+    },
+    {
+      label: "Anemia",
+      pattern: /anemi\w*|kurang\s+darah|\bhb\s+(?:rendah|turun)/,
+      adult: ["TABLET_TAMBAH_DARAH"],
+      child: [],
+    },
+    {
+      label: "Kesemutan / kebas",
+      pattern: /kesemutan|kebas|\bbaal\b|mati\s+rasa|neuropati\w*/,
+      adult: ["MECOBALAMIN_500_DEWASA"],
+      child: [],
     },
     {
       label: "Sinusitis",
@@ -1321,7 +1441,7 @@
     { key: "RINITIS_ALERGI", label: "Rinitis alergi", icd: ["J30.4", "J30.3"], query: "allergic rhinitis",
       adult: ["LORATADINE_10_DEWASA"], child: ["CETIRIZINE_RACIKAN_BARU"] },
     { key: "ASMA", label: "Asma", icd: ["J45.9", "J45"], query: "asthma",
-      adult: ["METHYLPREDNISOLONE_4_DEWASA"], child: [] },
+      adult: ["SALBUTAMOL_2_DEWASA", "METHYLPREDNISOLONE_4_DEWASA"], child: [] },
     { key: "KONJUNGTIVITIS", label: "Konjungtivitis", icd: ["H10.9", "H10"], query: "conjunctivitis",
       adult: ["CENDO_XITROL_TETES"], child: ["CENDO_XITROL_TETES"] },
     { key: "GASTRITIS", label: "Gastritis", icd: ["K29.7", "K29"], query: "gastritis",
@@ -1329,7 +1449,7 @@
     { key: "KONSTIPASI", label: "Konstipasi", icd: ["K59.0", "K59"], query: "constipation",
       adult: [], child: [] },
     { key: "NYERI_PERUT", label: "Nyeri perut / kolik", icd: ["R10.4", "R10"], query: "abdominal pain",
-      adult: [], child: [] },
+      adult: ["SCOPMA_DEWASA"], child: [] },
     { key: "HELMINTHIASIS", label: "Cacingan", icd: ["B82.0", "B82.9", "B83.9"], query: "helminthiasis",
       adult: [], child: [] },
     { key: "ISK", label: "Infeksi saluran kemih", icd: ["N39.0"], query: "urinary tract infection",
@@ -1341,13 +1461,13 @@
     { key: "ABSES", label: "Abses / bisul", icd: ["L02.9", "L02"], query: "cutaneous abscess",
       adult: ["CEFADROXIL_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["CEFADROXIL_PUYER_ANAK", "PARACETAMOL_ANAK"] },
     { key: "TINEA", label: "Tinea (kurap/jamur)", icd: ["B35.9", "B35.4"], query: "dermatophytosis",
-      adult: ["CETIRIZINE_10_DEWASA"], child: [] },
+      adult: ["MICONAZOLE_SALEP", "CETIRIZINE_10_DEWASA"], child: ["MICONAZOLE_SALEP"] },
     { key: "PANU", label: "Pitiriasis versikolor (panu)", icd: ["B36.0"], query: "pityriasis versicolor",
-      adult: [], child: [] },
+      adult: ["MICONAZOLE_SALEP"], child: ["MICONAZOLE_SALEP"] },
     { key: "VARICELLA", label: "Varisela (cacar air)", icd: ["B01.9", "B01"], query: "varicella",
       adult: ["PARACETAMOL_DEWASA", "CETIRIZINE_10_DEWASA"], child: ["PARACETAMOL_ANAK", "CETIRIZINE_RACIKAN_BARU"] },
     { key: "ZOSTER", label: "Herpes zoster", icd: ["B02.9", "B02"], query: "zoster",
-      adult: ["PARACETAMOL_DEWASA"], child: [] },
+      adult: ["ACYCLOVIR_400_DEWASA", "PARACETAMOL_DEWASA"], child: [] },
     { key: "STOMATITIS", label: "Stomatitis (sariawan)", icd: ["K12.0", "K12.1"], query: "stomatitis",
       adult: [], child: [] },
     { key: "OA_GENU", label: "Osteoartritis lutut", icd: ["M17.9", "M17"], query: "gonarthrosis",
@@ -1356,6 +1476,25 @@
       adult: ["ALLOPURINOL_100"], child: [] },
     { key: "DISLIPIDEMIA", label: "Dislipidemia", icd: ["E78.5", "E78.0"], query: "hyperlipidaemia",
       adult: ["SIMVASTATIN_10"], child: [] },
+    // v0.3.1 (Medisin): diagnosis tambahan; obat hanya yang ada di stok BPJS klinik.
+    { key: "HORDEOLUM", label: "Hordeolum (bintitan)", icd: ["H00.0"], query: "hordeolum",
+      adult: ["RECO_SALEP_MATA"], child: ["RECO_SALEP_MATA"] },
+    { key: "HEMOROID", label: "Hemoroid (wasir)", icd: ["I84.9", "K64.9"], query: "haemorrhoids",
+      adult: ["SUPERHOID_SUPP"], child: [] },
+    { key: "DISENTRI", label: "Disentri", icd: ["A06.0", "A03.9"], query: "dysentery",
+      adult: ["METRONIDAZOLE_500_DEWASA"], child: ["ZINC_ANAK", "ORALIT_ANAK"] },
+    { key: "TIFOID", label: "Demam tifoid", icd: ["A01.0"], query: "typhoid",
+      adult: ["CIPROFLOXACIN_500_DEWASA", "PARACETAMOL_DEWASA"], child: ["PARACETAMOL_ANAK"] },
+    { key: "GOUT", label: "Gout arthritis", icd: ["M10.9", "M10"], query: "gout",
+      adult: ["DICLOFENAC_50"], child: [] },
+    { key: "HERPES_LABIALIS", label: "Herpes labialis", icd: ["B00.1"], query: "herpesviral vesicular dermatitis",
+      adult: ["ACYCLOVIR_SALEP"], child: ["ACYCLOVIR_SALEP"] },
+    { key: "MILIARIA", label: "Miliaria (biang keringat)", icd: ["L74.3", "L74.0"], query: "miliaria",
+      adult: ["BEDAK_SALICYL"], child: ["BEDAK_SALICYL"] },
+    { key: "ANEMIA", label: "Anemia", icd: ["D64.9"], query: "anaemia",
+      adult: ["TABLET_TAMBAH_DARAH"], child: [] },
+    { key: "PARESTESIA", label: "Parestesia (kesemutan)", icd: ["R20.2"], query: "paraesthesia",
+      adult: ["MECOBALAMIN_500_DEWASA"], child: [] },
   ];
 
   // RESUME + DIAGNOSIS (uji coba): diagnosis dipilih dari Keluhan Utama.
@@ -1372,7 +1511,11 @@
     { key: "ASMA", tier: 1, pattern: /\basma\b|asthma|mengi|\bsesak\b/ },
     { key: "RINITIS_ALERGI", tier: 1, pattern: /rinitis|rhinitis|alergi\s+(?:debu|dingin|cuaca)|bersin[\s-]+bersin\s+(?:tiap|setiap|saat|kalau|jika)/ },
     { key: "ISPA", tier: 1, pattern: /batuk|pilek|\bbat?pil\b|\bflu\b|influenza|bersin|hidung\s+(?:tersumbat|mampet|meler)|ingus|\bispa\b|common cold|tenggorok\w*\s+(?:sakit|nyeri|perih|gatal)|(?:nyeri|sakit|perih|gatal)\s+(?:saat\s+)?(?:menelan|telan|tenggorok\w*)|radang\s+tenggorok\w*/ },
+    { key: "HORDEOLUM", tier: 1, pattern: /bintit\w*|timbil|hordeol\w*|kelopak\s+mata\s+(?:bengkak|benjol\w*)|benjolan\s+(?:di\s+)?kelopak/ },
     { key: "KONJUNGTIVITIS", tier: 1, pattern: /mata\s+(?:\w+\s+)?(?:merah|belek\w*|gatal|berair|sakit|nyeri)|(?:sakit|nyeri)\s+mata|belekan|konjungtiv\w*|\bbelek\b/ },
+    { key: "HEMOROID", tier: 1, pattern: /wasir|ambei?y?en|hemoroid\w*|haemoroid\w*|benjolan\s+(?:di\s+)?(?:anus|dubur)/ },
+    { key: "TIFOID", tier: 1, pattern: /tifus|tipes|tifoid|typhoid|thypoid/ },
+    { key: "DISENTRI", tier: 1, pattern: /disentri|(?:bab|berak|diare|mencret)\s+(?:\w+\s+)?(?:berlendir|lendir|berdarah|darah)/ },
     { key: "GEA", tier: 1, pattern: /diare|mencret|muntaber|(?:bab|berak|buang air besar)\s+(?:cair|encer)|gastroenteritis|\bgea\b/ },
     { key: "HELMINTHIASIS", tier: 1, pattern: /cacing\w*|kremi/ },
     { key: "GASTRITIS", tier: 1, pattern: /gastritis/ },
@@ -1389,13 +1532,18 @@
     { key: "PANU", tier: 1, pattern: /\bpanu\b|versikolor|versicolor/ },
     { key: "STOMATITIS", tier: 1, pattern: /sariawan|stomatitis|\baft\w*/ },
     { key: "URTIKARIA", tier: 1, pattern: /biduran|kaligata|urtikaria|bentol|\bbidur/ },
+    { key: "HERPES_LABIALIS", tier: 1, pattern: /herpes\s+(?:bibir|labial\w*)|lepuh\w*\s+(?:di\s+)?bibir|bibir\s+(?:melepuh|lepuh)/ },
+    { key: "MILIARIA", tier: 1, pattern: /biang\s+keringat|keringat\s+buntet|miliaria/ },
     { key: "DERMATITIS", tier: 1, pattern: /ruam|eksim|eksema|dermatitis|gatal/ },
     { key: "IMUNISASI", tier: 1, pattern: /imunisasi|vaksin\w*|\bbcg\b|\bdpt\w*|\bpolio\b|\bopv\b|\bipv\b|\bpcv\b|campak\s+rubel\w*|\bmr\b|\bhb[\s-]?0\b/ },
+    { key: "GOUT", tier: 1, pattern: /\bgout\b|pirai|asam\s+urat\s+(?:kambuh|nyeri|sakit|bengkak)|jempol\s+kaki\s+(?:bengkak|nyeri|sakit|merah)/ },
     { key: "OA_GENU", tier: 1, pattern: /(?:nyeri|sakit|ngilu)\s+(?:di\s+)?lutut|lutut\s+(?:nyeri|sakit|kaku|bengkak|ngilu)|osteoart\w*|pengapuran/ },
     { key: "LBP", tier: 1, pattern: /(?:nyeri|sakit|pegal)\s+(?:di\s+)?(?:pinggang|punggung)|low back pain|\blbp\b|encok/ },
     { key: "HT", tier: 2, pattern: /hipertensi|darah\s+tinggi|tensi\s+tinggi|\bht\b|\bhtn\b/ },
     { key: "HIPERURISEMIA", tier: 2, pattern: /asam\s+urat\s+(?:tinggi|naik)|kontrol\s+asam\s+urat|hiperurisemi\w*/ },
     { key: "DISLIPIDEMIA", tier: 2, pattern: /kolesterol\s+(?:tinggi|naik)|kontrol\s+kolesterol|dislipid\w*|hiperlipid\w*/ },
+    { key: "ANEMIA", tier: 2, pattern: /anemi\w*|kurang\s+darah|\bhb\s+(?:rendah|turun)/ },
+    { key: "PARESTESIA", tier: 2, pattern: /kesemutan|kebas|\bbaal\b|mati\s+rasa/ },
     { key: "DM", tier: 2, pattern: /diabetes|kencing\s+manis|gula\s+(?:darah\s+)?(?:tinggi|naik)|\bdm\b/ },
     // v10: vertigo khas (berputar) = keluhan utama, mengalahkan TD tinggi dari TTV.
     { key: "VERTIGO", tier: 1, pattern: /vertigo|pusing\s+berputar|(?:ruangan|sekitar|kepala)\s+(?:terasa\s+)?berputar/ },

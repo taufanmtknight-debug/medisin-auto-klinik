@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.1 — 2026-11-17 (salep mata + pengetahuan keluhan tambahan)
+
+Obat dipilih hanya dari master obat BPJS klinik yang berstok (135 nama dicek di Medisin).
+
+- Cendo Xitrol / Lyteers: **1 minidose** (permintaan dokter).
+- Reco salep mata (3 x 1 oles pada mata yang sakit, 1 tube) di grup Tetes Mata / Telinga.
+- Grup baru "Obat Lain (tambahan)": Miconazole salep, Acyclovir salep, Acyclovir 400 mg (5 x 2, 70 tab), Bedak salicyl, Scopma, Salbutamol 2 mg, Tablet tambah darah, Mecobalamin, Superhoid supp.
+- Diagnosis baru dari keluhan (kode dicek di PCare): Hordeolum H00.0, Hemoroid I84.9, Disentri A06.0, Tifoid A01.0, Gout M10.9, Herpes labialis B00.1, Miliaria L74.3, Anemia D64.9, Parestesia R20.2.
+- Obat ditambahkan ke diagnosis lama: Asma + Salbutamol; Nyeri perut/kolik + Scopma; Tinea & Panu + Miconazole salep; Herpes zoster + Acyclovir 400.
+
 ## v0.3.0 — 2026-11-17 (tetes mata & telinga pilihan dokter)
 
 Nama persis dicek di master obat klinik: "BPJS -- CENDO XITROL MINIDOSE", "BPJS -- CENDO LYTEERS MINIDOSE", "BPJS -- RECO TETES TELINGA" (pasien umum otomatis memakai nama tanpa awalan).
