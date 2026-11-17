@@ -11,3 +11,16 @@ Klinik pratama, klinik_id 827, login sebagai dokter. Data pasien tidak disalin k
 - `Resep.loadObat` di akun ini tidak memanggil update/abort bila request gagal → script memakai batas waktu 15 dtk.
 - Tarif: "BPJS - Dokter Umum Jasa Konsultasi", "Dokter Umum Jasa Konsultasi", "BPJS TK - …", "Inhealth - …" (awalan tarif memakai satu tanda "-").
 - Uji v0.2.0 pada satu kunjungan BPJS (isi di memori saja, lalu muat ulang; dicek 0 diagnosa/resep/racikan/tindakan/BHP tersimpan): diagnosa K04.0 0,5 dtk; tindakan konsultasi BPJS Rp 30.000; resep "BPJS -- PARACETAMOL 500 MG", "BPJS -- AMOXICILLIN 500 MG" 0,4 dtk; BHP cek gula 3 baris; racikan ISPA anak 3 bahan BPJS.
+
+## Uji ulang lewat menu terpasang (v0.2.0, 2026-11-17)
+
+Tiga kunjungan BPJS dewasa di POLI UMUM 2 (status Sedang Dilayani), tombol RESUME + DIAGNOSIS + RESEP lalu INPUT RESEP, tanpa SIMPAN:
+
+| Kasus (diringkas) | Hasil |
+|---|---|
+| ICD sudah diisi dokter (H10.0), anamnesa sudah ada | ICD & anamnesa tidak diubah; Paket Resep: BPJS -- PARACETAMOL 500 MG x10; tindakan konsultasi BPJS Rp 30.000 |
+| Keluhan demam | R50.9 dari kata "demam"; prognosa Bonam; BPJS -- PARACETAMOL + BPJS -- IBUPROFEN 400 MG (dicentang manual), batch & signa terisi |
+| Minta rujukan, TD 145/75 | I10 dari TD (sistolik ≥140); BPJS -- AMLODIPINE 5 MG x15 "1 x 1"; status pulang tidak diubah (dokter ubah ke rujuk sendiri) |
+
+Setelah muat ulang ketiganya: 0 diagnosa/resep/racikan/tindakan/BHP baru tersimpan; tidak ada kunci localStorage dibuat.
+Catatan: template Konjungtivitis belum punya obat (tetes mata belum dipetakan).

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.2.0
+// @version      0.2.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.2.0";
+  const SCRIPT_VERSION_FALLBACK = "0.2.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -1833,6 +1833,12 @@
     LOG(`Tindakan terisi: ${opt.tarif_nm} (belum disimpan)`);
     return true;
   }
+  // Baris tindakan yang diisi tetapi belum disimpan dokter (bagian Tindakan punya SIMPAN sendiri).
+  function unsavedServiceNote() {
+    const td = findVm("Tindakan");
+    const names = (td?.input_tindakan || []).filter((r) => r?.val?.tarif_nm).map((r) => r.val.tarif_nm);
+    return names.length ? ` Tindakan diisi (${names.join(", ")}): tekan SIMPAN di bagian Tindakan.` : "";
+  }
   function validateAndReport() {}
 
   // ============================================================
@@ -3378,6 +3384,7 @@
     }
 
     let msg = `PAKET RESEP selesai: kategori ${group === "adult" ? "DEWASA" : "ANAK"}. Review resep, lalu tekan SIMPAN di bagian Resep.`;
+    msg += unsavedServiceNote();
     if (failedItems.length) msg += ` GAGAL DIINPUT (tambahkan manual): ${failedItems.join("; ")}.`;
     if (skipped.length) msg += ` Catatan: ${skipped.join(", ")}.`;
     notify(msg, failedItems.length ? "error" : skipped.length ? "warn" : "success", failedItems.length ? 25000 : 12000);
@@ -3937,7 +3944,8 @@
       }
       const failNote =
         (kept.length ? ` Tidak diubah (sudah diisi dokter): ${kept.join(", ")}.` : "") +
-        (failed.length ? ` BELUM TERISI: ${failed.join("; ")}. Isi manual.` : "");
+        (failed.length ? ` BELUM TERISI: ${failed.join("; ")}. Isi manual.` : "") +
+        unsavedServiceNote();
 
       if (withDiagnosis) {
         const dxLabel = (key) => DIAGNOSIS_TEMPLATES.find((d) => d.key === key)?.label || key;

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.1 — 2026-11-17
+
+- Pesan akhir RESUME dan PAKET RESEP kini mengingatkan bila baris Tindakan (jasa konsultasi) sudah diisi: "tekan SIMPAN di bagian Tindakan" (bagian Tindakan punya SIMPAN sendiri, terpisah dari Resep).
+- Diuji ulang lewat menu AUTO KLINIK v0.2.0 yang terpasang pada 3 kunjungan BPJS hari itu (isi di memori, tanpa simpan; setelah muat ulang tidak ada yang tersimpan).
+
 ## v0.2.0 — 2026-11-17 (disesuaikan dengan akun klinik asli)
 
 Dipelajari ulang di akun klinik (bukan trial). Halaman pelayanan sama, tetapi master obat/tarif berbeda: tiap obat punya nama per penjamin dengan stok terpisah ("BPJS -- X", "X" untuk UMUM, "BPJS TK -- X", "IMR -- X", "IDN -- X"), sama seperti di Klinik Pintar.
