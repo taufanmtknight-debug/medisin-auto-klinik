@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.0 — 2026-11-17 (pengetahuan keluhan → diagnosis diperluas)
+
+- **116 diagnosis baru** (total 161) untuk keluhan umum FKTP: napas/THT, mata, saluran cerna & mulut, kemih/kelamin/kebidanan, otot-tulang-saraf, kulit, infeksi tropis (DBD, malaria, chikungunya, campak, flu Singapura, leptospirosis), anak, jiwa, jantung-pembuluh, serta pemeriksaan umum (KB, ANC, surat sehat, sunat). Semua dengan kode ICD-10 dan edukasi.
+- **Ribuan variasi kata keluhan awam** (mis. "boyok", "dengkul linu", "kuping bernanah", "watuk", "mumet", "anyang-anyangan", "cantengan", "kelilipan") untuk deteksi diagnosis. Tiap keluhan memberi beberapa pilihan diagnosis (maks 5).
+- **Tanda bahaya** (nyeri dada, sesak berat, curiga stroke, kejang, pingsan, muntah darah/BAB hitam, batuk darah, nyeri perut hebat, tanda bahaya kehamilan, dehidrasi, gigitan hewan, alergi berat, ide bunuh diri, cedera kepala, patah tulang, hipoglikemia, tetanus/difteri, trauma mata, tidak bisa kencing, keracunan, sakit kepala hebat/kaku kuduk) dan TTV berbahaya (krisis hipertensi, hipotensi, SpO2 <90): menjadi diagnosis utama (mengalahkan TD tinggi), kotak merah dengan saran rujuk/IGD di Paket Resep, **obat tidak dicentang otomatis**.
+- **Perhatian** (kotak kuning): hamil/telat haid & riwayat alergi obat (obat juga tidak dicentang otomatis), menyusui, sesak, batuk ≥2 minggu (TB), demam ≥5 hari, curiga DBD, kuning, berdebar, BB turun, luka kotor (tetanus), luka pada pasien DM.
+- Obat untuk diagnosis baru hanya dari daftar Paket Resep yang ada; banyak diagnosis sengaja tanpa obat otomatis.
+
 ## v0.4.4 — 2026-11-17 (golongan obat diringkas)
 
 - Paket Resep: 16 golongan digabung menjadi 9 — Analgesik / NSAID; Batuk-Pilek; Antihistamin / Kortikosteroid; Antibiotik / Antivirus; Saluran Cerna; Obat Kronis (HT, DM, Kolesterol, Asam Urat); Vitamin / Saraf; Mata / Telinga; Kulit / Topikal. "Obat Lain (FKTP)" dan "Obat Lain (tambahan)" dibagi ke golongan yang sesuai. Obat, dosis, dan saran tidak berubah.

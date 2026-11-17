@@ -341,7 +341,8 @@ test("v9.5: contoh Keluhan Utama asli dari screenshot klinik", () => {
 
 test("menu DIAGNOSIS: diagnosis dengan kode ICD-10 yang sah", () => {
   const byKey = plain(Object.fromEntries(api.DIAGNOSIS_TEMPLATES.slice(0, 15).map((d) => [d.key, d.icd[0]])));
-  assert.equal(api.DIAGNOSIS_TEMPLATES.length, 45);
+  assert.ok(api.DIAGNOSIS_TEMPLATES.length >= 150);
+  assert.equal(new Set(api.DIAGNOSIS_TEMPLATES.map((d) => d.key)).size, api.DIAGNOSIS_TEMPLATES.length);
   assert.deepEqual(byKey, {
     ISPA: "J06", FARINGITIS: "J02.9", TONSILITIS: "J03.9", GEA: "A09", DISPEPSIA: "K30", FEVER: "R50.9",
     MYALGIA: "M79.1", LBP: "M54.5", CEPHALGIA: "R51", VERTIGO: "R42", DERMATITIS: "L30.9", URTIKARIA: "L50.9",
@@ -606,7 +607,7 @@ test("v0.3.0 Medisin: 'sakit mata ... gatal' = konjungtivitis, bukan dermatitis"
   assert.equal(d("sakit mata 4 hari, gatal dan nyeri"), "KONJUNGTIVITIS");
   assert.equal(d("mata kanan merah"), "KONJUNGTIVITIS");
   assert.equal(d("gatal di tangan"), "DERMATITIS");
-  assert.equal(d("mata kering"), null);
+  assert.equal(d("mata kering"), "MATA_KERING"); // v0.5.0
 });
 
 test("v0.3.1 Medisin: keluhan baru -> diagnosis & obat", () => {

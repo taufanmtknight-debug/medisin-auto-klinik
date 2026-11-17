@@ -640,7 +640,8 @@ test("pilihan & pencarian diagnosis", async () => {
   assert.ok(c.length >= 2 && c.length <= 5);
   assert.equal(c[0], "ISPA");
   assert.ok(c.includes("CEPHALGIA") || c.includes("FEVER"));
-  assert.deepEqual(plain(api.diagnosisCandidates("kaki kena paku")), []);
+  assert.equal(api.diagnosisCandidates("kaki kena paku")[0].key, "VULNUS"); // v0.5.0
+  assert.deepEqual(plain(api.diagnosisCandidates("kontrol rutin")), []);
   assert.ok(api.searchDiagnosisTemplates("gastritis").some((d) => d.key === "GASTRITIS"));
   assert.ok(api.searchDiagnosisTemplates("I10").some((d) => d.key === "HT"));
   assert.ok(api.searchDiagnosisTemplates("pusing berputar").some((d) => d.key === "VERTIGO"));
