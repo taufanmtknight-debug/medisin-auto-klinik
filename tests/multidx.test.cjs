@@ -10,10 +10,10 @@ const dd = (t) => plain(api.detectDiagnoses(t));
 const keys = (t) => dd(t).list.map((f) => f.key);
 
 const SINGLE = {
-  "bintik": "RUAM_KULIT",
-  "bintik merah": "RUAM_KULIT",
+  "bintik": "DERMATITIS",
+  "bintik merah": "DERMATITIS",
   "bintik merah gatal": "DERMATITIS",
-  "bercak": "RUAM_KULIT",
+  "bercak": "DERMATITIS",
   "bintik berair": "VARICELLA",
   "bintil berisi air": "VARICELLA",
   "lenting di badan": "VARICELLA",

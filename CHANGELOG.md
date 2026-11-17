@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.2 — 2026-11-18
+
+- Keluhan **"bintik", "bintil", "bercak", "bintik merah", "kemerahan kulit"** saja sekarang menjadi diagnosis **Dermatitis (L30.9)** dan otomatis mendapat obatnya (salep racikan + cetirizine), bukan lagi "Ruam kulit" tanpa obat (permintaan dokter). Ruam kulit (R21) hanya untuk bercak hitam/coklat/ungu dan "ruam tidak gatal"; Ruam kulit menjadi diagnosis banding dermatitis.
+
 ## v0.8.1 — 2026-11-18
 
 - **Jumlah tablet racikan selalu bulat** (koreksi dokter: Medisin tidak menerima 0,25/0,5/0,75). **Jumlah bungkus menyesuaikan (10-30)**, dan lama hari = bungkus ÷ frekuensi. Contoh: BB 10 kg puyer demam = 3 tablet paracetamol buat 12 bungkus = 125 mg/bungkus.

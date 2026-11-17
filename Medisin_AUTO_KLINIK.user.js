@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.1
+// @version      0.8.2
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.1";
+  const SCRIPT_VERSION_FALLBACK = "0.8.2";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -2378,7 +2378,9 @@
     { key: "VARICELLA", tier: 3, pattern: /(?:bintik|bintil|lenting|lepuh|gelembung|bentol)\w*[\s-]+(?:\w+[\s-]+){0,2}?(?:berair|berisi\s+air|bening|berisi\s+cairan|berisi\s+cairan\s+bening)|\blenting\w*|bintik\s+air\b/ },
     { key: "TINEA", tier: 3, pattern: /bercak\w*[\s-]+(?:\w+[\s-]+){0,2}?(?:merah\s+)?(?:bersisik|berkerak|bersisik\s+gatal)|bercak\s+(?:\w+\s+)?(?:melingkar|bulat\s+(?:\w+\s+)?gatal|seperti\s+cincin|tepi\s+(?:merah|aktif|meninggi))/ },
     { key: "PANU", tier: 3, pattern: /bercak[\s-]*(?:bercak\s+)?(?:putih|keputihan|coklat\s+muda)|belang[\s-]+belang|kulit\s+(?:\w+\s+)?belang/ },
-    { key: "RUAM_KULIT", tier: 3, pattern: /bintik[\s-]*(?:bintik\s+)?(?:merah|kecil|hitam|coklat)|bercak[\s-]*(?:bercak\s+)?(?:merah|hitam|coklat|ungu|biru|gelap)|\bbintik\w*|\bbercak\w*|\bbintil\w*|kemerahan\s+(?:di\s+)?kulit|kulit\s+(?:\w+\s+)?kemerahan|ruam\s+(?:\w+\s+)?(?:tidak|tak|gak|ga)\s+gatal/ },
+    // v0.8.2 (permintaan dokter): keluhan "bintik"/"bintil"/"bercak merah" saja = Dermatitis.
+    { key: "RUAM_KULIT", tier: 3, pattern: /bintik[\s-]*(?:bintik\s+)?(?:hitam|coklat)|bercak[\s-]*(?:bercak\s+)?(?:hitam|coklat|ungu|biru|gelap)|ruam\s+(?:\w+\s+)?(?:tidak|tak|gak|ga)\s+gatal/ },
+    { key: "DERMATITIS", tier: 3, pattern: /bintik[\s-]*(?:bintik\s+)?(?:merah|kecil)|bercak[\s-]*(?:bercak\s+)?merah|\bbintik\w*|\bbercak\w*|\bbintil\w*|kemerahan\s+(?:di\s+)?kulit|kulit\s+(?:\w+\s+)?kemerahan/ },
     // ---- keluhan umum lain ----
     { key: "LIMFADENOPATI", tier: 1, before: "STRUMA", pattern: /kelenjar\s+(?:getah\s+bening\s+)?(?:\w+\s+)?(?:bengkak|membesar|teraba)|getah\s+bening|limfadeno\w*|limfadeni\w*|(?:bengkak|benjol\w*)\s+(?:\w+\s+)?(?:di\s+)?(?:ketiak|lipat\s+paha|selangkangan|bawah\s+rahang|belakang\s+telinga|bawah\s+telinga)|bengkak\s+(?:di\s+)?leher/ },
     { key: "KEILITIS", tier: 1, pattern: /keilitis|cheilitis|angular|bibir\s+(?:\w+\s+)?(?:pecah[\s-]*pecah|kering\s+(?:\w+\s+)?(?:pecah|mengelupas|perih)|mengelupas|luka\s+(?:di\s+)?sudut)|sudut\s+(?:bibir|mulut)\s+(?:\w+\s+)?(?:luka|pecah|perih|lecet|robek)|(?:luka|lecet)\s+(?:di\s+)?sudut\s+(?:bibir|mulut)/ },
@@ -2491,7 +2493,7 @@
     OA_GENU: "GOUT ARTRALGIA HIPERURISEMIA",
     GOUT: "OA_GENU ARTRALGIA SELULITIS",
     ARTRALGIA: "OA_GENU GOUT CHIKUNGUNYA",
-    DERMATITIS: "URTIKARIA TINEA SKABIES MILIARIA GIGITAN_SERANGGA PSORIASIS",
+    DERMATITIS: "URTIKARIA TINEA SKABIES MILIARIA GIGITAN_SERANGGA RUAM_KULIT",
     URTIKARIA: "DERMATITIS GIGITAN_SERANGGA ALERGI_OBAT ANAFILAKSIS",
     TINEA: "DERMATITIS KANDIDIASIS_KULIT PSORIASIS PITIRIASIS_ROSEA INTERTRIGO",
     PANU: "PITIRIASIS_ALBA VITILIGO TINEA KUSTA",
