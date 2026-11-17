@@ -33,7 +33,7 @@ const ICDS = [
   { icd_kode: "I10", en: "Essential (primary) hypertension", value: "I10", label: "I10 - Essential (primary) hypertension" },
 ];
 
-function makeApp({ pasien = {}, path = PATH } = {}) {
+function makeApp({ pasien = {}, path = PATH, extra = {} } = {}) {
   const saveCalls = [];
   const forbidden = (name) => () => {
     saveCalls.push(name);
@@ -189,6 +189,7 @@ function makeApp({ pasien = {}, path = PATH } = {}) {
     document: { querySelector: (sel) => (sel === "#q-app" ? { __vue__: root } : null), getElementById: () => null, body: null },
     location: { hostname: "app.medisin.id", pathname: path, href: "https://app.medisin.id" + path },
     localStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, String(v)) },
+    ...extra,
   };
   const { api } = loadScript(globals);
   return { api, p, Resep, Racikan, Diagnosa, Tindakan, saveCalls, storage };
@@ -404,13 +405,24 @@ test("racikan: dialog diisi lalu MENUNGGU dokter; script tidak menyimpan", async
   assert.deepEqual(saveCalls, []);
 });
 
-test("sumber script tidak memanggil fungsi simpan/submit atau API tulis Medisin", () => {
+test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare tidak pernah", () => {
   const { source } = loadScript();
   const code = source.replace(/\/\/[^\n]*/g, "");
+  const START = "AK-WRITE-BLOCK START";
+  const END = "AK-WRITE-BLOCK END";
+  assert.equal(source.split(START).length, 2, "tepat satu blok tulis");
+  assert.equal(source.split(END).length, 2);
+  const a = source.indexOf(START);
+  const b = source.indexOf(END);
+  assert.ok(a < b);
+  const block = source.slice(a, b).replace(/\/\/[^\n]*/g, "");
+  const outside = (source.slice(0, a) + source.slice(b)).replace(/\/\/[^\n]*/g, "");
+  // Di luar blok: tidak ada pemanggilan simpan/submit/API tulis sama sekali.
   for (const re of [
     /\.onSave\w*\s*\(/,
     /\.onSubmit\w*\s*\(/,
     /\.saveData\s*\(/,
+    /\.doPelayanan\s*\(/,
     /\.\$klinik\b/,
     /\.\$rest2\b/,
     /\.\$axios\b/,
@@ -418,5 +430,179 @@ test("sumber script tidak memanggil fungsi simpan/submit atau API tulis Medisin"
     /\bfetch\s*\(/,
     /XMLHttpRequest/,
   ])
+    assert.doesNotMatch(outside, re);
+  // Di seluruh script: SUBMIT, SUBMIT BPJS/SATUSEHAT, PCare, racikan simpan TIDAK PERNAH.
+  for (const re of [
+    /\.onSubmit\w*\s*\(/,
+    /\.saveData\s*\(/,
+    /submitBpjs|submitSatuSehat|onSaveTindakanBpjs|onSaveResepBpjs|onSubmitRujukan\w*/,
+    /\.onSaveRacikan\s*\(|\.onSubmitAdd\s*\(/,
+    /\.\$rest2\b/,
+    /\bfetch\s*\(/,
+    /XMLHttpRequest/,
+    /\.(?:put|patch)\s*\(/,
+  ])
     assert.doesNotMatch(code, re);
+  // Di dalam blok: hanya 4 simpan milik Medisin + baca riwayat + permintaan lewat penjaga.
+  const saves = [...block.matchAll(/\.(onSave\w+)\s*\(/g)].map((m) => m[1]).sort();
+  assert.deepEqual(saves, ["onSaveBhp", "onSaveDiagnosa", "onSaveResep", "onSaveTindakan"]);
+  const posts = [...block.matchAll(/(\w+)\.post\s*\(\s*([^,)]*)/g)].map((m) => m[1] + ":" + m[2].trim());
+  assert.deepEqual(posts.sort(), ['ax:"admin/pelayanan/pasien/riwayat"', "klinik:url"]);
+  assert.equal([...block.matchAll(/\.doPelayanan\s*\(/g)].length, 1);
+});
+
+// ---------------- v0.4.0 alur cepat ----------------
+const plain = (x) => JSON.parse(JSON.stringify(x));
+function fillForSave(a) {
+  a.Diagnosa.input_icdx[0].val = { icd_kode: "J06.9", value: "J06.9", en: "Acute upper respiratory infection" };
+  a.Resep.input_resep[0].val = { produk_id: 1, produk_nm: "PARACETAMOL 500 MG" };
+  a.Resep.input_bhp[0].produk_id = { produk_id: 21, produk_nm: "BPJS -- ALKOHOL SWAB" };
+  a.Tindakan.input_tindakan[0].val = { tarif_nm: "BPJS - Dokter Umum Jasa Konsultasi" };
+}
+function fakeSavers(a, sent) {
+  const base = {
+    get: async () => ({ data: [] }),
+    post: async (url) => {
+      sent.push(url);
+      return { data: { message: "ok" } };
+    },
+    put: async (url) => sent.push("PUT " + url),
+  };
+  for (const vm of [a.Diagnosa, a.Resep, a.Tindakan]) {
+    vm.$klinik = base;
+    vm.$rest2 = { post: async (url) => sent.push("REST2 " + url) };
+  }
+  a.Diagnosa.onSaveDiagnosa = function () {
+    return this.$klinik.post("master/kunjungan/diagnosa", {});
+  };
+  a.Resep.onSaveResep = function () {
+    assert.equal(this.limit, 0, "limit direset sebelum simpan resep");
+    return this.$klinik.post("master/kunjungan/resep", {});
+  };
+  a.Resep.onSaveBhp = async function () {
+    await this.$klinik.post("master/kunjungan/tarif-bhp/" + ID, {});
+  };
+  a.Tindakan.onSaveTindakan = function () {
+    // validasi asinkron seperti QForm: permintaan dikirim setelah fungsi kembali
+    setTimeout(() => this.$klinik.post("master/kunjungan/tindakan", {}), 150);
+  };
+  return base;
+}
+
+test("SIMPAN SEMUA: urutan Diagnosa → Resep → BHP → Tindakan, penjaga dilepas setelahnya", async () => {
+  const a = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  fillForSave(a);
+  const sent = [];
+  const base = fakeSavers(a, sent);
+  const list = a.api.pendingSections();
+  assert.deepEqual(plain(list.map((x) => x.key)), ["dx", "resep", "bhp", "tind"]);
+  const r = await a.api.saveSections(list);
+  assert.deepEqual(plain(r.failed), []);
+  assert.deepEqual(plain(r.done), ["Diagnosa", "Resep", "BHP", "Tindakan"]);
+  assert.deepEqual(sent, ["master/kunjungan/diagnosa", "master/kunjungan/resep", "master/kunjungan/tarif-bhp/" + ID, "master/kunjungan/tindakan"]);
+  for (const vm of [a.Diagnosa, a.Resep, a.Tindakan]) assert.equal(vm.$klinik, base);
+});
+
+test("SIMPAN SEMUA: PCare, PUT, dan alamat lain diblokir; mode uji tidak mengirim", async () => {
+  const a = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  fillForSave(a);
+  const sent = [];
+  fakeSavers(a, sent);
+  a.Diagnosa.onSaveDiagnosa = function () {
+    this.$rest2.post("bpjs/pcare/kunjungan", {}).catch(() => {});
+    return this.$klinik.put("master/kunjungan/" + ID, {}).catch(() => {});
+  };
+  a.Resep.onSaveResep = function () {
+    return this.$klinik.post("master/kunjungan/" + ID + "/submit", {}).catch(() => {});
+  };
+  const r = await a.api.saveSections(a.api.pendingSections().slice(0, 2));
+  assert.deepEqual(sent, []);
+  assert.equal(r.done.length, 0);
+  assert.match(r.failed.join(" "), /diblokir AUTO KLINIK: bpjs\/pcare\/kunjungan/);
+  assert.match(r.failed.join(" "), /diblokir AUTO KLINIK: master\/kunjungan\/K\w+\/submit/);
+
+  const d = makeApp({ extra: { __AK_DRY_RUN__: true } });
+  fillForSave(d);
+  const sent2 = [];
+  fakeSavers(d, sent2);
+  const r2 = await d.api.saveSections(d.api.pendingSections());
+  assert.deepEqual(sent2, []);
+  assert.equal(r2.done.length, 4);
+});
+
+test("SIMPAN SEMUA: baris kosong tidak dihitung, gagal simpan dilaporkan", async () => {
+  const a = makeApp();
+  assert.deepEqual(plain(a.api.pendingSections()), []);
+  a.Diagnosa.input_icdx[0].val = { icd_kode: "I10", value: "I10", en: "Hypertension" };
+  const sent = [];
+  fakeSavers(a, sent);
+  a.Diagnosa.onSaveDiagnosa = function () {
+    return this.$klinik.post("master/kunjungan/diagnosa", {}).then(() => Promise.reject(new Error("x")), () => {}).catch((e) => this.$parseError(e));
+  };
+  a.Diagnosa.$parseError = () => {};
+  const r = await a.api.saveSections(a.api.pendingSections());
+  assert.equal(r.done.length, 0);
+  assert.match(r.failed[0], /^Diagnosa: x/);
+});
+
+test("edukasi per diagnosis: hanya bila kosong, teks sesuai ICD", async () => {
+  const a = makeApp();
+  a.Diagnosa.input_icdx[0].val = { icd_kode: "J06.9", value: "J06.9", en: "URTI" };
+  assert.equal(await a.api.fillEducation(), true);
+  assert.equal(a.p.rl_edukasi, a.api.EDUKASI.ISPA);
+  const b = makeApp({ pasien: { rl_edukasi: "isian dokter" } });
+  b.Diagnosa.input_icdx[0].val = { icd_kode: "J06.9", value: "J06.9", en: "URTI" };
+  assert.deepEqual(plain(await b.api.fillEducation()), { kept: "isian dokter" });
+  assert.equal(b.p.rl_edukasi, "isian dokter");
+  const c = makeApp();
+  assert.equal(await c.api.fillEducation(), false);
+  // semua diagnosis bawaan punya edukasi
+  for (const dx of a.api.DIAGNOSIS_TEMPLATES) assert.ok(a.api.EDUKASI[dx.key], "edukasi " + dx.key);
+  assert.equal(a.api.educationForCodes(["Z99.9"]), a.api.educationForCodes([]));
+  assert.match(a.api.educationForCodes(["I10", "E11.9"]), /garam.*gula/);
+});
+
+test("resep ulang: kunjungan lalu terakhir, obat satuan saja, racikan dihitung", () => {
+  const { api } = loadScript();
+  const list = [
+    { id_kunjungan: "K1", tgl_kunjungan: "2026-10-01 08:00", resep: [{ produk_nm: "A" }], icdx: [] },
+    { id_kunjungan: "K3", tgl_kunjungan: "2026-11-17 08:00", resep: [{ produk_nm: "SEKARANG" }], icdx: [] },
+    { id_kunjungan: "K2", tgl_kunjungan: "2026-11-02 09:00", icdx: [{ icd_kode: "i10", en: "Hypertension" }, { icd_kode: "I10" }],
+      resep: [
+        { produk_nm: "BPJS -- AMLODIPINE 10 MG", resep_qty: "10", resep_signa: "1 X 1", is_racikan: "0" },
+        { produk_nm: "BPJS -- CTM 4 MG", resep_qty: "3", is_racikan: "1" },
+      ] },
+    { id_kunjungan: "K4", tgl_kunjungan: "2026-11-10 09:00", resep: [], icdx: [] },
+  ];
+  const last = api.pickLastVisit(list, "K3");
+  assert.equal(last.id_kunjungan, "K2");
+  const v = api.summarizeVisit(last);
+  assert.equal(v.date, "2026-11-02");
+  assert.deepEqual(plain(v.icdx), [{ code: "I10", en: "Hypertension" }]);
+  assert.deepEqual(plain(v.drugs), [{ name: "BPJS -- AMLODIPINE 10 MG", base: "AMLODIPINE 10 MG", qty: 10, signa: "1 X 1" }]);
+  assert.equal(v.racikan, 1);
+  assert.equal(api.pickLastVisit([{ id_kunjungan: "K3", resep: [{}] }], "K3"), null);
+});
+
+test("surat sakit & pasien berikutnya: tanggal dan baris antrean", () => {
+  const { api } = loadScript();
+  assert.equal(api.addDaysIso("2026-11-17", 0), "2026-11-17");
+  assert.equal(api.addDaysIso("2026-11-30", 1), "2026-12-01");
+  assert.equal(api.addDaysIso("2026-12-31", 2), "2027-01-02");
+  const rows = [
+    { kunjungan: { id_kunjungan: "A" }, status: { status_id: 203 } },
+    { kunjungan: { id_kunjungan: "B" }, status: { status_id: 202 } },
+    { kunjungan: { id_kunjungan: "C" }, status: { status_id: 201 } },
+  ];
+  assert.equal(api.nextWaitingRow(rows, "X").kunjungan.id_kunjungan, "B");
+  assert.equal(api.nextWaitingRow(rows, "B").kunjungan.id_kunjungan, "C");
+  assert.equal(api.nextWaitingRow([rows[0]], "X"), null);
+});
+
+test("jalan otomatis: bisa dimatikan & dinyalakan (disimpan di localStorage)", () => {
+  const a = makeApp();
+  a.api.toggleAutoRun();
+  assert.equal(a.storage.get("auto-klinik-medisin:otomatis"), "0");
+  a.api.toggleAutoRun();
+  assert.equal(a.storage.get("auto-klinik-medisin:otomatis"), "1");
 });

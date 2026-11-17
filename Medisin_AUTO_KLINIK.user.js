@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.3.2
+// @version      0.4.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.3.2";
+  const SCRIPT_VERSION_FALLBACK = "0.4.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -3567,7 +3567,10 @@
       }
     }
 
-    let msg = `PAKET RESEP selesai: kategori ${group === "adult" ? "DEWASA" : "ANAK"}. Review resep, lalu tekan SIMPAN di bagian Resep.`;
+    let msg = `PAKET RESEP selesai: kategori ${group === "adult" ? "DEWASA" : "ANAK"}. Review resep, lalu SIMPAN SEMUA (Alt+S).`;
+    try {
+      if ((await fillEducation()) === true) msg += " Edukasi terisi.";
+    } catch (_) {}
     msg += unsavedServiceNote();
     if (failedItems.length) msg += ` GAGAL DIINPUT (tambahkan manual): ${failedItems.join("; ")}.`;
     if (skipped.length) msg += ` Catatan: ${skipped.join(", ")}.`;
@@ -4274,7 +4277,7 @@
       id: "auto-klinik-resume-dx",
       icon: "🧪",
       label: "RESUME + DIAGNOSIS + RESEP",
-      desc: "Resume, diagnosis dari keluhan, lalu Paket Resep",
+      desc: "Resume, diagnosis dari keluhan, lalu Paket Resep · Alt+R",
       primary: true,
       run: () => runTemplate("resume-diagnosis"),
     },
@@ -4289,8 +4292,43 @@
       id: "auto-klinik-paket-obat",
       icon: "💊",
       label: "PAKET RESEP GOLONGAN",
-      desc: "Pilih obat & racikan sesuai umur/BB",
+      desc: "Pilih obat & racikan sesuai umur/BB · Alt+P",
       run: () => whenPasienReady(() => renderMedicationGroupPackagePicker()),
+    },
+    {
+      id: "auto-klinik-ulang",
+      icon: "🔁",
+      label: "RESEP ULANG",
+      desc: "Diagnosa + obat dari kunjungan lalu · Alt+U",
+      run: () => repeatLastVisit(),
+    },
+    {
+      id: "auto-klinik-surat",
+      icon: "📝",
+      label: "SURAT SAKIT",
+      desc: "Isi surat istirahat 1–3 hari · Alt+K",
+      run: () => fillSickLetter(),
+    },
+    {
+      id: "auto-klinik-simpan",
+      icon: "💾",
+      label: "SIMPAN SEMUA",
+      desc: "Simpan Diagnosa, Resep, BHP, Tindakan · Alt+S",
+      run: () => saveAll(),
+    },
+    {
+      id: "auto-klinik-next",
+      icon: "⏭️",
+      label: "PASIEN BERIKUTNYA",
+      desc: "Buka antrean & panggil pasien menunggu · Alt+N",
+      run: () => goNextPatient(),
+    },
+    {
+      id: "auto-klinik-otomatis",
+      icon: "⚙️",
+      label: "JALAN OTOMATIS",
+      desc: autoRunLabel(),
+      run: () => toggleAutoRun(),
     },
   ];
 
@@ -4607,6 +4645,606 @@
       background:#fff!important;color:#334155!important;font:600 13px/1 ${AK_FONT}!important;cursor:pointer!important;}
   `;
 
+
+  // ============================================================
+  // 9. ALUR CEPAT (v0.4.0, permintaan dokter 2026-11-17)
+  //    resep ulang, edukasi per diagnosis, surat sakit, jalan otomatis,
+  //    pasien berikutnya, shortcut keyboard, SIMPAN SEMUA
+  // ============================================================
+
+  // ---------------- EDUKASI PER DIAGNOSIS (pure, diuji) ----------------
+  // Teks singkat untuk kolom Edukasi (pasien.rl_edukasi). Hanya diisi bila kosong.
+  const EDUKASI = {
+    ISPA: "Istirahat cukup, perbanyak minum air hangat, pakai masker, tutup mulut saat batuk.",
+    FARINGITIS: "Perbanyak minum air hangat, hindari gorengan/es/pedas, istirahat cukup.",
+    TONSILITIS: "Habiskan antibiotik sesuai aturan, minum air hangat, hindari gorengan/es.",
+    SINUSITIS: "Habiskan antibiotik, cuci hidung dengan air garam, hindari debu/asap.",
+    OMA: "Jaga telinga tetap kering, jangan mengorek telinga, habiskan antibiotik.",
+    RINITIS_ALERGI: "Hindari pencetus (debu, dingin, bulu hewan), pakai masker.",
+    ASMA: "Hindari pencetus, segera ke IGD bila sesak berat atau tidak membaik.",
+    KONJUNGTIVITIS: "Jangan mengucek mata, cuci tangan, handuk/sapu tangan tidak dipakai bersama.",
+    HORDEOLUM: "Kompres hangat 3-4x sehari, jangan dipencet, jaga kebersihan kelopak mata.",
+    GEA: "Minum oralit/air sedikit-sedikit tapi sering, makan lunak, cuci tangan. Segera kembali bila lemas atau tidak bisa minum.",
+    DISENTRI: "Minum cukup, makan lunak, cuci tangan sebelum makan. Kembali bila BAB darah bertambah atau lemas.",
+    TIFOID: "Tirah baring, makan lunak rendah serat, habiskan antibiotik, kontrol 3 hari.",
+    DISPEPSIA: "Makan teratur porsi kecil, hindari pedas/asam/kopi, jangan langsung berbaring setelah makan.",
+    GASTRITIS: "Makan teratur porsi kecil, hindari pedas/asam/kopi/rokok, kelola stres.",
+    NYERI_PERUT: "Makan lunak, minum cukup. Segera kembali bila nyeri makin hebat, muntah terus, atau demam tinggi.",
+    KONSTIPASI: "Perbanyak sayur, buah, dan air putih, olahraga ringan.",
+    FEVER: "Kompres hangat, minum cukup, istirahat. Kontrol bila demam lebih dari 3 hari.",
+    MYALGIA: "Istirahat cukup, kompres hangat bagian yang pegal, peregangan ringan.",
+    LBP: "Hindari mengangkat beban berat, perbaiki posisi duduk, kompres hangat.",
+    OA_GENU: "Kurangi berat badan bila berlebih, hindari jongkok/naik turun tangga berlebihan.",
+    GOUT: "Kurangi jeroan, seafood, emping, dan minuman manis; minum air putih cukup.",
+    HIPERURISEMIA: "Kurangi jeroan, seafood, emping, dan minuman manis; minum air putih cukup.",
+    CEPHALGIA: "Istirahat dan tidur cukup, kurangi layar/gadget, minum cukup.",
+    VERTIGO: "Bangun dari tidur perlahan, hindari gerakan kepala mendadak, hati-hati jatuh.",
+    DERMATITIS: "Jangan digaruk, hindari sabun/bahan pencetus, jaga kulit tetap lembap.",
+    URTIKARIA: "Hindari pencetus (makanan/obat tertentu), jangan digaruk.",
+    TINEA: "Jaga kulit tetap kering, ganti pakaian berkeringat, handuk tidak dipakai bersama.",
+    PANU: "Jaga kulit tetap kering, ganti pakaian berkeringat, oles obat sampai bersih.",
+    MILIARIA: "Pakai baju tipis yang menyerap keringat, mandi teratur, hindari gerah.",
+    VARICELLA: "Jangan digaruk/dipecahkan, isolasi di rumah sampai lenting kering, potong kuku.",
+    ZOSTER: "Jangan dipecahkan, jaga lesi tetap kering dan bersih, istirahat cukup.",
+    HERPES_LABIALIS: "Jangan dipecahkan, hindari berbagi alat makan.",
+    ABSES: "Jaga luka tetap bersih, jangan dipencet, habiskan antibiotik.",
+    ISK: "Minum air putih minimal 2 liter, jangan menahan kencing, habiskan antibiotik.",
+    DISMENORE: "Kompres hangat perut bawah, istirahat cukup.",
+    PULPITIS: "Sikat gigi 2x sehari, kontrol ke dokter gigi untuk perawatan gigi.",
+    STOMATITIS: "Perbanyak sayur dan buah, minum cukup, jaga kebersihan mulut.",
+    HELMINTHIASIS: "Cuci tangan sebelum makan, potong kuku, pakai alas kaki.",
+    HEMOROID: "Perbanyak serat dan air putih, jangan mengejan terlalu kuat, jangan duduk terlalu lama.",
+    ANEMIA: "Perbanyak makanan tinggi zat besi (daging, hati, sayur hijau), minum tablet tambah darah dengan air putih.",
+    PARESTESIA: "Hindari posisi yang menekan saraf terlalu lama; kontrol gula darah bila diabetes.",
+    HT: "Kurangi garam, olahraga teratur, minum obat rutin, kontrol tensi berkala.",
+    DM: "Kurangi gula dan nasi, olahraga teratur, minum obat rutin, kontrol gula darah berkala.",
+    DISLIPIDEMIA: "Kurangi gorengan, santan, dan jeroan, olahraga teratur.",
+    IMUNISASI: "Demam ringan setelah imunisasi wajar; kompres dan beri obat penurun panas bila perlu.",
+  };
+  const EDUKASI_UMUM = "Minum obat sesuai aturan. Kontrol bila keluhan tidak membaik dalam 3 hari atau memberat.";
+
+  // Kode ICD di halaman -> teks edukasi (tanpa dobel). (pure, diuji)
+  function educationForCodes(codes, templates = DIAGNOSIS_TEMPLATES) {
+    const out = [];
+    for (const code of codes || []) {
+      const dx = (templates || []).find((d) => (d.icd || []).some((c) => icdCodeMatches(c, code)));
+      const t = dx && EDUKASI[dx.key];
+      if (t && !out.includes(t)) out.push(t);
+    }
+    if (!out.length) return EDUKASI_UMUM;
+    return out.join(" ");
+  }
+
+  // Isi kolom Edukasi (Rencana Lanjutan) bila masih kosong. Tersimpan saat dokter SUBMIT.
+  async function fillEducation() {
+    const p = needPasien();
+    if (!isBlank(p.rl_edukasi)) return { kept: String(p.rl_edukasi).slice(0, 40) };
+    const codes = selectedIcdEntries().map((e) => e.code);
+    if (!codes.length) return false;
+    setReactive(p, "rl_edukasi", educationForCodes(codes));
+    LOG("Edukasi terisi (belum disimpan)");
+    return true;
+  }
+
+  // ---------------- RIWAYAT KUNJUNGAN ----------------
+  // Kunjungan terakhir SEBELUM kunjungan ini yang punya diagnosa/resep. (pure, diuji)
+  function pickLastVisit(list, currentId) {
+    const when = (v) => String(v?.tgl_kunjungan || v?.kunjungan_entrytime || v?.tgl_antrian || "");
+    return (
+      (Array.isArray(list) ? list : [])
+        .filter((v) => v && String(v.id_kunjungan) !== String(currentId))
+        .filter((v) => (v.resep || []).length || (v.icdx || []).length)
+        .sort((a, b) => when(b).localeCompare(when(a)))[0] || null
+    );
+  }
+
+  // Ringkasan kunjungan: diagnosa + obat satuan (racikan dihitung saja). (pure, diuji)
+  function summarizeVisit(v) {
+    const icdx = [];
+    for (const d of v?.icdx || []) {
+      const code = String(d?.icd_kode || d?.icdx || "").trim().toUpperCase();
+      if (code && !icdx.some((x) => x.code === code)) icdx.push({ code, en: String(d?.en || d?.icdx_kasus || "").trim() });
+    }
+    const drugs = [];
+    let racikan = 0;
+    for (const r of v?.resep || []) {
+      if (String(r?.is_racikan ?? "0") !== "0") {
+        racikan++;
+        continue;
+      }
+      const name = String(r?.produk_nm || "").trim();
+      if (!name) continue;
+      drugs.push({
+        name,
+        base: splitProductPrefix(name).base,
+        qty: Number(r?.resep_qty) > 0 ? Number(r.resep_qty) : 1,
+        signa: String(r?.resep_signa || "").trim(),
+      });
+    }
+    const date = String(v?.tgl_kunjungan || v?.kunjungan_entrytime || "").slice(0, 10);
+    return { date, icdx, drugs, racikan };
+  }
+
+  // ---------------- SURAT SAKIT ----------------
+  // "2026-11-17" + n hari (pure, diuji).
+  function addDaysIso(iso, n) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + Number(n || 0)));
+    return dt.toISOString().slice(0, 10);
+  }
+  const todayIso = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  // ---------------- PASIEN BERIKUTNYA ----------------
+  // Baris antrean pertama yang masih menunggu poli (201/202). (pure, diuji)
+  function nextWaitingRow(rows, currentId) {
+    return (
+      (Array.isArray(rows) ? rows : []).find(
+        (r) =>
+          [201, 202].includes(Number(r?.status?.status_id ?? r?.status_antrian)) &&
+          String(r?.kunjungan?.id_kunjungan) !== String(currentId || ""),
+      ) || null
+    );
+  }
+
+  // ---------------- DIALOG KONFIRMASI ----------------
+  // lines: array teks; buttons: [{label, value, primary}] -> Promise<value|null>
+  function askChoice(title, lines, buttons) {
+    return new Promise((resolve) => {
+      document.getElementById("ak-confirm")?.remove();
+      const shade = document.createElement("div");
+      shade.id = "ak-confirm";
+      shade.innerHTML = `
+        <div class="akc-card" role="dialog" aria-modal="true">
+          <div class="akc-title">${escapePreviewHtml(title)}</div>
+          <div class="akc-body">${(lines || []).map((l) => `<div>${escapePreviewHtml(l)}</div>`).join("")}</div>
+          <div class="akc-foot">
+            <button type="button" data-v="__cancel">Batal</button>
+            ${(buttons || [])
+              .map((b, i) => `<button type="button" data-i="${i}"${b.primary ? ' class="akc-primary"' : ""}>${escapePreviewHtml(b.label)}</button>`)
+              .join("")}
+          </div>
+        </div>`;
+      (document.body || document.documentElement).appendChild(shade);
+      const finish = (v) => {
+        shade.remove();
+        document.removeEventListener("keydown", onKey, true);
+        resolve(v);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") finish(null);
+        if (ev.key === "Enter") {
+          const i = (buttons || []).findIndex((b) => b.primary);
+          if (i >= 0) {
+            ev.preventDefault();
+            finish(buttons[i].value);
+          }
+        }
+      };
+      document.addEventListener("keydown", onKey, true);
+      shade.addEventListener("click", (ev) => {
+        const b = ev.target.closest?.("button");
+        if (!b) {
+          if (ev.target === shade) finish(null);
+          return;
+        }
+        if (b.dataset.v === "__cancel") return finish(null);
+        finish(buttons[Number(b.dataset.i)]?.value ?? null);
+      });
+    });
+  }
+
+  const ALUR_STYLES = `
+    #ak-confirm{position:fixed!important;inset:0!important;z-index:2147483646!important;display:flex!important;align-items:center!important;
+      justify-content:center!important;padding:12px!important;background:rgba(15,23,42,.45)!important;font-family:${AK_FONT}!important;box-sizing:border-box!important;}
+    #ak-confirm .akc-card{width:min(480px,100%)!important;max-height:calc(100vh - 24px)!important;display:flex!important;flex-direction:column!important;gap:10px!important;
+      padding:16px!important;border-radius:16px!important;background:#fff!important;color:#0f172a!important;box-shadow:0 20px 50px rgba(15,23,42,.35)!important;box-sizing:border-box!important;}
+    #ak-confirm .akc-title{font:700 16px/1.3 ${AK_FONT}!important;}
+    #ak-confirm .akc-body{display:flex!important;flex-direction:column!important;gap:4px!important;overflow:auto!important;font:400 13px/1.45 ${AK_FONT}!important;color:#334155!important;}
+    #ak-confirm .akc-foot{display:flex!important;flex-wrap:wrap!important;justify-content:flex-end!important;gap:8px!important;}
+    #ak-confirm .akc-foot button{min-height:38px!important;padding:6px 14px!important;border:1px solid #cbd5e1!important;border-radius:10px!important;
+      background:#fff!important;color:#334155!important;font:600 13px/1 ${AK_FONT}!important;cursor:pointer!important;}
+    #ak-confirm .akc-foot button.akc-primary{background:#ea580c!important;border-color:#ea580c!important;color:#fff!important;}
+  `;
+
+  // ---------------- JALAN OTOMATIS SAAT PASIEN DIBUKA ----------------
+  // (dipanggil MAIN_MENU sebelum bagian ini dimuat -> tanpa const)
+  function autoRunEnabled() {
+    try {
+      return localStorage.getItem("auto-klinik-medisin:otomatis") !== "0";
+    } catch (_) {
+      return true;
+    }
+  }
+  function toggleAutoRun() {
+    const on = !autoRunEnabled();
+    try {
+      localStorage.setItem("auto-klinik-medisin:otomatis", on ? "1" : "0");
+    } catch (_) {}
+    notify(`Jalan otomatis saat membuka pasien: ${on ? "NYALA" : "MATI"}.`, "info", 6000);
+    const b = document.querySelector("#auto-klinik-otomatis small");
+    if (b) b.textContent = autoRunLabel();
+  }
+  function autoRunLabel() {
+    return `Sekarang ${autoRunEnabled() ? "NYALA" : "MATI"} · RESUME + Paket Resep saat pasien dibuka`;
+  }
+
+  // Sekali per kunjungan, hanya bila belum ada diagnosa/resep tersimpan.
+  const autoRunDone = new Set();
+  let autoRunBusy = false;
+  async function maybeAutoRun() {
+    if (autoRunBusy || !autoRunEnabled() || !isTargetPage()) return;
+    const id = urlKunjunganId();
+    if (!id || autoRunDone.has(id)) return;
+    const p = pasienAktif();
+    const dg = p && findVm("Diagnosa");
+    const rs = p && findVm("Resep");
+    if (!p || !dg || !rs) return;
+    autoRunDone.add(id);
+    let seen = false;
+    try {
+      seen = sessionStorage.getItem("ak-auto:" + id) === "1";
+      sessionStorage.setItem("ak-auto:" + id, "1");
+    } catch (_) {}
+    if (seen) return;
+    const saved = (Array.isArray(dg.data) && dg.data.length) || (p.resep || []).length;
+    if (saved) {
+      LOG("Jalan otomatis dilewati: diagnosa/resep kunjungan ini sudah tersimpan");
+      return;
+    }
+    autoRunBusy = true;
+    try {
+      await sleep(400);
+      await runTemplate("resume-diagnosis");
+    } finally {
+      autoRunBusy = false;
+    }
+  }
+
+  // >>> AK-WRITE-BLOCK START
+  // Bagian ini SATU-SATUNYA yang boleh menyimpan/mengubah data di Medisin, dan hanya
+  // saat dokter menekan tombolnya sendiri (dijaga tes). Yang TIDAK PERNAH dipanggil:
+  // SUBMIT (saveData), SUBMIT BPJS/SATUSEHAT, PCare, proses kasir/farmasi, racikan.
+
+  // Riwayat kunjungan pasien (hanya membaca; sama dengan halaman RIWAYAT MEDIS).
+  async function loadVisitHistory(p) {
+    const ax = vueRoot()?.$axios;
+    if (!ax || !p?.users_id) throw new Error("riwayat pasien tidak bisa dibaca");
+    const res = await ax.post("admin/pelayanan/pasien/riwayat", { users_id: p.users_id });
+    const d = res?.data;
+    return Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+  }
+
+  // RESEP ULANG: diagnosa + obat satuan dari kunjungan lalu, stok sesuai penjamin SEKARANG.
+  // Hanya mengisi baris (tidak menyimpan).
+  function repeatLastVisit() {
+    return runTask("RESEP ULANG", async () => {
+      const p = await waitPasienReady();
+      const rs = needVm("Resep", "Resep");
+      const last = pickLastVisit(await loadVisitHistory(p), p.id_kunjungan);
+      if (!last) {
+        notify("Belum ada kunjungan sebelumnya dengan diagnosa/resep untuk pasien ini.", "warn", 9000);
+        return;
+      }
+      const v = summarizeVisit(last);
+      const lines = [
+        `Kunjungan ${v.date || "terakhir"}`,
+        ...(v.icdx.length ? v.icdx.map((d) => `Diagnosa: ${d.code} ${d.en}`) : ["Diagnosa: -"]),
+        ...(v.drugs.length ? v.drugs.map((d) => `Obat: ${d.base} · ${d.qty} · ${d.signa || "-"}`) : ["Obat: -"]),
+      ];
+      if (v.racikan) lines.push(`Racikan (${v.racikan} bahan) tidak diulang otomatis.`);
+      lines.push(`Obat diambil dari stok penjamin ${currentPenjamin()}. Tidak ada yang disimpan.`);
+      const ok = await askChoice("Resep ulang dari kunjungan lalu?", lines, [
+        { label: "ISI RESEP ULANG", value: "ok", primary: true },
+      ]);
+      if (ok !== "ok") return;
+
+      const notes = [];
+      for (const d of v.icdx) {
+        try {
+          await fillDiagnosis({ key: "ULANG", label: d.en || d.code, icd: [d.code], query: d.en || d.code });
+        } catch (e) {
+          notes.push(`ICD ${d.code}: ${e?.message || e}`);
+        }
+      }
+      const penjamin = currentPenjamin();
+      const lowStock = [];
+      let filled = 0;
+      for (const d of v.drugs) {
+        let opt = null;
+        try {
+          const found = await searchProducts(rs, d.base);
+          opt = pickProductForPenjamin(found, d.base, penjamin);
+        } catch (e) {
+          notes.push(`${d.base}: ${e?.message || e}`);
+          continue;
+        }
+        if (!opt) {
+          notes.push(`${d.base}: tidak ada untuk penjamin ${penjamin}`);
+          continue;
+        }
+        if (productAlreadyInRecipe(rs, opt)) continue;
+        const row = nextEmptyRow(rs, "input_resep");
+        putProductInRow(rs, row, opt, d.qty);
+        if (d.signa) row.signa = matchSignaMaster(rs.signa_opt, d.signa);
+        filled++;
+        const stock = Number(opt.totalStockSystem);
+        if (Number.isFinite(stock) && Number(row.jumlah) > stock) lowStock.push(`${productName(opt)} (stok ${stock})`);
+        await sleep(60);
+      }
+      try {
+        await fillEducation();
+      } catch (_) {}
+      notify(
+        `RESEP ULANG: ${v.icdx.length} diagnosa, ${filled} obat diisi. Periksa lalu SIMPAN SEMUA (Alt+S).` +
+          (lowStock.length ? ` STOK KURANG: ${lowStock.join(", ")}.` : "") +
+          (notes.length ? ` Belum terisi: ${notes.join("; ")}.` : ""),
+        lowStock.length || notes.length ? "warn" : "success",
+        16000,
+      );
+    });
+  }
+
+  // SURAT SAKIT: buka tab Keterangan Dokter (Medisin sendiri membuat/memuat draf surat
+  // saat tab dibuka), lalu isi tanggal & jenis. Dokter yang menekan SIMPAN/CETAK.
+  function fillSickLetter() {
+    return runTask("SURAT SAKIT", async () => {
+      const p = await waitPasienReady();
+      const days = await askChoice("Surat sakit berapa hari?", ["Mulai hari ini. Jenis: Perlu Istirahat, diagnosa ditampilkan."], [
+        { label: "1 hari", value: 1 },
+        { label: "2 hari", value: 2, primary: true },
+        { label: "3 hari", value: 3 },
+      ]);
+      if (!days) return;
+      const root = vueRoot();
+      if (vmName(findVm("KeteranganDokter")) !== "KeteranganDokter")
+        await root.$router.push({ name: "pelayanan-proses", params: { tab: "KeteranganDokter", id_kunjungan: btoa(p.id_kunjungan) } }).catch(() => {});
+      const sk = await waitFor(() => {
+        const v = findVm("KeteranganDokter");
+        return v && v.form && !v.loading && v.form.no_surat ? v : null;
+      }, 20000, 200, "form surat");
+      const start = todayIso();
+      sk.form.jenis_surat = "Perlu Istirahat";
+      sk.form.tgl_mulai = start;
+      sk.form.tgl_selesai = addDaysIso(start, days - 1);
+      sk.form.show_diagnosa = 1;
+      notify(`Surat sakit ${days} hari (${start} s/d ${sk.form.tgl_selesai}) terisi. Periksa lalu tekan SIMPAN / CETAK di surat.`, "success", 12000);
+    });
+  }
+
+  // PASIEN BERIKUTNYA: buka antrean POLI DOKTER, lalu jalankan tombol PELAYANAN milik
+  // Medisin untuk pasien menunggu pertama (status menjadi "Sedang Dilayani").
+  const NEXT_KEY = "ak-next-patient";
+  async function goNextPatient() {
+    const ok = await askChoice(
+      "Panggil pasien berikutnya?",
+      [
+        "Membuka antrean POLI DOKTER lalu menekan PELAYANAN untuk pasien menunggu pertama.",
+        "Pastikan pasien ini sudah SIMPAN dan SUBMIT.",
+      ],
+      [{ label: "PASIEN BERIKUTNYA", value: "ok", primary: true }],
+    );
+    if (ok !== "ok") return;
+    try {
+      sessionStorage.setItem(NEXT_KEY, JSON.stringify({ t: Date.now(), from: urlKunjunganId() }));
+    } catch (_) {}
+    await vueRoot()?.$router.push("/admin/klinik/antrean/poli").catch(() => {});
+  }
+  let nextBusy = false;
+  async function maybeContinueNextPatient() {
+    if (nextBusy || location.pathname !== "/admin/klinik/antrean/poli") return;
+    let job = null;
+    try {
+      job = JSON.parse(sessionStorage.getItem(NEXT_KEY) || "null");
+    } catch (_) {}
+    if (!job || Date.now() - Number(job.t) > 60000) return;
+    nextBusy = true;
+    try {
+      sessionStorage.removeItem(NEXT_KEY);
+      const q = await waitFor(
+        () => allVm().find((v) => v.$data && "dokter_opt" in v.$data && "filter" in v.$data && typeof v.doPelayanan === "function"),
+        15000, 200, "antrean poli",
+      );
+      await sleep(800);
+      await waitFor(() => !q.loading, 15000, 200, "daftar antrean");
+      const row = nextWaitingRow(q.data, job.from);
+      if (!row) {
+        notify("Tidak ada pasien yang menunggu di antrean poli.", "warn", 9000);
+        return;
+      }
+      notify("Membuka pasien berikutnya…", "info", 4000);
+      q.doPelayanan(row);
+    } catch (e) {
+      notify(`PASIEN BERIKUTNYA: ${e?.message || e}`, "error", 10000);
+    } finally {
+      nextBusy = false;
+    }
+  }
+
+  // SIMPAN SEMUA: menjalankan tombol SIMPAN milik Medisin per bagian, berurutan:
+  // Diagnosa -> Resep -> BHP -> Tindakan. Tidak menekan SUBMIT (anamnesa/TTV + PCare).
+  const SAVE_ALLOWED = [
+    /^master\/kunjungan\/diagnosa$/,
+    /^master\/kunjungan\/resep$/,
+    /^master\/kunjungan\/tarif-bhp\/[^/]+$/,
+    /^master\/kunjungan\/tindakan$/,
+  ];
+  // Selama satu simpan, permintaan tulis komponen hanya boleh ke alamat di atas;
+  // PCare (rest2) selalu diblokir. globalThis.__AK_DRY_RUN__ = uji tanpa mengirim.
+  async function withGuard(vm, fn, { waitMs = 4000 } = {}) {
+    const log = { calls: [], errors: [] };
+    const dry = !!globalThis.__AK_DRY_RUN__;
+    const klinik = vm.$klinik;
+    const pending = [];
+    const blocked = (url) => {
+      const e = new Error(`diblokir AUTO KLINIK: ${url}`);
+      log.errors.push(e.message);
+      return Promise.reject(e);
+    };
+    const guard = {
+      get: (...a) => klinik.get(...a),
+      post: (url, body, cfg) => {
+        if (!SAVE_ALLOWED.some((re) => re.test(String(url)))) return blocked(url);
+        log.calls.push(String(url));
+        const pr = dry ? Promise.resolve({ data: { message: "UJI: tidak dikirim", data: [] } }) : klinik.post(url, body, cfg);
+        pending.push(
+          pr.catch((e) => {
+            log.errors.push(String(e?.response?.data?.message || e?.message || e));
+          }),
+        );
+        return pr;
+      },
+      put: (url) => blocked(url),
+      patch: (url) => blocked(url),
+      delete: (url) => blocked(url),
+    };
+    const KEYS = ["$klinik", "$rest2", "$parseError", "$socket"];
+    const saved = KEYS.map((k) => Object.getOwnPropertyDescriptor(vm, k));
+    const own = (k, v) => Object.defineProperty(vm, k, { value: v, configurable: true, writable: true });
+    const parseError = vm.$parseError;
+    own("$klinik", guard);
+    own("$rest2", { get: blocked, post: blocked, put: blocked, patch: blocked, delete: blocked });
+    own("$parseError", (e, ...rest) => {
+      log.errors.push(String(e?.response?.data?.message || e?.message || e));
+      return parseError?.call(vm, e, ...rest);
+    });
+    if (dry) own("$socket", { emit: () => {} });
+    try {
+      const r = await fn();
+      // Validasi form Medisin bisa asinkron: tunggu permintaan simpan muncul, lalu selesai.
+      const t0 = Date.now();
+      while (!log.calls.length && !log.errors.length && Date.now() - t0 < waitMs) await sleep(100);
+      await Promise.all(pending);
+      await sleep(300);
+      return { ...log, result: r };
+    } finally {
+      KEYS.forEach((k, i) => {
+        delete vm[k];
+        if (saved[i]) Object.defineProperty(vm, k, saved[i]);
+      });
+    }
+  }
+
+  // Bagian yang terisi tetapi belum disimpan. (dipakai juga oleh tes)
+  function pendingSections() {
+    const out = [];
+    const dg = findVm("Diagnosa");
+    const rs = findVm("Resep");
+    const td = findVm("Tindakan");
+    const dx = (dg?.input_icdx || []).filter((r) => r?.val);
+    if (dx.length) out.push({ key: "dx", label: `Diagnosa (${dx.map((r) => icdOptionCode(r.val)).join(", ")})`, vm: dg, n: dx.length });
+    const resep = (rs?.input_resep || []).filter((r) => r?.val);
+    if (resep.length) out.push({ key: "resep", label: `Resep (${resep.length} obat)`, vm: rs, n: resep.length });
+    const bhp = (rs?.input_bhp || []).filter((r) => r?.produk_id?.produk_id);
+    if (bhp.length) out.push({ key: "bhp", label: `BHP (${bhp.length})`, vm: rs, n: bhp.length });
+    const tind = (td?.input_tindakan || []).filter((r) => r?.val?.tarif_nm);
+    if (tind.length) out.push({ key: "tind", label: `Tindakan (${tind.map((r) => r.val.tarif_nm).join(", ")})`, vm: td, n: tind.length });
+    return out;
+  }
+
+  async function saveSection(s) {
+    const vm = s.vm;
+    if (s.key === "dx") {
+      const ok = await Promise.resolve(vm.$refs?.form_diagnosa?.validate?.() ?? true);
+      if (ok === false) throw new Error("kolom diagnosa belum lengkap");
+      const g = await withGuard(vm, () => vm.onSaveDiagnosa());
+      return check(g, "master/kunjungan/diagnosa");
+    }
+    if (s.key === "resep") {
+      vm.limit = 0;
+      const g = await withGuard(vm, () => vm.onSaveResep());
+      return check(g, "master/kunjungan/resep");
+    }
+    if (s.key === "bhp") {
+      const g = await withGuard(vm, () => vm.onSaveBhp());
+      return check(g, "master/kunjungan/tarif-bhp/");
+    }
+    if (s.key === "tind") {
+      const g = await withGuard(vm, () => vm.onSaveTindakan());
+      return check(g, "master/kunjungan/tindakan");
+    }
+    throw new Error("bagian tidak dikenal");
+  }
+  function check(g, url) {
+    if (g.errors.length) throw new Error(g.errors.join("; "));
+    if (!g.calls.some((c) => c.startsWith(url))) throw new Error("tidak tersimpan (periksa kolom wajib di bagian ini)");
+    return true;
+  }
+
+  async function saveSections(list) {
+    const done = [];
+    const failed = [];
+    for (const s of list) {
+      const name = s.label.split(" (")[0];
+      setBusy(true, `Simpan ${name}`);
+      try {
+        await saveSection(s);
+        done.push(name);
+      } catch (e) {
+        failed.push(`${name}: ${String(e?.message || e).replace(/\.$/, "")}`);
+      }
+    }
+    return { done, failed };
+  }
+
+  function saveAll({ confirm = true } = {}) {
+    return runTask("SIMPAN SEMUA", async () => {
+      await waitPasienReady();
+      if (findRacikanModal()) throw new Error("dialog racikan masih terbuka. SIMPAN atau tutup racikan dulu.");
+      const list = pendingSections();
+      if (!list.length) {
+        notify("Tidak ada isian baru yang perlu disimpan (Diagnosa/Resep/BHP/Tindakan).", "info", 7000);
+        return;
+      }
+      if (confirm) {
+        const ok = await askChoice(
+          "Simpan semua bagian?",
+          [
+            ...list.map((s) => "• " + s.label),
+            "Berurutan: Diagnosa → Resep → BHP → Tindakan (tindakan ±30 detik).",
+            "SUBMIT / SUBMIT BPJS tetap ditekan dokter setelahnya.",
+          ],
+          [{ label: "SIMPAN SEMUA", value: "ok", primary: true }],
+        );
+        if (ok !== "ok") return;
+      }
+      const { done, failed } = await saveSections(list);
+      notify(
+        (globalThis.__AK_DRY_RUN__ ? "[UJI, tidak dikirim] " : "") +
+          (done.length ? `Tersimpan: ${done.join(", ")}. ` : "") +
+          (failed.length ? `GAGAL: ${failed.join("; ")}. ` : "") +
+          "Lanjutkan SUBMIT untuk anamnesa/TTV (dan kirim BPJS).",
+        failed.length ? "error" : "success",
+        failed.length ? 25000 : 12000,
+      );
+    });
+  }
+  // <<< AK-WRITE-BLOCK END
+
+  // ---------------- SHORTCUT KEYBOARD ----------------
+  const SHORTCUTS = {
+    KeyR: () => runTemplate("resume-diagnosis"),
+    KeyP: () => whenPasienReady(() => renderMedicationGroupPackagePicker()),
+    KeyU: () => repeatLastVisit(),
+    KeyS: () => saveAll(),
+    KeyK: () => fillSickLetter(),
+    KeyN: () => goNextPatient(),
+  };
+  function onShortcut(ev) {
+    if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    const fn = SHORTCUTS[ev.code];
+    if (!fn || !isTargetPage()) return;
+    if (document.getElementById("ak-confirm") || document.getElementById("ak-drugmap")) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeMainSubmenu();
+    Promise.resolve()
+      .then(fn)
+      .catch((e) => notify(`AUTO KLINIK: ${e?.message || e}`, "error", 12000));
+  }
+
   function start() {
     // v10.0.8: cegah eksekusi ganda bila ada dua salinan script aktif.
     const root = document.documentElement;
@@ -4615,7 +5253,7 @@
       return;
     }
     root?.setAttribute("data-auto-klinik", VERSION);
-    addStyle(STYLES + DRUGMAP_STYLES);
+    addStyle(STYLES + DRUGMAP_STYLES + ALUR_STYLES);
     hookSpaNavigation();
     ensureButtonMounted();
 
@@ -4652,6 +5290,12 @@
     document.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") closeMainSubmenu();
     });
+    // v0.4.0: shortcut Alt+huruf, jalan otomatis, lanjutan "pasien berikutnya".
+    document.addEventListener("keydown", onShortcut, true);
+    setInterval(() => {
+      maybeAutoRun().catch((e) => LOG("Jalan otomatis gagal:", e?.message || e));
+      maybeContinueNextPatient();
+    }, 1000);
 
     // Klik di luar launcher menutup submenu.
     document.addEventListener("click", (ev) => {
@@ -4738,6 +5382,25 @@
       addBhpItems,
       addService,
       addRacikan,
+      // v0.4.0 alur cepat
+      EDUKASI,
+      educationForCodes,
+      fillEducation,
+      pickLastVisit,
+      summarizeVisit,
+      addDaysIso,
+      nextWaitingRow,
+      pendingSections,
+      saveSections,
+      withGuard,
+      saveAll,
+      repeatLastVisit,
+      fillSickLetter,
+      maybeAutoRun,
+      goNextPatient,
+      maybeContinueNextPatient,
+      toggleAutoRun,
+      SAVE_ALLOWED,
     });
     return;
   }
