@@ -455,7 +455,11 @@ test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare t
   const b = source.indexOf(END);
   assert.ok(a < b);
   const block = source.slice(a, b).replace(/\/\/[^\n]*/g, "");
-  const outside = (source.slice(0, a) + source.slice(b)).replace(/\/\/[^\n]*/g, "");
+  // v0.6.0: satu-satunya fetch di luar blok = BACA (GET) kunci.json dari GitHub.
+  const LOCK_FETCH = 'await fetch(`${LOCK_URL}?t=${Date.now()}`, { method: "GET", cache: "no-store", credentials: "omit" })';
+  assert.equal(source.split(LOCK_FETCH).length, 2, "fetch kunci tepat satu, GET tanpa kredensial");
+  assert.match(source, /const LOCK_URL =\s*"https:\/\/raw\.githubusercontent\.com\/[^"]+\/kunci\.json";/);
+  const outside = (source.slice(0, a) + source.slice(b)).replace(LOCK_FETCH, "").replace(/\/\/[^\n]*/g, "");
   // Di luar blok: tidak ada pemanggilan simpan/submit/API tulis sama sekali.
   for (const re of [
     /\.onSave\w*\s*\(/,
@@ -482,7 +486,7 @@ test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare t
     /XMLHttpRequest/,
     /\.(?:put|patch)\s*\(/,
   ])
-    assert.doesNotMatch(code, re);
+    assert.doesNotMatch(code.replace(LOCK_FETCH, ""), re);
   // Di dalam blok: hanya 4 simpan milik Medisin + baca riwayat + permintaan lewat penjaga.
   const saves = [...block.matchAll(/\.(onSave\w+)\s*\(/g)].map((m) => m[1]).sort();
   assert.deepEqual(saves, ["onSaveBhp", "onSaveDiagnosa", "onSaveResep", "onSaveTindakan"]);

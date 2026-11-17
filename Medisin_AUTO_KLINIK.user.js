@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.5.2
+// @version      0.6.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.5.2";
+  const SCRIPT_VERSION_FALLBACK = "0.6.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -5104,6 +5104,7 @@
       icon: "⏭️",
       label: "PASIEN BERIKUTNYA",
       desc: "Buka antrean & panggil pasien menunggu · Alt+N",
+      anywhere: true,
       run: () => goNextPatient(),
     },
     {
@@ -5113,6 +5114,7 @@
       desc: autoRunLabel(),
       toggle: true,
       keepOpen: true,
+      anywhere: true,
       run: () => toggleAutoRun(),
     },
   ];
@@ -5126,7 +5128,8 @@
 
   function ensureButtonMounted() {
     const existing = document.getElementById("auto-klinik-box");
-    if (!isTargetPage()) {
+    // v0.6.0: tombol di semua halaman Medisin (bukan hanya pelayanan pasien).
+    if (!isMedisinPage()) {
       existing?.remove();
       return;
     }
@@ -5156,6 +5159,19 @@
       </div>`;
     mountRoot.appendChild(box);
     if (taskRunning) box.querySelector("#auto-klinik-main").disabled = true;
+    makeLauncherDraggable(box);
+    applyLauncherPos(box);
+    if (akLocked()) {
+      // Dikunci jarak jauh: hanya tombol abu-abu bergembok, menu tidak bisa dibuka.
+      box.classList.add("ak-locked");
+      box.querySelector("#auto-klinik-main").innerHTML = "🔒 AUTO KLINIK dikunci";
+      box.querySelector("#auto-klinik-main").addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        notify(lockMessage(), "warn", 6000);
+      });
+      return;
+    }
 
     const submenu = box.querySelector("#auto-klinik-submenu");
     box.querySelector("#auto-klinik-main")?.addEventListener("click", (ev) => {
@@ -5171,6 +5187,9 @@
         ev.preventDefault();
         ev.stopPropagation();
         if (!item.keepOpen) closeMainSubmenu();
+        if (akLocked()) return notify(lockMessage(), "warn", 6000);
+        if (!item.anywhere && !isTargetPage())
+          return notify("Buka pasien dari antrean poli (tab DOKTER) dulu.", "warn", 6000);
         try {
           Promise.resolve(item.run()).catch((e) => notify(`${item.label}: ${e?.message || e}`, "error", 12000));
         } catch (e) {
@@ -6299,7 +6318,7 @@
   function onShortcut(ev) {
     if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
     const fn = SHORTCUTS[ev.code];
-    if (!fn || !isTargetPage()) return;
+    if (!fn || !isTargetPage() || akLocked()) return;
     if (document.getElementById("ak-confirm") || document.getElementById("ak-drugmap")) return;
     ev.preventDefault();
     ev.stopPropagation();
@@ -6309,6 +6328,161 @@
       .catch((e) => notify(`AUTO KLINIK: ${e?.message || e}`, "error", 12000));
   }
 
+  // ---------------- v0.6.0: TOMBOL DI SEMUA HALAMAN, BISA DIGESER, KUNCI JARAK JAUH ----------------
+  // Tombol muncul di semua halaman app.medisin.id; menu yang butuh pasien hanya jalan di
+  // halaman pelayanan. Posisi tombol disimpan per perangkat (localStorage).
+  function isMedisinPage() {
+    return location.hostname === MEDISIN_HOST && !/^\/(?:login|auth|register)/i.test(location.pathname);
+  }
+
+  const POS_KEY = "auto-klinik-medisin:posisi-tombol";
+  // Posisi = titik tengah tombol sebagai pecahan layar (0..1), aman saat layar diputar. (pure, diuji)
+  function clampLauncherPos(p) {
+    const c = (n, d) => (Number.isFinite(Number(n)) ? Math.min(0.97, Math.max(0.03, Number(n))) : d);
+    return { x: c(p?.x, 0.9), y: c(p?.y, 0.88) };
+  }
+  function readLauncherPos() {
+    try {
+      const p = JSON.parse(localStorage.getItem(POS_KEY) || "null");
+      return p ? clampLauncherPos(p) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function applyLauncherPos(box, pos = readLauncherPos()) {
+    if (!box || !pos) return;
+    const btn = box.querySelector("#auto-klinik-main");
+    const w = btn?.offsetWidth || 150;
+    const h = btn?.offsetHeight || 44;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const cx = Math.min(vw - w / 2 - 4, Math.max(w / 2 + 4, pos.x * vw));
+    const cy = Math.min(vh - h / 2 - 4, Math.max(h / 2 + 4, pos.y * vh));
+    const set = (k, v) => box.style.setProperty(k, v, "important");
+    const bottomHalf = pos.y >= 0.5;
+    const rightHalf = pos.x >= 0.5;
+    set("top", bottomHalf ? "auto" : `${Math.round(cy - h / 2)}px`);
+    set("bottom", bottomHalf ? `${Math.round(vh - cy - h / 2)}px` : "auto");
+    set("left", rightHalf ? "auto" : `${Math.round(cx - w / 2)}px`);
+    set("right", rightHalf ? `${Math.round(vw - cx - w / 2)}px` : "auto");
+    // Menu dibuka ke arah tengah layar agar tidak keluar layar.
+    box.classList.toggle("ak-pos-top", !bottomHalf);
+    box.classList.toggle("ak-pos-left", !rightHalf);
+  }
+
+  // Tekan-tahan lalu geser tombol (mouse & sentuh). Geser >8 px = pindah, bukan klik.
+  function makeLauncherDraggable(box) {
+    const btn = box.querySelector("#auto-klinik-main");
+    if (!btn || btn.dataset.akDrag) return;
+    btn.dataset.akDrag = "1";
+    let start = null;
+    let moved = false;
+    btn.addEventListener("pointerdown", (ev) => {
+      if (ev.button > 0) return;
+      start = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
+      moved = false;
+    });
+    btn.addEventListener("pointermove", (ev) => {
+      if (!start || ev.pointerId !== start.id) return;
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 8) return;
+      if (!moved) {
+        moved = true;
+        closeMainSubmenu();
+        box.classList.add("ak-dragging");
+        try {
+          btn.setPointerCapture(ev.pointerId);
+        } catch (_) {}
+      }
+      ev.preventDefault();
+      applyLauncherPos(box, clampLauncherPos({ x: ev.clientX / window.innerWidth, y: ev.clientY / window.innerHeight }));
+    });
+    const end = (ev) => {
+      if (!start) return;
+      start = null;
+      box.classList.remove("ak-dragging");
+      if (!moved) return;
+      const pos = clampLauncherPos({ x: ev.clientX / window.innerWidth, y: ev.clientY / window.innerHeight });
+      try {
+        localStorage.setItem(POS_KEY, JSON.stringify(pos));
+      } catch (_) {}
+      applyLauncherPos(box, pos);
+      // Klik yang mengikuti geseran tidak membuka menu.
+      btn.addEventListener("click", (e) => (e.preventDefault(), e.stopImmediatePropagation()), { capture: true, once: true });
+      setTimeout(() => (moved = false), 0);
+    };
+    btn.addEventListener("pointerup", end);
+    btn.addEventListener("pointercancel", end);
+  }
+
+  // ---- Kunci jarak jauh ----
+  // Dokter mengubah file kunci.json di GitHub (dari HP): "aktif": false = AUTO KLINIK
+  // dikunci di semua perangkat. Dicek saat mulai, tiap 2 menit, dan saat tab dibuka lagi.
+  // Bila internet/GitHub gagal, status terakhir yang diketahui tetap dipakai.
+  const LOCK_URL =
+    "https://raw.githubusercontent.com/taufanmtknight-debug/medisin-auto-klinik/claude/project-thread-cg0a4l/kunci.json";
+  const LOCK_KEY = "auto-klinik-medisin:kunci";
+  // (pure, diuji) Teks kunci.json -> { locked, pesan } atau null bila tidak terbaca.
+  function parseLockText(text) {
+    const t = String(text || "").trim();
+    if (!t) return null;
+    try {
+      const j = JSON.parse(t);
+      if (j && typeof j === "object" && "aktif" in j) {
+        const off = j.aktif === false || /^(?:false|tidak|mati|off|0|kunci)$/i.test(String(j.aktif).trim());
+        return { locked: off, pesan: String(j.pesan || "") };
+      }
+    } catch (_) {}
+    const m = t.match(/"?aktif"?\s*:\s*"?(\w+)"?/i);
+    if (m) return { locked: /^(?:false|tidak|mati|off|0|kunci)$/i.test(m[1]), pesan: "" };
+    return null;
+  }
+  let lockState = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(LOCK_KEY) || "null") || { locked: false, pesan: "" };
+    } catch (_) {
+      return { locked: false, pesan: "" };
+    }
+  })();
+  function akLocked() {
+    return !!lockState?.locked;
+  }
+  function lockMessage() {
+    return "AUTO KLINIK sedang dikunci dokter." + (lockState?.pesan ? " " + lockState.pesan : "");
+  }
+  let lockChecking = false;
+  async function refreshRemoteLock() {
+    if (lockChecking) return;
+    lockChecking = true;
+    try {
+      const res = await fetch(`${LOCK_URL}?t=${Date.now()}`, { method: "GET", cache: "no-store", credentials: "omit" });
+      if (!res.ok) return;
+      const next = parseLockText(await res.text());
+      if (!next) return;
+      const changed = next.locked !== akLocked();
+      lockState = { ...next, t: Date.now() };
+      try {
+        localStorage.setItem(LOCK_KEY, JSON.stringify(lockState));
+      } catch (_) {}
+      if (changed) {
+        document.getElementById("auto-klinik-box")?.remove();
+        ensureButtonMounted();
+        notify(next.locked ? lockMessage() : "AUTO KLINIK dibuka kembali.", next.locked ? "warn" : "success", 8000);
+      }
+    } catch (e) {
+      LOG("Cek kunci jarak jauh gagal (status terakhir dipakai):", e?.message || e);
+    } finally {
+      lockChecking = false;
+    }
+  }
+
+  const LAUNCHER_STYLES = `
+    #auto-klinik-main{touch-action:none!important;user-select:none!important;-webkit-user-select:none!important;}
+    #auto-klinik-box.ak-dragging #auto-klinik-main{cursor:grabbing!important;opacity:.85!important;transform:scale(1.06)!important;}
+    #auto-klinik-box.ak-pos-top,#auto-klinik-box.ak-pos-top .ak-menu{flex-direction:column-reverse!important;}
+    #auto-klinik-box.ak-pos-left,#auto-klinik-box.ak-pos-left .ak-menu{align-items:flex-start!important;}
+    #auto-klinik-box.ak-locked #auto-klinik-main{background:#64748b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important;}
+  `;
+
   function start() {
     // v10.0.8: cegah eksekusi ganda bila ada dua salinan script aktif.
     const root = document.documentElement;
@@ -6317,7 +6491,11 @@
       return;
     }
     root?.setAttribute("data-auto-klinik", VERSION);
-    addStyle(STYLES + DRUGMAP_STYLES + ALUR_STYLES);
+    addStyle(STYLES + DRUGMAP_STYLES + ALUR_STYLES + LAUNCHER_STYLES);
+    refreshRemoteLock();
+    setInterval(refreshRemoteLock, 120000);
+    window.addEventListener("resize", () => applyLauncherPos(document.getElementById("auto-klinik-box")));
+    document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refreshRemoteLock());
     hookSpaNavigation();
     ensureButtonMounted();
 
@@ -6326,7 +6504,7 @@
 
     // Pasang ulang launcher bila aplikasi menghapusnya.
     const observer = new MutationObserver(() => {
-      if (isTargetPage() && !document.getElementById("auto-klinik-box")) {
+      if (isMedisinPage() && !document.getElementById("auto-klinik-box")) {
         setTimeout(ensureButtonMounted, 30);
       }
     });
@@ -6357,6 +6535,7 @@
     // v0.4.0: shortcut Alt+huruf, jalan otomatis, lanjutan "pasien berikutnya".
     document.addEventListener("keydown", onShortcut, true);
     setInterval(() => {
+      if (akLocked()) return;
       maybeAutoRun().catch((e) => LOG("Jalan otomatis gagal:", e?.message || e));
       maybeContinueNextPatient();
     }, 1000);
@@ -6397,6 +6576,9 @@
       ANAMNESIS_SUGGESTION_RULES,
       DIAGNOSIS_TEMPLATES,
       DIAGNOSIS_FROM_COMPLAINT,
+      parseLockText,
+      clampLauncherPos,
+      LOCK_URL,
       RED_FLAGS,
       detectRedFlags,
       redFlagHtml,

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.0 — 2026-11-17
+
+- **Tombol AUTO KLINIK bisa digeser** ke mana saja: tekan-tahan lalu geser (mouse di laptop, jari di HP). Posisinya diingat per perangkat. Ketuk biasa tetap membuka menu; menu terbuka ke arah tengah layar.
+- **Tombol muncul di semua halaman Medisin** (dashboard, antrean, dll.), tidak hanya saat pelayanan pasien. Menu yang butuh pasien (RESUME, Paket Resep, SIMPAN SEMUA) di halaman lain hanya memberi pesan "Buka pasien dari antrean poli (tab DOKTER) dulu."; PASIEN BERIKUTNYA dan JALAN OTOMATIS bisa dipakai di mana saja.
+- **Kunci jarak jauh**: file `kunci.json` di GitHub. `"aktif": false` = AUTO KLINIK terkunci di semua perangkat (tombol abu-abu 🔒, menu, pintasan keyboard, jalan otomatis & pasien berikutnya berhenti). `"aktif": true` = buka lagi. Dicek saat halaman dibuka, tiap 2 menit, dan saat tab dibuka lagi (GitHub bisa menunda sampai ±5 menit). Bila internet/GitHub gagal, status terakhir yang diketahui dipakai. Script hanya MEMBACA file ini (GET, tanpa kredensial).
+
 ## v0.5.2 — 2026-11-17
 
 - Puyer lambung + mual (Antasida + Ranitidin) menjadi **2x sehari** (signa 2 x 1 ac, 10 bungkus = 5 hari). Ranitidin 1,5 mg/kg/dosis = 1/2 tablet 150 mg per 5 kg BB (permintaan dokter). Antasida tetap 1 tablet per 5 kg, ikut 2x sehari.
