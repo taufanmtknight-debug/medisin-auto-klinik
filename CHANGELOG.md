@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.1 — 2026-11-17 (permintaan dokter)
+
+- RESEP ULANG dan SURAT SAKIT dihapus dulu dari menu dan shortcut (Alt+U, Alt+K).
+- JALAN OTOMATIS menjadi saklar: hijau = NYALA, abu-abu = MATI; menu tidak tertutup saat saklar ditekan.
+- Panel Paket Resep: kepala oranye, tiap bagian berwarna sendiri (Pasien biru, Diagnosis hijau toska, Keluhan ungu, Pilih obat oranye, Tindakan hijau), tiap golongan obat dalam kotak berbatas dengan warna berbeda, kotak pilihan berbatas jelas, pilihan yang dicentang oranye.
+
 ## v0.4.0 — 2026-11-17 (alur cepat, permintaan dokter)
 
 - **SIMPAN SEMUA** (menu / Alt+S): setelah dokter mereview, menekan SIMPAN milik Medisin berurutan Diagnosa → Resep → BHP → Tindakan, dengan dialog konfirmasi lebih dulu. Selama menyimpan, komponen hanya boleh mengirim ke 4 alamat simpan itu; PCare (rest2), PUT, dan alamat lain diblokir. **SUBMIT, SUBMIT BPJS/SATUSEHAT, PROSES KASIR dan simpan racikan tetap tidak pernah ditekan** (dijaga tes). Gagal per bagian dilaporkan.

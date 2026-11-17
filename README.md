@@ -20,7 +20,7 @@ Yang dikerjakan (menu sama seperti versi Klinik Pintar):
 
 Aturan: script **mengisi**; dokter mereview. SIMPAN hanya lewat tombol **SIMPAN SEMUA** yang ditekan dokter (Diagnosa, Resep, BHP, Tindakan). SUBMIT / SUBMIT BPJS / SATUSEHAT / kasir dan simpan racikan selalu ditekan dokter. Dijaga oleh tes (`npm test`).
 
-Shortcut (di halaman pasien): **Alt+R** RESUME+DIAGNOSIS, **Alt+P** Paket Resep, **Alt+U** Resep ulang, **Alt+S** SIMPAN SEMUA, **Alt+K** Surat sakit, **Alt+N** Pasien berikutnya. Menu "JALAN OTOMATIS" menyalakan/mematikan RESUME otomatis saat pasien dibuka.
+Shortcut (di halaman pasien): **Alt+R** RESUME+DIAGNOSIS, **Alt+P** Paket Resep, **Alt+S** SIMPAN SEMUA, **Alt+N** Pasien berikutnya. Saklar "JALAN OTOMATIS" di menu (hijau = nyala) menyalakan/mematikan RESUME otomatis saat pasien dibuka.
 
 - RESUME juga mengisi baris Tindakan "Jasa Konsultasi Dokter Umum" sesuai penjamin; tindakan cek gula/kolesterol/asam urat/imunisasi mengisi tab BHP.
 
