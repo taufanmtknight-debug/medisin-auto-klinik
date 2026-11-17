@@ -5030,6 +5030,8 @@
     .akm-head .ak-rp-x{width:30px!important;height:30px!important;font-size:20px!important;}
     .akm-body{padding:8px!important;gap:8px!important;background:#cbd5e1!important;}
     .akm-col{gap:8px!important;}
+    .akm-sec,.akm-group{flex:none!important;}
+    .akm-sec > .ak-package-anamnesis{width:calc(100% - 16px)!important;}
     .akm-sec{border:1px solid var(--akc,#64748b)!important;border-top-width:1px!important;border-radius:10px!important;padding:0 0 8px!important;}
     .akm-sec > *:not(.akm-sec-title){margin-left:8px!important;margin-right:8px!important;}
     .akm-sec-title{margin:0 0 7px!important;padding:5px 9px!important;background:var(--akc,#64748b)!important;color:#fff!important;border-bottom:0!important;
