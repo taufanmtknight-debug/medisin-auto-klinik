@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.4.2
+// @version      0.4.3
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.4.2";
+  const SCRIPT_VERSION_FALLBACK = "0.4.3";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -2903,7 +2903,7 @@
       ),
       ...(preview.notes || []),
     ];
-    return `<div class="ak-live-preview-box"><div class="ak-live-preview-head"><div><div class="ak-live-preview-title">${escapePreviewHtml(title)}</div><div class="ak-live-preview-sub">Preview diperbarui otomatis setiap kali pilihan ditambah atau dihapus.</div></div><div class="ak-live-preview-count">${(preview.medicines || []).length + (preview.racikans || []).length} pilihan</div></div><div class="ak-preview-section"><div class="ak-rp-label">OBAT NON-RACIKAN (${(preview.medicines || []).length})</div>${medRows || '<div class="ak-preview-empty">Belum ada obat non-racikan yang dipilih.</div>'}</div><div class="ak-preview-section"><div class="ak-rp-label">RACIKAN (${(preview.racikans || []).length})</div>${racikanRows || '<div class="ak-preview-empty">Belum ada racikan yang dipilih.</div>'}</div>${notes.length ? `<div class="ak-preview-notes"><b>Catatan:</b><br>${notes.map((n) => `• ${escapePreviewHtml(n)}`).join("<br>")}</div>` : ""}</div>`;
+    return `<div class="ak-live-preview-box"><div class="ak-live-preview-head"><div><div class="ak-live-preview-title">${escapePreviewHtml(title)}</div></div><div class="ak-live-preview-count">${(preview.medicines || []).length + (preview.racikans || []).length} pilihan</div></div><div class="ak-preview-section"><div class="ak-rp-label">OBAT NON-RACIKAN (${(preview.medicines || []).length})</div>${medRows || '<div class="ak-preview-empty">Belum ada obat non-racikan yang dipilih.</div>'}</div><div class="ak-preview-section"><div class="ak-rp-label">RACIKAN (${(preview.racikans || []).length})</div>${racikanRows || '<div class="ak-preview-empty">Belum ada racikan yang dipilih.</div>'}</div>${notes.length ? `<div class="ak-preview-notes"><b>Catatan:</b><br>${notes.map((n) => `• ${escapePreviewHtml(n)}`).join("<br>")}</div>` : ""}</div>`;
   }
 
   function updateMedicationGroupLivePreview(shade, ageYears) {
@@ -2924,11 +2924,11 @@
       getMedicationPackageNeedsWeight(ageYears) &&
       !Number.isFinite(weightKg)
     ) {
-      box.innerHTML = `<div class="ak-live-preview-box ak-live-preview-waiting"><div class="ak-live-preview-title">PREVIEW OBAT TERPILIH</div><div class="ak-preview-empty">Masukkan BB pasien terlebih dahulu untuk menampilkan preview obat/racikan yang sesuai.</div></div>`;
+      box.innerHTML = `<div class="ak-live-preview-box ak-live-preview-waiting"><div class="ak-live-preview-title">PREVIEW OBAT TERPILIH</div><div class="ak-preview-empty">Isi BB dulu.</div></div>`;
       return;
     }
     if (!itemKeys.length && !actionKeys.length) {
-      box.innerHTML = `<div class="ak-live-preview-box ak-live-preview-waiting"><div class="ak-live-preview-title">PREVIEW OBAT TERPILIH</div><div class="ak-preview-empty">Pilih obat/racikan terlebih dahulu. Preview akan muncul di sini.</div></div>`;
+      box.innerHTML = `<div class="ak-live-preview-box ak-live-preview-waiting"><div class="ak-live-preview-title">PREVIEW OBAT TERPILIH</div><div class="ak-preview-empty">Belum ada pilihan.</div></div>`;
       return;
     }
     try {
@@ -3618,7 +3618,7 @@
     shade.id = "ak-medgroup-picker";
     shade.innerHTML = `<div class="ak-rp-card ak-medgroup-card akm">
   <div class="akm-head">
-    <div class="akm-head-text"><div class="ak-rp-title">💊 Paket Resep</div><div class="ak-rp-sub">Data pasien dan Anamnesa dibaca otomatis. Obat bertanda <em class="ak-suggest-badge">saran</em> sudah dicentang. Review dulu sebelum input.</div></div>
+    <div class="akm-head-text"><div class="ak-rp-title">💊 Paket Resep</div><div class="ak-rp-sub">Obat <em class="ak-suggest-badge">saran</em> sudah dicentang · review sebelum input</div></div>
     <button class="ak-rp-x" type="button" aria-label="Tutup">×</button>
   </div>
   <div class="akm-body">
@@ -3634,18 +3634,18 @@
       <div id="ak-medgroup-vitals" class="akm-vitals"></div>
     </section>
     <section class="akm-sec akm-diagnosis">
-      <div class="akm-sec-title">🩺 Diagnosis terinput</div>
+      <div class="akm-sec-title">🩺 Diagnosis</div>
       <div id="ak-medgroup-dx" class="akm-dx"></div>
       <div id="ak-medgroup-dx-preview"></div>
       <div id="ak-medgroup-dx-choices" class="akm-dxc"></div>
       <div class="akm-dxs">
-        <input id="ak-medgroup-dx-search" type="search" autocomplete="off" placeholder="🔍 Cari diagnosis: nama, keluhan, atau kode ICD (mis. gastritis, K29)">
+        <input id="ak-medgroup-dx-search" type="search" autocomplete="off" placeholder="🔍 Cari diagnosis / ICD (mis. gastritis, K29)">
         <div id="ak-medgroup-dx-results" class="akm-dxs-res"></div>
       </div>
     </section>
     <section class="akm-sec akm-anamnesa">
       <div class="akm-sec-title">📝 Keluhan (Anamnesa) <button id="ak-medgroup-resuggest" class="akm-link" type="button">↻ Baca ulang</button></div>
-      <textarea id="ak-medgroup-anamnesis" class="ak-package-anamnesis" rows="3" placeholder="Anamnesa / Keluhan Utama belum terbaca dari form. Ketik keluhan pasien di sini untuk mendapat saran obat."></textarea>
+      <textarea id="ak-medgroup-anamnesis" class="ak-package-anamnesis" rows="3" placeholder="Ketik keluhan pasien…"></textarea>
       <div id="ak-medgroup-anamnesis-source" class="akm-hint"></div>
       <div id="ak-medgroup-sync" class="akm-hint akm-sync"></div>
       <div id="ak-medgroup-suggestion" class="ak-package-suggestion"></div>
@@ -3660,7 +3660,7 @@
       <div id="ak-medgroup-items" class="akm-items"></div>
     </section>
     <section class="akm-sec akm-tindakan">
-      <div class="akm-sec-title">🩹 Tindakan → BHP <small>(opsional)</small></div>
+      <div class="akm-sec-title">🩹 Tindakan / BHP</div>
       <div class="akm-choices" id="ak-medgroup-actions"></div>
     </section>
    </div>
@@ -3709,13 +3709,13 @@
       ageEl.classList.add("akm-missing");
     }
     const weightHint = weightInfo
-      ? `BB terakhir dari ${weightInfo.source}. Ubah bila tidak sesuai.`
-      : "BB tidak ditemukan di halaman. Isi manual.";
+      ? `BB dari ${weightInfo.source}.`
+      : "BB belum ada, isi manual.";
     if (weightInfo) weight.value = String(weightInfo.kg);
     const setAnamnesisSource = (source) => {
       anamnesisSourceEl.textContent = source
-        ? `Dari form ${source}. Bila diubah, Keluhan Utama dan Anamnesa di halaman diganti teks ini, Diagnosis ikut diperbarui.`
-        : "Anamnesa / Keluhan Utama kosong di halaman. Ketik keluhan untuk mendapat saran.";
+        ? `Dari ${source} · diedit = Keluhan Utama & Anamnesa ikut diganti`
+        : "Anamnesa kosong · ketik keluhan";
     };
     {
       const summary = formatVitalsSummary(pageVitals);
@@ -3733,10 +3733,10 @@
       );
       if (diagText) rows.push(`<div class="akm-hint">Diagnosa: ${escapePreviewHtml(diagText)}</div>`);
       if (presetDiagnosis)
-        rows.push(`<div class="akm-hint">Saran obat ikut diagnosis <b>${escapePreviewHtml(presetDiagnosis.label)}</b>.</div>`);
+        rows.push(`<div class="akm-hint">Obat ikut: <b>${escapePreviewHtml(presetDiagnosis.label)}</b></div>`);
       shade.querySelector("#ak-medgroup-dx").innerHTML = rows.length
         ? rows.join("")
-        : '<span class="akm-hint akm-missing">Belum ada Diagnosa / ICD 10 yang terisi.</span>';
+        : '<span class="akm-hint akm-missing">Belum ada diagnosa.</span>';
     };
     renderDx(pageIcd, pageDiagnosisText);
     anamnesisEl.value = pageComplaint.text;
@@ -3758,14 +3758,14 @@
         return;
       }
       if (!dx) {
-        el.innerHTML = `<div class="akm-dxp none">🔎 Diagnosis dari keluhan: <b>tidak dikenali</b>. Diagnosa/ICD di halaman tidak diubah.</div>`;
+        el.innerHTML = `<div class="akm-dxp none">🔎 Keluhan tidak dikenali — pilih/cari diagnosis.</div>`;
         return;
       }
       const page = selectedIcdEntries();
       const filled = dx.icd.some((c) => page.some((e) => icdCodeMatches(c, e.code)));
       const others = (found.others || []).map(dxLabelOf);
       el.innerHTML =
-        `<div class="akm-dxp"><div class="akm-dxp-head">🔎 Preview diagnosis dari keluhan<span class="akm-dxp-tag${filled ? " ok" : ""}">${filled ? "sudah terisi" : "akan dipilih"}</span></div>` +
+        `<div class="akm-dxp"><div class="akm-dxp-head">🔎 Dari keluhan<span class="akm-dxp-tag${filled ? " ok" : ""}">${filled ? "sudah terisi" : "akan dipilih"}</span></div>` +
         `<div><b>${escapePreviewHtml(dx.icd[0])}</b> ${escapePreviewHtml(dx.label)} <small>(dari "${escapePreviewHtml(found.keyword)}")</small></div>` +
         (others.length ? `<small>Juga cocok: ${escapePreviewHtml(others.join(", "))}</small>` : "") +
         `</div>`;
@@ -3835,9 +3835,9 @@
       if (!group) {
         suggestionEl.innerHTML = `<div class="ak-preview-empty">Saran obat muncul setelah kategori DEWASA/ANAK diketahui.</div>`;
       } else if (!anamnesisEl.value.trim() && !s.matches.length) {
-        suggestionEl.innerHTML = `<div class="ak-preview-empty">Keluhan kosong, jadi tidak ada saran. Pilih obat manual.</div>`;
+        suggestionEl.innerHTML = `<div class="ak-preview-empty">Keluhan kosong · pilih obat manual.</div>`;
       } else if (!s.matches.length) {
-        suggestionEl.innerHTML = `<div class="ak-preview-empty">Tidak ada keluhan yang dikenali. Pilih obat manual, atau tambahkan kata keluhan di kotak Keluhan, atau pilih/cari diagnosis di atas.</div>`;
+        suggestionEl.innerHTML = `<div class="ak-preview-empty">Keluhan tidak dikenali. Pilih obat manual atau pilih diagnosis.</div>`;
       } else {
         const rows = s.matches
           .map(
@@ -3848,7 +3848,7 @@
         const notes = s.notes
           .map((n) => `<br><small>ⓘ ${escapePreviewHtml(n)}</small>`)
           .join("");
-        suggestionEl.innerHTML = `<div class="ak-package-suggestion-box"><div class="ak-live-preview-title">✨ SARAN OBAT & TINDAKAN DARI ${presetDiagnosis ? "DIAGNOSIS & " : ""}KELUHAN UTAMA (${group === "adult" ? "DEWASA" : "ANAK"})</div>${rows}${notes}<div class="ak-package-suggestion-warn">Saran otomatis berdasarkan kata kunci dan sudah dicentang. Dokter wajib mengevaluasi indikasi, kontraindikasi, dan riwayat alergi sebelum input.</div></div>`;
+        suggestionEl.innerHTML = `<div class="ak-package-suggestion-box"><div class="ak-live-preview-title">✨ SARAN (${group === "adult" ? "DEWASA" : "ANAK"})</div>${rows}${notes}<div class="ak-package-suggestion-warn">Sudah dicentang · evaluasi indikasi, kontraindikasi & alergi.</div></div>`;
       }
     };
 
@@ -3914,13 +3914,13 @@
     const refreshCategory = () => {
       const needsWeight = getMedicationPackageNeedsWeight(ageYears);
       if (!needsWeight) {
-        setStatus("adult", `Umur >17 tahun → DEWASA, BB tidak menentukan dosis. ${weightInfo ? weightHint : ""}`.trim());
+        setStatus("adult", `Umur >17 th → dosis dewasa. ${weightInfo ? weightHint : ""}`.trim());
         showGroup("adult");
         return "adult";
       }
       const kg = parseWeightKg(weight?.value || "");
       if (!kg) {
-        setStatus(null, `${ageYears == null ? "Umur tidak terbaca. " : ""}Isi BB untuk menentukan DEWASA/ANAK dan dosis. ${weightHint}`);
+        setStatus(null, `${ageYears == null ? "Umur tidak terbaca. " : ""}Isi BB untuk dosis. ${weightHint}`);
         currentGroup = null;
         applySuggestions(null);
         items.innerHTML = '<div class="ak-preview-empty">Isi berat badan dulu untuk menampilkan daftar obat.</div>';
@@ -3930,7 +3930,7 @@
         return null;
       }
       const group = getMedicationPackageGroup(kg, ageYears);
-      setStatus(group, `${ageYears == null ? "Umur tidak terbaca; kategori dari BB. " : ""}BB ${String(kg).replace(".", ",")} kg → dosis ${group === "adult" ? "dewasa" : "anak sesuai BB"}. ${weightHint}`);
+      setStatus(group, `${ageYears == null ? "Umur tidak terbaca; kategori dari BB. " : ""}BB ${String(kg).replace(".", ",")} kg → dosis ${group === "adult" ? "dewasa" : "anak"}. ${weightHint}`);
       showGroup(group);
       return group;
     };
@@ -3963,7 +3963,7 @@
       writeComplaintToPage(t, syncedText);
       syncedText = t;
       setAnamnesisSource("Anamnesa");
-      if (syncStatusEl) syncStatusEl.textContent = "✓ Keluhan Utama & Anamnesa di halaman diperbarui.";
+      if (syncStatusEl) syncStatusEl.textContent = "✓ Keluhan Utama & Anamnesa diperbarui";
     };
     const syncDiagnosis = () => {
       const t = String(anamnesisEl.value || "").trim();
@@ -3975,7 +3975,7 @@
         const r = await updateDiagnosisFromComplaint(t);
         dxSyncedText = t;
         if (r.dx) presetDiagnosis = r.dx;
-        if (syncStatusEl) syncStatusEl.textContent = `✓ Keluhan Utama & Anamnesa diperbarui · Diagnosis: ${r.note}`;
+        if (syncStatusEl) syncStatusEl.textContent = `✓ Diperbarui · Diagnosis: ${r.note}`;
         renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
         renderDxPreview();
         resuggest();
@@ -4003,7 +4003,7 @@
       if (!dxChoicesEl) return;
       const list = diagnosisCandidates(String(anamnesisEl.value || ""), vitalsAssessment);
       dxChoicesEl.innerHTML = list.length
-        ? `<div class="akm-dxc-title">PILIHAN DIAGNOSIS PALING MUNGKIN (ketuk untuk memakai)</div><div class="akm-dxc-list">${list.map(dxBtn).join("")}</div>`
+        ? `<div class="akm-dxc-title">PILIHAN DIAGNOSIS</div><div class="akm-dxc-list">${list.map(dxBtn).join("")}</div>`
         : "";
     };
     const chooseDx = (d) =>
@@ -4018,7 +4018,7 @@
         }
         presetDiagnosis = d;
         dxSyncedText = String(anamnesisEl.value || "").trim();
-        if (syncStatusEl) syncStatusEl.textContent = `✓ Diagnosis: ${r.note}. Saran obat mengikuti diagnosis ini.`;
+        if (syncStatusEl) syncStatusEl.textContent = `✓ Diagnosis: ${r.note}`;
         renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
         renderDxChoices();
         resuggest({ reset: true });
@@ -4035,9 +4035,9 @@
       }
       const tpl = searchDiagnosisTemplates(q);
       const tplHtml = tpl.length
-        ? `<div class="akm-dxc-title">DIAGNOSIS DENGAN PAKET OBAT</div><div class="akm-dxc-list">${tpl.map(dxBtn).join("")}</div>`
+        ? `<div class="akm-dxc-title">DENGAN PAKET OBAT</div><div class="akm-dxc-list">${tpl.map(dxBtn).join("")}</div>`
         : "";
-      dxResultsEl.innerHTML = tplHtml + (q.length >= 3 ? '<div class="akm-hint">⏳ Mencari ICD di Medisin…</div>' : "");
+      dxResultsEl.innerHTML = tplHtml + (q.length >= 3 ? '<div class="akm-hint">⏳ Mencari ICD…</div>' : "");
       if (q.length < 3) return;
       let opts = [];
       try {
@@ -4051,10 +4051,10 @@
       dxResultsEl.innerHTML =
         tplHtml +
         (opts.length
-          ? `<div class="akm-dxc-title">ICD 10 (DITAMBAHKAN SEBAGAI DIAGNOSA)</div><div class="akm-dxc-list">${opts
+          ? `<div class="akm-dxc-title">ICD 10 (DITAMBAHKAN)</div><div class="akm-dxc-list">${opts
               .map((o, i) => `<button type="button" class="akm-dxc-btn akm-dxc-icd" data-icd-i="${i}"><b>${escapePreviewHtml(icdOptionCode(o))}</b>${escapePreviewHtml(o.en || o.label || "")}</button>`)
               .join("")}</div>`
-          : '<div class="akm-hint">ICD tidak ditemukan. Coba kata Inggris atau kode, mis. "gastritis" / "K29".</div>');
+          : '<div class="akm-hint">ICD tidak ditemukan. Coba bahasa Inggris / kode.</div>');
     };
     dxSearchEl?.addEventListener("input", () => {
       clearTimeout(dxSearchTimer);
@@ -5021,6 +5021,74 @@
     .akm-dxs input:focus{outline:none!important;border-color:#0d9488!important;box-shadow:0 0 0 3px rgba(13,148,136,.15)!important;}
     .akm-dxs-res:not(:empty){margin-top:8px!important;display:flex!important;flex-direction:column!important;gap:6px!important;}
     .akm-dxs-res .akm-dxc-list{gap:5px!important;}
+
+    /* ---------- v0.4.3: Paket Resep lebih ringkas & warna lebih tegas ---------- */
+    .ak-rp-card.akm{width:min(1000px,calc(100vw - 24px))!important;max-height:calc(100vh - 24px)!important;border:2px solid #c2410c!important;border-radius:14px!important;}
+    .akm-head{padding:8px 14px!important;background:linear-gradient(135deg,#ea580c,#c2410c)!important;align-items:center!important;}
+    .akm-head .ak-rp-title{font-size:16px!important;}
+    .akm-head .ak-rp-sub{font-size:11.5px!important;margin-top:1px!important;}
+    .akm-head .ak-rp-x{width:30px!important;height:30px!important;font-size:20px!important;}
+    .akm-body{padding:8px!important;gap:8px!important;background:#cbd5e1!important;}
+    .akm-col{gap:8px!important;}
+    .akm-sec{border:1px solid var(--akc,#64748b)!important;border-top-width:1px!important;border-radius:10px!important;padding:0 0 8px!important;}
+    .akm-sec > *:not(.akm-sec-title){margin-left:8px!important;margin-right:8px!important;}
+    .akm-sec-title{margin:0 0 7px!important;padding:5px 9px!important;background:var(--akc,#64748b)!important;color:#fff!important;border-bottom:0!important;
+      font:800 12.5px/1.3 ${AK_FONT}!important;}
+    .akm-sec-title .akm-link{color:#fff!important;font-size:11.5px!important;text-decoration:underline!important;}
+    .akm-sec-title .akm-count{background:#fff!important;color:var(--akc,#ea580c)!important;}
+    .akm-hint{margin-top:5px!important;font-size:11px!important;line-height:1.35!important;}
+    .akm-stats{gap:6px!important;}
+    .akm-stat{padding:5px 8px!important;gap:2px!important;border-color:#2563eb!important;border-radius:8px!important;}
+    .akm-stat > span:first-child{font-size:9.5px!important;}
+    .akm-stat b{font-size:14px!important;}
+    .akm-bb input{font-size:14px!important;}
+    .akm-cat{font-size:12px!important;padding:1px 8px!important;}
+    .akm-vitals{margin-top:4px!important;font-size:11.5px!important;}
+    .akm-dxp{margin-top:6px!important;padding:5px 8px!important;font-size:12px!important;border-style:solid!important;border-color:#0d9488!important;background:#f0fdfa!important;color:#134e4a!important;}
+    .akm-dxc{margin-top:6px!important;}
+    .akm-dxc-title{font-size:10px!important;margin-bottom:4px!important;color:#0f766e!important;}
+    .akm-dxc-list{gap:4px!important;}
+    .akm-dxc-btn{min-height:28px!important;padding:3px 9px!important;font-size:12px!important;border-color:#0d9488!important;background:#ccfbf1!important;}
+    .akm-dxs{margin-top:6px!important;}
+    .akm-dxs input{padding:6px 10px!important;font-size:12.5px!important;border-color:#0d9488!important;}
+    .akm .ak-package-anamnesis{min-height:44px!important;padding:6px 9px!important;font-size:12.5px!important;border-color:#7c3aed!important;}
+    .akm .ak-package-suggestion{margin-top:6px!important;}
+    .akm .ak-package-suggestion-box{padding:6px 8px!important;font-size:11.5px!important;border-color:#7c3aed!important;background:#f5f3ff!important;}
+    .akm .ak-package-suggestion-warn{margin-top:4px!important;font-size:10.5px!important;}
+    .akm .ak-preview-empty{padding:6px 8px!important;font-size:11.5px!important;}
+    .akm .ak-live-preview-box{padding:7px 9px!important;border-top-width:1px!important;border-color:#ea580c!important;}
+    .akm .ak-live-preview-title{font-size:12px!important;}
+    .akm .ak-preview-section{margin-top:6px!important;}
+    .akm .ak-live-preview-row,.akm .ak-live-preview-racikan{padding:6px 8px!important;gap:6px!important;font-size:12px!important;}
+    .akm .ak-live-preview-row b,.akm .ak-live-preview-racikan b{font-size:12px!important;}
+    .akm .ak-package-preview-meta{margin:0 0 6px!important;padding:6px 8px!important;font-size:11.5px!important;}
+    .akm-items{gap:7px!important;}
+    .akm-group{border:1px solid var(--akg,#f97316)!important;border-left-width:4px!important;border-radius:8px!important;}
+    .akm-group-title{padding:4px 8px!important;background:var(--akg,#f97316)!important;color:#fff!important;border-bottom:0!important;font-size:10.5px!important;letter-spacing:.4px!important;}
+    .akm-group .akm-choices{padding:5px!important;gap:4px!important;}
+    .akm .ak-package-choice{min-height:30px!important;padding:4px 8px!important;gap:7px!important;border-radius:7px!important;font-size:12.5px!important;border-color:#94a3b8!important;}
+    .akm .ak-package-choice input{width:16px!important;height:16px!important;}
+    .akm .ak-package-choice.akm-on{background:#fed7aa!important;border-color:#c2410c!important;box-shadow:inset 4px 0 0 #c2410c!important;color:#7c2d12!important;}
+    .akm .ak-package-choice.akm-suggested{border-color:#7c3aed!important;}
+    .akm-name small{font-size:10.5px!important;}
+    .ak-suggest-badge{padding:1px 6px!important;font-size:9.5px!important;}
+    .akm-foot{padding:7px 12px!important;gap:8px!important;border-top:2px solid #c2410c!important;}
+    .akm-selected{font-size:11.5px!important;}
+    .akm-btn-ghost,.akm-btn-primary{min-height:36px!important;padding:6px 14px!important;border-radius:9px!important;font-size:13px!important;}
+    .akm-btn-primary{background:#ea580c!important;border-color:#c2410c!important;}
+    @media (max-width:600px){
+      .ak-rp-card.akm{width:100vw!important;max-height:100%!important;border-radius:0!important;border-width:0!important;}
+      .akm-head{padding:7px 10px!important;}
+      .akm-head .ak-rp-sub{display:none!important;}
+      .akm-body{padding:6px!important;gap:6px!important;}
+      .akm-choices{grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+      .akm .ak-package-choice{font-size:12px!important;padding:4px 6px!important;gap:5px!important;}
+      .akm-stat b,.akm-bb input{font-size:13.5px!important;}
+      .akm-foot{flex-direction:row!important;align-items:center!important;padding:6px 8px!important;}
+      .akm-selected{display:none!important;}
+      .akm-actions{flex:1!important;}
+      .akm-actions > *{flex:1!important;}
+    }
 
     #ak-confirm{position:fixed!important;inset:0!important;z-index:2147483646!important;display:flex!important;align-items:center!important;
       justify-content:center!important;padding:12px!important;background:rgba(15,23,42,.45)!important;font-family:${AK_FONT}!important;box-sizing:border-box!important;}
