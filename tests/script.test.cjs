@@ -78,6 +78,8 @@ test("regresi dosis berbasis BB sama dengan v8.1.6", () => {
   assert.deepEqual(plain(qty("BARU_BAPIL2_", 9)), ["2", "2", "2"]);
   assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 33)), ["7", "3.5"]); // v0.5.1: ranitidin dosis terendah
   assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 4)), ["1", "0.5"]);
+  const lm = api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 4).tpl;
+  assert.deepEqual([lm.doseFreq, lm.duration], ["2", "5"]); // v0.5.2: 1,5 mg/kg 2x sehari
 
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 3), "1");
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 9), "2");

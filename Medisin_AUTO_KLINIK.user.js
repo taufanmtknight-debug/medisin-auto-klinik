@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.5.1
+// @version      0.5.2
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.5.1";
+  const SCRIPT_VERSION_FALLBACK = "0.5.2";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -399,7 +399,8 @@
     // Cefadroxil puyer: pola jumlah tablet sama seperti Amoxicillin, tetapi 2x sehari.
     { prefix: "CEFADROXIL_ANAK_", title: "CEFADROXIL", name: "cefadroxil", maxKg: 40, duration: "5", doseFreq: "2", instruction: "setelah makan", items: ["CEFADROXIL_500"] },
     // v7.4.2: racikan "baru" (BB <= 40 kg). Dosis/instruksi mengikuti input pengguna.
-    { prefix: "BARU_LAMBUNG_MUAL_", title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] }, // v0.5.1: ranitidin dosis terendah (1/2 tablet per 5 kg)
+    // v0.5.2 (permintaan dokter): ranitidin 1,5 mg/kg/dosis 2x sehari = 1/2 tablet 150 mg per 5 kg dalam 10 bungkus (5 hari).
+    { prefix: "BARU_LAMBUNG_MUAL_", title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
     { prefix: "BARU_MUAL_MUNTAH_", title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
     { prefix: "BARU_AMOXICILLIN_", title: "AMOXICILLIN", name: "amoxicillin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
     { prefix: "BARU_CETIRIZINE_", title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },

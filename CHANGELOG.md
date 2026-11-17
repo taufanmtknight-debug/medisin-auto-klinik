@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.2 — 2026-11-17
+
+- Puyer lambung + mual (Antasida + Ranitidin) menjadi **2x sehari** (signa 2 x 1 ac, 10 bungkus = 5 hari). Ranitidin 1,5 mg/kg/dosis = 1/2 tablet 150 mg per 5 kg BB (permintaan dokter). Antasida tetap 1 tablet per 5 kg, ikut 2x sehari.
+
 ## v0.5.1 — 2026-11-17 (masukan dokter)
 
 - **RESUME saja** sekarang juga mengisi Diagnosa (ICD) dari keluhan; Paket Resep tidak dibuka. Diagnosa yang sudah diisi dokter tidak diubah.
