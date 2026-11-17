@@ -1,8 +1,14 @@
 # Changelog
 
+## v0.8.1 — 2026-11-18
+
+- **Jumlah tablet racikan selalu bulat** (koreksi dokter: Medisin tidak menerima 0,25/0,5/0,75). **Jumlah bungkus menyesuaikan (10-30)**, dan lama hari = bungkus ÷ frekuensi. Contoh: BB 10 kg puyer demam = 3 tablet paracetamol buat 12 bungkus = 125 mg/bungkus.
+- Bayi <6 bulan: racikan tanpa CTM dihitung ulang jumlah bungkusnya.
+- Racikan Lambung + Mual dan Racikan Antasida mulai BB 8 kg.
+
 ## v0.8.0 — 2026-11-18
 
-- **Dosis anak dihitung per mg/kg** (tabel lengkap: `docs/medisin/09-dosis-anak-v0.8.0.md`). Rentang BB lebih rapat (2-3, >3-4, … kg) dan jumlah tablet dibulatkan ke ¼ tablet. Dosis di BB terendah tiap rentang tidak melebihi batas atas.
+- **Dosis anak dihitung per mg/kg** (tabel lengkap: `docs/medisin/09-dosis-anak.md`). Rentang BB lebih rapat (2-3, >3-4, … kg) dan jumlah tablet dibulatkan ke ¼ tablet. Dosis di BB terendah tiap rentang tidak melebihi batas atas.
   - Paracetamol 10-15 mg/kg/dosis.
   - Ibuprofen 5-10 mg/kg/dosis.
   - Domperidon maks 0,25 mg/kg/dosis, puyer & sirup.

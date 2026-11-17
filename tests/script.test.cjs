@@ -53,7 +53,7 @@ test("rentang BB bersambung: setiap BB 1 kg s.d. batas atas punya tepat satu tem
   ];
   for (const s of series) {
     const tpls = Object.entries(s.source).filter(([k]) => k.startsWith(s.prefix));
-    const minKg = s.dosed ? api.DOSE_BANDS_KG[0] : 1; // v0.8.0: series per mg/kg mulai 2 kg
+    const minKg = s.dosed ? s.minKg || api.DOSE_BANDS_KG[0] : 1; // v0.8.0: series per mg/kg mulai 2 kg
     for (let w10 = minKg * 10; w10 <= s.maxKg * 10; w10++) {
       const w = w10 / 10;
       const hits = tpls.filter(([, t]) => api.isWeightInBand(t.band, w));
@@ -74,9 +74,8 @@ test("regresi dosis berbasis BB sama dengan v8.1.6", () => {
   assert.deepEqual(plain(qty("ANTIBIOTIK_ANAK_", 50)), ["10"]);
   assert.deepEqual(plain(qty("CEFADROXIL_ANAK_", 40)), ["8"]);
   // v0.8.0: per mg/kg (lihat tes "v0.8.0: dosis anak per mg/kg").
-  assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 33)), ["8.25", "3.25"]);
-  const lm = api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 4).tpl;
-  assert.deepEqual([lm.doseFreq, lm.duration], ["2", "5"]); // v0.5.2: 1,5 mg/kg 2x sehari
+  const lm = api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 10).tpl;
+  assert.deepEqual([lm.doseFreq, lm.duration, lm.compoundInstruction], ["2", "6", "buat 12"]); // 2x sehari, bungkus menyesuaikan
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 3), "0.5");
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 10), "2");
 
@@ -570,29 +569,36 @@ test("v10.0.9: obat batuk & puyer Ibuprofen anak (permintaan dokter)", () => {
   assert.equal(item.population, "child");
   const r = plain(api.resolveMedicationItem(item, 12, 4));
   assert.equal(r.racikans.length, 1);
-  assert.equal(r.racikans[0].tpl.ingredients[0].quantity, "2.25");
+  assert.match(r.racikans[0].tpl.ingredients[0].quantity, /^\d+$/);
 });
 
 // v0.8.0 (permintaan dokter 2026-11-18): dosis anak per mg/kg & batas umur.
-test("v0.8.0: dosis anak per mg/kg tetap di rentang wajar untuk tiap BB", () => {
+test("v0.8.0: dosis anak per mg/kg, tablet BULAT, jumlah bungkus menyesuaikan", () => {
   const S = { PARACETAMOL_500: 500, IBUPROFEN_400: 400, DOMPERIDONE_10: 10, CTM_4: 4, DEXAMETHASONE_05: 0.5, GUAIFENESIN_100: 100, AMBROXOL_30: 30, CETIRIZINE_10: 10, RANITIDINE_HCL: 150, ANTASIDA_TABLET: 1 };
+  const check = (t, kg, label) => {
+    const n = api.racikanQtyFor(t);
+    assert.ok(n >= 10 && n <= 30, `${label}: ${n} bungkus`);
+    assert.equal(t.duration, String(Math.max(1, Math.round(n / Number(t.doseFreq)))));
+    for (const ing of t.ingredients) {
+      assert.match(ing.quantity, /^[1-9]\d*$/, `${label} ${ing.item}: ${ing.quantity} bukan bulat`);
+      const r = api.PEDIATRIC_DOSE_RULES[ing.item];
+      const mg = (S[ing.item] * Number(ing.quantity)) / n;
+      assert.ok(mg / kg <= r.hi + 1e-9, `${label} ${kg} kg ${ing.item}: ${mg / kg} > ${r.hi}`);
+      assert.ok(mg <= r.maxDose + 1e-9, `${label} ${kg} kg ${ing.item}: ${mg} mg > maks`);
+      if (mg < r.maxDose - 1e-9 && kg >= 4) assert.ok(mg / kg >= r.lo * 0.75, `${label} ${kg} kg ${ing.item}: ${mg / kg} terlalu rendah`);
+    }
+  };
   for (const s of api.CHILD_PUYER_SERIES.filter((x) => x.dosed)) {
-    for (let kg = 2; kg <= s.maxKg; kg += 0.5) {
+    for (let kg = s.minKg || 2; kg <= s.maxKg; kg += 0.5) {
       const t = api.getWeightTemplate(s.prefix, kg).tpl;
-      for (const ing of t.ingredients) {
-        const r = api.PEDIATRIC_DOSE_RULES[ing.item];
-        const mg = (S[ing.item] * Number(ing.quantity)) / 10;
-        assert.ok(mg / kg <= r.hi + 1e-9, `${s.prefix} ${kg} kg ${ing.item}: ${mg / kg} > ${r.hi}`);
-        assert.ok(mg <= r.maxDose + 1e-9, `${s.prefix} ${kg} kg ${ing.item}: ${mg} mg > maks`);
-        if (mg < r.maxDose - 1e-9 && kg >= 4) assert.ok(mg / kg >= r.lo * 0.75, `${s.prefix} ${kg} kg ${ing.item}: ${mg / kg} terlalu rendah`);
-      }
+      check(t, kg, s.prefix);
+      // tanpa CTM (bayi) juga bulat & dihitung ulang
+      const st = api.stripIngredientsForAge(t, 0.3).tpl;
+      if (st.ingredients.length) check(st, kg, s.prefix + " bayi");
     }
   }
-  const q = (p, kg) => plain(api.getWeightTemplate(p, kg).tpl.ingredients.map((i) => i.quantity));
-  assert.deepEqual(q("DEMAM_ANAK_", 10), ["2.25"]); // 112,5 mg = 11,3-12,5 mg/kg
-  assert.deepEqual(q("IBUPROFEN_ANAK_", 8), ["1.5"]); // 60 mg = 7,5-8,6 mg/kg
-  assert.deepEqual(q("MUAL_MUNTAH_ANAK_", 6.5), ["1.25"]); // 1,25 mg <= 0,25 mg/kg
-  assert.deepEqual(q("BARU_CETIRIZINE_", 10), ["2.25"]);
+  const q = (p, kg) => { const t = api.getWeightTemplate(p, kg).tpl; return [api.racikanQtyFor(t), ...t.ingredients.map((i) => Number(i.quantity))]; };
+  assert.deepEqual(plain(q("DEMAM_ANAK_", 10)), [12, 3]); // 125 mg = 12,5-13,9 mg/kg
   // Sirup domperidon 1 mg/mL: maks 0,25 mg/kg/dosis.
   for (let kg = 2; kg <= 50; kg += 0.5) {
     const ml = Number(api.getWeightRecipeTemplate("MUAL_MUNTAH_SYRUP_ANAK_", kg).tpl.medicines[0].dose);

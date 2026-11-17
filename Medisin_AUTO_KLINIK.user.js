@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.0
+// @version      0.8.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.0";
+  const SCRIPT_VERSION_FALLBACK = "0.8.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -392,8 +392,8 @@
     ANTASIDA_TABLET: 4,
   };
   const DOSE_BANDS_KG = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 25, 28, 31, 35, 40, 45, 50];
-  function dosedBands(maxKg) {
-    const edges = DOSE_BANDS_KG.filter((k) => k <= maxKg);
+  function dosedBands(maxKg, minKg = DOSE_BANDS_KG[0]) {
+    const edges = DOSE_BANDS_KG.filter((k) => k >= minKg && k <= maxKg);
     return edges.slice(1).map((b, i) => ({ index: i + 1, minKg: edges[i], maxKg: b }));
   }
   // Jumlah tablet (racikan, per `perPack` bungkus) atau mL (sirup, perPack 1). (pure, diuji)
@@ -408,6 +408,50 @@
     const cap = Math.floor((r.maxDose * unitsPerMg) / inc + 1e-9) * inc;
     const q = Math.max(inc, Math.min(target, safe, cap));
     return Math.round(q * 100) / 100;
+  }
+  // v0.8.0 (koreksi dokter): Medisin hanya menerima jumlah tablet BULAT. Maka jumlah
+  // bungkus (10-30) yang disesuaikan: dipilih jumlah bungkus terkecil yang membuat
+  // semua bahan dekat target (±15%), dosis di BB terendah tidak melebihi batas atas. (pure, diuji)
+  function dosedRacikanPlan(items, band) {
+    const gm = Math.sqrt(band.minKg * band.maxKg);
+    let best = null;
+    for (let n = 10; n <= 30; n++) {
+      let ok = true;
+      let worst = 0;
+      const qty = {};
+      for (const k of items) {
+        const r = PEDIATRIC_DOSE_RULES[k];
+        const u = n / r.mg;
+        const cap = Math.floor(r.maxDose * u + 1e-9);
+        const q = Math.min(Math.round(r.perKg * gm * u), Math.floor(r.hi * band.minKg * u + 1e-9), cap);
+        if (q < 1) {
+          ok = false;
+          worst = Infinity;
+          break;
+        }
+        qty[k] = q;
+        const mg = (r.mg * q) / n;
+        if (q !== cap) {
+          if (mg / band.maxKg < r.lo - 1e-9) ok = false;
+          worst = Math.max(worst, Math.abs(mg / gm / r.perKg - 1));
+        }
+      }
+      if (ok && worst <= 0.15) return { n, qty };
+      if (worst < Infinity && (!best || worst < best.worst)) best = { n, qty, worst };
+    }
+    return best ? { n: best.n, qty: best.qty } : null;
+  }
+  function buildDosedRacikan(base, items, band) {
+    const plan = dosedRacikanPlan(items, band);
+    if (!plan) return null;
+    const freq = Number(base.doseFreq) || 1;
+    return {
+      ...base,
+      dosedItems: items.slice(),
+      duration: String(Math.max(1, Math.round(plan.n / freq))),
+      compoundInstruction: `buat ${plan.n}`,
+      ingredients: items.map((k) => ({ item: k, quantity: String(plan.qty[k]) })),
+    };
   }
 
   // Syrup anak (non-racikan) berbasis BB. dose = nomor rentang (ml).
@@ -448,18 +492,18 @@
     { prefix: "CEFADROXIL_ANAK_", title: "CEFADROXIL", name: "cefadroxil", maxKg: 40, duration: "5", doseFreq: "2", instruction: "setelah makan", items: ["CEFADROXIL_500"] },
     // v7.4.2: racikan "baru" (BB <= 40 kg). Dosis/instruksi mengikuti input pengguna.
     // v0.5.2 (permintaan dokter): ranitidin 1,5 mg/kg/dosis 2x sehari = 1/2 tablet 150 mg per 5 kg dalam 10 bungkus (5 hari).
-    { prefix: "BARU_LAMBUNG_MUAL_", dosed: true, title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
+    { prefix: "BARU_LAMBUNG_MUAL_", dosed: true, minKg: 8, title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
     { prefix: "BARU_MUAL_MUNTAH_", dosed: true, title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
     { prefix: "BARU_AMOXICILLIN_", title: "AMOXICILLIN", name: "amoxicillin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
     { prefix: "BARU_CETIRIZINE_", dosed: true, title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },
     { prefix: "BARU_BAPIL2_", dosed: true, title: "BAPIL 2", name: "batuk pilek 2", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DEXAMETHASONE_05", "CTM_4", "AMBROXOL_30"] },
     // v0.8.0 (permintaan dokter): puyer antasida anak >=4 tahun, 3x sehari sebelum makan.
-    { prefix: "BARU_ANTASIDA_", dosed: true, title: "ANTASIDA ANAK", name: "antasida", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET"] },
+    { prefix: "BARU_ANTASIDA_", dosed: true, minKg: 8, title: "ANTASIDA ANAK", name: "antasida", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET"] },
   ];
 
   const RACIKAN_TEMPLATES = {};
   for (const s of CHILD_PUYER_SERIES) {
-    for (const band of s.dosed ? dosedBands(s.maxKg) : weightBands(s.step || 5, s.maxKg)) {
+    for (const band of s.dosed ? dosedBands(s.maxKg, s.minKg) : weightBands(s.step || 5, s.maxKg)) {
       RACIKAN_TEMPLATES[s.prefix + bandKey(band)] = {
         title: `${s.title} ${bandLabel(band)}`,
         band,
@@ -470,12 +514,18 @@
         unit: "Pulvis",
         instruction: s.instruction,
         compoundInstruction: "buat 10",
-        ingredients: s.items.map((it) => {
-          const key = typeof it === "string" ? it : it.item;
-          if (s.dosed) return { item: key, quantity: String(pediatricQty(key, band, 10)) };
-          return typeof it === "string" ? { item: it, quantity: String(band.index) } : { item: it.item, quantity: String(band.index * it.perBand) };
-        }),
+        ingredients: s.items.map((it) => (typeof it === "string" ? { item: it, quantity: String(band.index) } : { item: it.item, quantity: String(band.index * it.perBand) })),
       };
+    }
+  }
+
+  // v0.8.0: series per mg/kg -> tablet bulat, jumlah bungkus menyesuaikan.
+  for (const s of CHILD_PUYER_SERIES.filter((x) => x.dosed)) {
+    for (const band of dosedBands(s.maxKg, s.minKg)) {
+      const key = s.prefix + bandKey(band);
+      const tpl = buildDosedRacikan(RACIKAN_TEMPLATES[key], s.items.map((it) => (typeof it === "string" ? it : it.item)), band);
+      if (tpl) RACIKAN_TEMPLATES[key] = tpl;
+      else delete RACIKAN_TEMPLATES[key];
     }
   }
 
@@ -4556,8 +4606,10 @@
     const dropped = tpl.ingredients.filter((i) => !ok(i)).map((i) => i.item);
     if (!dropped.length) return { tpl, dropped };
     const names = dropped.map((k) => shortDrugName(ITEMS[k]?.target || k));
+    const keep = tpl.ingredients.filter(ok);
+    const redo = tpl.dosedItems && keep.length ? buildDosedRacikan(tpl, keep.map((i) => i.item), tpl.band) : null;
     return {
-      tpl: { ...tpl, title: `${tpl.title} (tanpa ${names.join(", ")})`, ingredients: tpl.ingredients.filter(ok) },
+      tpl: { ...(redo || tpl), title: `${tpl.title} (tanpa ${names.join(", ")})`, ingredients: redo ? redo.ingredients : keep },
       dropped,
       names,
     };
@@ -7429,6 +7481,7 @@
       DOSE_BANDS_KG,
       dosedBands,
       pediatricQty,
+      dosedRacikanPlan,
       itemAgeBlock,
       stripIngredientsForAge,
       drugStrengthMg,
