@@ -8,7 +8,7 @@ Proyek AUTO KLINIK untuk website **Medisin** (`https://app.medisin.id`), penerus
 | `medisin-auto-klinik-rilis` | file rilis (sumber update Violentmonkey) |
 
 ## Userscript
-`Medisin_AUTO_KLINIK.user.js` (v0.1.0, versi awal) — dipasang di Violentmonkey, aktif di halaman pelayanan pasien (`/admin/pelayanan/proses/...`, tab DOKTER).
+`Medisin_AUTO_KLINIK.user.js` (v0.2.0) — dipasang di Violentmonkey, aktif di halaman pelayanan pasien (`/admin/pelayanan/proses/...`, tab DOKTER).
 
 Pasang: buka Violentmonkey → "+" → "Install from URL" →
 `https://raw.githubusercontent.com/taufanmtknight-debug/medisin-auto-klinik/claude/project-thread-cg0a4l/Medisin_AUTO_KLINIK.user.js`
@@ -20,9 +20,11 @@ Yang dikerjakan (menu sama seperti versi Klinik Pintar):
 
 Aturan: script hanya **mengisi**. SIMPAN (Diagnosa/Resep/Racikan) dan SUBMIT selalu ditekan dokter. Dijaga oleh tes (`npm test`).
 
-Nama obat: hanya nama yang **sama persis** dipilih otomatis. Bila tidak ada, muncul dialog "Pilih obat di Medisin"; pilihan dokter diingat di browser itu per klinik + penjamin.
+- RESUME juga mengisi baris Tindakan "Jasa Konsultasi Dokter Umum" sesuai penjamin; tindakan cek gula/kolesterol/asam urat/imunisasi mengisi tab BHP.
 
-Belum otomatis di v0.1.0: Tindakan/tarif, BHP (cek gula/kolesterol/asam urat, imunisasi), repo rilis + update otomatis. Jalur pasien BPJS (ICD lewat PCare) belum bisa diuji di akun trial.
+Nama obat mengikuti penjamin pasien ("BPJS -- X" untuk BPJS, "X" untuk UMUM, dst.) dan harus **sama persis**. Bila tidak ada, muncul dialog "Pilih obat di Medisin"; pilihan dokter diingat di browser itu per klinik + penjamin.
+
+Belum: repo rilis terpisah, uji di HP, penjamin selain BPJS/UMUM belum diuji langsung.
 
 Tes: `npm test` (Node ≥ 20).
 

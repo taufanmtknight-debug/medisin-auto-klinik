@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.0 — 2026-11-17 (disesuaikan dengan akun klinik asli)
+
+Dipelajari ulang di akun klinik (bukan trial). Halaman pelayanan sama, tetapi master obat/tarif berbeda: tiap obat punya nama per penjamin dengan stok terpisah ("BPJS -- X", "X" untuk UMUM, "BPJS TK -- X", "IMR -- X", "IDN -- X"), sama seperti di Klinik Pintar.
+
+- **Obat mengikuti penjamin pasien.** Pasien BPJS → "BPJS -- …", UMUM → nama tanpa awalan, penjamin lain → awalan yang sama dengan nama penjamin. v0.1.0 selalu memilih nama tanpa awalan (stok UMUM) — ini diperbaiki. Bila obat untuk penjamin itu tidak ada, muncul dialog pilih obat (obat berawalan penjamin pasien di urutan atas); tidak pernah diam-diam memakai stok penjamin lain.
+- **Tindakan**: RESUME mengisi satu baris "Jasa Konsultasi Dokter Umum" sesuai penjamin ("BPJS - Dokter Umum Jasa Konsultasi", "Dokter Umum Jasa Konsultasi", "BPJS TK - …"), hanya di poli umum, tidak dobel.
+- **BHP**: tindakan Cek Gula/Kolesterol/Asam Urat/Imunisasi mengisi baris di tab BHP (bagian Resep) dengan batch yang ada stok dan jumlahnya.
+- Racikan: peringatan bila stok bahan kurang.
+- Header: `@updateURL`/`@downloadURL` agar Violentmonkey memperbarui otomatis.
+- Semua tetap hanya mengisi; SIMPAN/SUBMIT oleh dokter.
+
 ## v0.1.0 — 2026-11-16 (versi awal untuk Medisin)
 
 Port dari AUTO KLINIK Klinik Pintar v10.1.1. Data, template resep/racikan, Paket Resep Golongan, menu, dan tampilan dipertahankan. Mesin pengisi form ditulis ulang untuk Medisin (Vue 2 + Quasar + Vuex): script mengisi state halaman, bukan mengetik di kolom.

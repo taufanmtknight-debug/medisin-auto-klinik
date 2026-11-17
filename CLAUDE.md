@@ -14,6 +14,11 @@ Pengguna adalah dokter; balas dalam Bahasa Indonesia sederhana. Website: `https:
 - Jangan salin data pribadi pasien ke repo/dokumen.
 - Keluaran `javascript_tool` dibatasi: string >~1000 karakter terpotong dan URL ber-query diblokir; kembalikan array potongan ±900 karakter, ganti `?&=` sebelum mengembalikan.
 
+## Akun klinik asli
+- Sudah dipakai untuk pasien asli; akun dokter tidak bisa membuat pasien uji. Uji = buka halaman proses lewat URL, isi di memori saja, JANGAN simpan, muat ulang, cek tidak ada yang tersimpan. Lihat `docs/medisin/08-akun-klinik-asli.md`.
+- Obat/tarif berawalan penjamin (`BPJS -- X`, `X`, `BPJS TK -- X`, …) dengan stok terpisah; jangan pernah memakai stok penjamin lain secara otomatis.
+- Untuk mencoba build baru saat v lama terpasang: set `window.__AUTO_KLINIK_TEST__ = {}` lalu eval build → fungsi pengisi tersedia tanpa launcher kedua.
+
 ## Userscript `Medisin_AUTO_KLINIK.user.js`
 - Satu file, 8 bagian (lihat komentar di atas file). Bagian 2–4 = jembatan Medisin (state Vue); bagian 1, 5–8 dibawa dari versi Klinik Pintar.
 - Komponen Medisin dicari dengan `name` ATAU `_componentTag` (`Resep`, `Racikan`, `Diagnosa`, `dokter`). Data pasien hanya dipakai lewat `pasienAktif()` (id kunjungan store = URL).

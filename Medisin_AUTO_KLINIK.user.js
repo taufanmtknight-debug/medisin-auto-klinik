@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.1.0
+// @version      0.2.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -9,7 +9,9 @@
 // @noframes
 // @inject-into  page
 // @grant        GM_addStyle
-// @homepageURL  https://github.com/taufanmtknight-debug/medisin-auto-klinik-rilis
+// @homepageURL  https://github.com/taufanmtknight-debug/medisin-auto-klinik
+// @updateURL    https://raw.githubusercontent.com/taufanmtknight-debug/medisin-auto-klinik/claude/project-thread-cg0a4l/Medisin_AUTO_KLINIK.user.js
+// @downloadURL  https://raw.githubusercontent.com/taufanmtknight-debug/medisin-auto-klinik/claude/project-thread-cg0a4l/Medisin_AUTO_KLINIK.user.js
 // ==/UserScript==
 
 // PENTING: @name dan @namespace JANGAN diubah setelah script dipasang. Violentmonkey
@@ -35,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.1.0";
+  const SCRIPT_VERSION_FALLBACK = "0.2.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -1766,11 +1768,70 @@
     await setPrognosis();
   }
 
-  // Tindakan/tarif: nama tarif berbeda di tiap klinik Medisin, jadi belum diisi otomatis.
+  // ---------------- TINDAKAN (tarif jasa konsultasi) ----------------
+  // Nama tarif mengikuti penjamin: "BPJS - Dokter Umum Jasa Konsultasi",
+  // "Dokter Umum Jasa Konsultasi" (UMUM), "BPJS TK - …", "Inhealth - …". (pure, diuji)
+  function serviceNameFor(penjamin) {
+    const base = String(TEMPLATE.service || "").replace(/^BPJS\s*-\s*/i, "").trim();
+    const prefix = penjaminPrefix(penjamin);
+    return prefix ? `${prefix} - ${base}` : base;
+  }
+
   async function warmServiceList() {}
+
+  // Isi satu baris Tindakan dengan jasa konsultasi dokter umum sesuai penjamin.
+  // Hanya nama tarif yang SAMA PERSIS; hanya di poli umum; tidak dobel. TIDAK menekan SIMPAN.
   async function addService() {
-    LOG("Tindakan (tarif) tidak diisi otomatis di Medisin -> isi manual");
-    return false;
+    const p = needPasien();
+    const td = findVm("Tindakan");
+    if (!td) throw new Error("bagian Tindakan tidak ada di tab ini");
+    const poli = String(p.poli_nm || p.nama_poli || "");
+    if (poli && !/umum/i.test(poli)) {
+      LOG(`Tindakan: poli "${poli}" bukan poli umum -> jasa konsultasi tidak diisi`);
+      return false;
+    }
+    const name = serviceNameFor(p.penjamin_nm);
+    const same = (x) => drugNameKey(x) === drugNameKey(name);
+    const savedHas = (Array.isArray(p.tindakan) ? p.tindakan : []).some(
+      (t) => t && Object.values(t).some((v) => typeof v === "string" && same(v)),
+    );
+    if (savedHas || (td.input_tindakan || []).some((r) => r.val && same(r.val.tarif_nm))) return false;
+
+    const base = serviceNameFor("UMUM");
+    td.tarif_opt = [];
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("pencarian tarif terlalu lama")), 15000);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      td.loadTarif(
+        base,
+        (apply) => {
+          try {
+            if (typeof apply === "function") apply();
+          } finally {
+            done();
+          }
+        },
+        done,
+      );
+    });
+    const opt = (Array.isArray(td.tarif_opt) ? td.tarif_opt : []).find((o) => same(o?.tarif_nm));
+    if (!opt) throw new Error(`tarif "${name}" tidak ada di daftar tarif`);
+    let row = (td.input_tindakan || []).find((r) => !r.val);
+    if (!row) {
+      td.addColom();
+      row = td.input_tindakan[td.input_tindakan.length - 1];
+    }
+    row.val = opt;
+    try {
+      td.onUpdateInput(opt, row); // harga tindakan
+    } catch (e) {
+      LOG("Harga tindakan tidak terisi otomatis: " + (e?.message || e));
+    }
+    LOG(`Tindakan terisi: ${opt.tarif_nm} (belum disimpan)`);
+    return true;
   }
   function validateAndReport() {}
 
@@ -1872,16 +1933,46 @@
   }
 
   // ---------------- PEMETAAN NAMA OBAT ----------------
-  // Nama obat di Medisin berbeda dari Klinik Pintar dan berbeda antar klinik/penjamin.
-  // Aturan: hanya nama yang SAMA PERSIS yang dipilih otomatis. Selain itu dokter
-  // memilih sekali dari daftar Medisin; pilihannya disimpan di browser ini
-  // (localStorage) per klinik + penjamin dan dipakai untuk berikutnya.
+  // Master obat klinik memakai awalan per penjamin dengan stok terpisah:
+  // "BPJS -- X" (BPJS), "X" (UMUM), "BPJS TK -- X", "IMR -- X", "IDN -- X".
+  // Aturan: dipilih otomatis HANYA obat bernama persis "<awalan penjamin> -- <nama template>"
+  // (UMUM: tanpa awalan). Selain itu dokter memilih sekali dari daftar Medisin; pilihannya
+  // disimpan di browser ini (localStorage) per klinik + penjamin.
   const DRUG_MAP_PREFIX = "auto-klinik-medisin:obat:";
   const drugNameKey = (s) => String(s || "").replace(/\s+/g, " ").trim().toUpperCase();
   const itemBaseName = (itemKey) =>
     String(ITEMS[itemKey]?.target || itemKey)
       .replace(/^BPJS\s*--\s*/i, "")
       .trim();
+
+  // "BPJS -- ZINC 20 MG" -> {prefix:"BPJS", base:"ZINC 20 MG"}; tanpa awalan -> prefix "". (pure, diuji)
+  function splitProductPrefix(name) {
+    const text = String(name || "").trim();
+    const m = text.match(/^(.+?)\s*--\s*(.+)$/);
+    return m ? { prefix: drugNameKey(m[1]), base: m[2].trim() } : { prefix: "", base: text };
+  }
+
+  // Awalan nama obat/tarif untuk penjamin pasien. (pure, diuji)
+  function penjaminPrefix(penjamin) {
+    const p = drugNameKey(penjamin);
+    if (!p || p === "UMUM") return "";
+    if (/^BPJS(?: KESEHATAN)?$/.test(p)) return "BPJS";
+    if (/^BPJS\b.*\b(?:TK|KET|KETENAGAKERJAAN)\b/.test(p)) return "BPJS TK";
+    return p;
+  }
+
+  // Obat bernama persis "<awalan penjamin> -- <nama>" (UMUM: tanpa awalan). (pure, diuji)
+  function pickProductForPenjamin(options, baseName, penjamin) {
+    const want = penjaminPrefix(penjamin);
+    const base = drugNameKey(baseName);
+    return (
+      (options || []).find((o) => {
+        const s = splitProductPrefix(productName(o));
+        return s.prefix === want && drugNameKey(s.base) === base;
+      }) || null
+    );
+  }
+
   // Kata pencarian awal untuk daftar pilihan: 6 huruf pertama dari kata pertama (≥3 huruf)
   // nama obat, supaya beda ejaan tetap ketemu (CETIRIZINE -> "CETIRI" cocok "CETIRIZIN"). (pure)
   function drugSearchWord(name) {
@@ -1909,33 +2000,19 @@
   }
   const currentPenjamin = () => String(pasienAktif()?.penjamin_nm || "UMUM").trim().toUpperCase();
 
-  // Nama yang dicoba (urut): pilihan dokter untuk penjamin ini, pilihan dokter untuk
-  // penjamin lain, lalu nama template. Semuanya tetap harus cocok PERSIS. (pure, diuji)
-  function drugNameCandidates(map, penjamin, itemKey, baseName) {
-    const out = [];
-    const add = (n) => {
-      const s = String(n || "").trim();
-      if (s && !out.some((x) => drugNameKey(x) === drugNameKey(s))) out.push(s);
-    };
-    add(map?.[penjamin]?.[itemKey]);
-    for (const [pj, m] of Object.entries(map || {})) if (pj !== penjamin) add(m?.[itemKey]);
-    add(baseName);
-    return out;
-  }
-
   const productName = (opt) => String(opt?.value?.produk_nm || "").trim();
   const exactProduct = (options, name) =>
     (options || []).find((o) => drugNameKey(productName(o)) === drugNameKey(name)) || null;
 
   // Cari obat lewat fungsi Medisin sendiri (loadObat milik Resep/Racikan): hasilnya
   // sudah disaring penjamin & hanya obat yang punya stok di lokasi non-gudang.
-  async function searchProducts(vm, query) {
+  async function searchProducts(vm, query, kategori) {
     const q = String(query || "").trim();
     if (q.length < 2) return [];
     const keep = Array.isArray(vm.obat_opt) ? vm.obat_opt.slice() : [];
     let got = null;
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Pencarian obat "${q}" terlalu lama`)), 25000);
+      const timer = setTimeout(() => reject(new Error(`Pencarian obat "${q}" gagal/terlalu lama`)), 15000);
       const done = () => {
         clearTimeout(timer);
         resolve();
@@ -1952,6 +2029,7 @@
             }
           },
           done,
+          kategori, // "BHP" untuk daftar BHP; kosong untuk obat
         ),
       ).catch((e) => {
         clearTimeout(timer);
@@ -1966,7 +2044,7 @@
   }
 
   // Dialog: dokter memilih obat Medisin untuk satu nama template. null = dilewati.
-  function askDrugMapping({ base, staleName, candidates, search }) {
+  function askDrugMapping({ base, penjamin, staleName, candidates, search }) {
     return new Promise((resolve) => {
       document.getElementById("ak-drugmap")?.remove();
       const shade = document.createElement("div");
@@ -1974,7 +2052,7 @@
       shade.innerHTML = `
         <div class="akd-card" role="dialog" aria-modal="true">
           <div class="akd-title">Pilih obat di Medisin</div>
-          <div class="akd-sub">Template: <b>${escapePreviewHtml(base)}</b><br>Nama ini tidak ada persis di daftar obat Medisin${
+          <div class="akd-sub">Template: <b>${escapePreviewHtml(base)}</b> · penjamin <b>${escapePreviewHtml(penjamin || "UMUM")}</b><br>Obat dengan nama ini untuk penjamin tersebut tidak ada di daftar Medisin${
             staleName ? ` (pilihan sebelumnya "${escapePreviewHtml(staleName)}" tidak ditemukan / stok kosong)` : ""
           }. Pilih obat yang sama. Pilihan diingat untuk berikutnya.</div>
           <input id="ak-drugmap-q" type="text" autocomplete="off" placeholder="Cari nama obat (min. 2 huruf)" value="${escapePreviewHtml(drugSearchWord(base))}">
@@ -2030,21 +2108,33 @@
   }
 
   // Opsi obat Medisin untuk satu item template; null bila dokter melewati.
-  async function resolveProduct(vm, itemKey) {
+  async function resolveProduct(vm, itemKey, kategori) {
     const base = itemBaseName(itemKey);
     const penjamin = currentPenjamin();
-    const map = loadDrugMap();
-    const mine = map?.[penjamin]?.[itemKey] || "";
-    for (const name of drugNameCandidates(map, penjamin, itemKey, base)) {
-      const hit = exactProduct(await searchProducts(vm, name), name);
+    const mine = loadDrugMap()?.[penjamin]?.[itemKey] || "";
+    if (mine) {
+      const hit = exactProduct(await searchProducts(vm, mine, kategori), mine);
       if (hit) return hit;
     }
-    const candidates = await searchProducts(vm, drugSearchWord(base));
+    const found = await searchProducts(vm, base, kategori);
+    const auto = pickProductForPenjamin(found, base, penjamin);
+    if (auto) return auto;
+    const want = penjaminPrefix(penjamin);
+    const list = found.length ? found : await searchProducts(vm, drugSearchWord(base), kategori);
+    // Obat dengan awalan penjamin pasien ditaruh paling atas.
+    const candidates = list
+      .slice()
+      .sort(
+        (a, b) =>
+          Number(splitProductPrefix(productName(b)).prefix === want) -
+          Number(splitProductPrefix(productName(a)).prefix === want),
+      );
     const pick = await askDrugMapping({
       base,
+      penjamin,
       staleName: mine,
       candidates,
-      search: (q) => searchProducts(vm, q),
+      search: (q) => searchProducts(vm, q, kategori),
     });
     if (!pick) return null;
     const fresh = loadDrugMap();
@@ -2085,9 +2175,57 @@
     return saved.some((x) => x && (x.produk_id === id || drugNameKey(x.produk_nm) === name));
   }
 
-  // BHP/tindakan (strip, lancet, spuit…): belum diisi otomatis di Medisin.
-  async function addBhpItems() {
-    throw new Error("BHP/tindakan belum diisi otomatis di Medisin — isi manual di bagian Tindakan/BHP");
+  // BHP untuk tindakan (strip, lancet, swab, spuit…): diisi di tab BHP bagian Resep.
+  // TIDAK menekan SIMPAN. Mengembalikan catatan (yang sudah ada / belum terisi).
+  async function addBhpItems(list) {
+    const rs = needVm("Resep", "Resep");
+    if (!Array.isArray(rs.input_bhp)) throw new Error("bagian BHP tidak ada di halaman ini");
+    const p = needPasien();
+    const notes = [];
+    let filled = 0;
+    for (const it of list || []) {
+      const label = itemBaseName(it.item);
+      let opt = null;
+      try {
+        opt = await resolveProduct(rs, it.item, "BHP");
+      } catch (e) {
+        notes.push(`${label} belum terisi (${String(e?.message || e).replace(/\.$/, "")})`);
+        continue;
+      }
+      if (!opt) {
+        notes.push(`${label} belum terisi (dilewati)`);
+        continue;
+      }
+      const id = opt.produk_id;
+      const saved = Array.isArray(p.tarif_bhp) ? p.tarif_bhp : [];
+      if (
+        rs.input_bhp.some((r) => r.produk_id && r.produk_id.produk_id === id) ||
+        saved.some((x) => x && (x.produk_id === id || drugNameKey(x.produk_nm) === drugNameKey(productName(opt))))
+      ) {
+        notes.push(`${productName(opt)} sudah ada`);
+        continue;
+      }
+      let row = rs.input_bhp.find((r) => !r.produk_id);
+      if (!row) {
+        rs.input_bhp.push({ produk_id: "", qty: 0, batches: [], produk_detail_id: "" });
+        row = rs.input_bhp[rs.input_bhp.length - 1];
+      }
+      if (!(rs.obat_opt || []).some((o) => o.produk_id === id)) rs.obat_opt = [...(rs.obat_opt || []), opt];
+      setReactive(row, "produk_id", opt);
+      try {
+        rs.batchDetailTarif(row); // batch yang masih ada stok
+      } catch (_) {
+        notes.push(`${productName(opt)}: stok kosong, batch belum terpilih`);
+      }
+      const n = Number(it.total);
+      row.qty = Number.isFinite(n) && n > 0 ? n : 1;
+      filled++;
+      LOG(`BHP: ${productName(opt)} x ${row.qty}`);
+    }
+    if (filled)
+      notify("BHP terisi di tab BHP (bagian Resep). Buka tab BHP, periksa, lalu tekan SIMPAN di sana.", "info", 15000);
+    else if ((list || []).length && notes.every((n) => /belum terisi/.test(n))) throw new Error(notes.join("; "));
+    return notes;
   }
 
   function findRacikanModal() {
@@ -2203,16 +2341,21 @@
     rk.form.racikan_jenis = racikanJenisFor(tpl);
     rk.form.racikan_qty = racikanQtyFor(tpl);
     rk.form.racikan_signa = signa;
+    const lowStock = [];
     for (const part of parts) {
       const row = nextEmptyRow(rk, "input_racikan");
       putProductInRow(rk, row, part.opt, part.quantity);
       row.signa = signa;
+      const stock = Number(part.opt.totalStockSystem);
+      if (Number.isFinite(stock) && Number(row.jumlah) > stock)
+        lowStock.push(`${productName(part.opt)} (butuh ${row.jumlah}, stok ${stock})`);
     }
     LOG(`Racikan ${title} terisi di dialog (belum disimpan)`);
     notify(
       `Racikan terisi di dialog Tambah Racikan: ${title}. Periksa, lalu tekan SIMPAN di dialog itu (atau tutup bila batal).` +
-        (missing.length ? ` Bahan belum masuk: ${missing.join(", ")}.` : ""),
-      missing.length ? "warn" : "info",
+        (missing.length ? ` Bahan belum masuk: ${missing.join(", ")}.` : "") +
+        (lowStock.length ? ` STOK KURANG: ${lowStock.join(", ")}.` : ""),
+      lowStock.length ? "error" : missing.length ? "warn" : "info",
       20000,
     );
     // Racikan berikutnya menunggu dialog ini selesai (maks. 10 menit).
@@ -3793,7 +3936,6 @@
         validateAndReport();
       }
       const failNote =
-        " Tindakan/tarif tidak diisi otomatis." +
         (kept.length ? ` Tidak diubah (sudah diisi dokter): ${kept.join(", ")}.` : "") +
         (failed.length ? ` BELUM TERISI: ${failed.join("; ")}. Isi manual.` : "");
 
@@ -3948,7 +4090,7 @@
       id: "auto-klinik-resume",
       icon: "📋",
       label: "RESUME",
-      desc: "Anamnesa, kesadaran, prognosa, status pulang",
+      desc: "Anamnesa, kesadaran, prognosa, layanan, status pulang",
       run: () => runTemplate("resume"),
     },
     {
@@ -4378,7 +4520,10 @@
       buildSigna,
       matchSignaMaster,
       drugSearchWord,
-      drugNameCandidates,
+      splitProductPrefix,
+      penjaminPrefix,
+      pickProductForPenjamin,
+      serviceNameFor,
       itemBaseName,
       racikanJenisFor,
       racikanQtyFor,
@@ -4398,6 +4543,8 @@
       setPrognosis,
       setDischarge,
       addRecipeItems,
+      addBhpItems,
+      addService,
       addRacikan,
     });
     return;

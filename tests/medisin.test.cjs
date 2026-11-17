@@ -14,6 +14,18 @@ const PRODUCTS = [
   { produk_id: 2, produk_nm: "PARACETAMOL 500 MG MERSI", stok: 50 },
   { produk_id: 3, produk_nm: "CTM 4 MG", stok: 5 },
   { produk_id: 4, produk_nm: "AMBROXOL 30 MG", stok: 91 },
+  // Master klinik asli: awalan per penjamin, stok terpisah.
+  { produk_id: 11, produk_nm: "BPJS -- PARACETAMOL 500 MG", stok: 900 },
+  { produk_id: 12, produk_nm: "IMR -- PARACETAMOL 500 MG", stok: 13 },
+  { produk_id: 21, produk_nm: "BPJS -- ALKOHOL SWAB", stok: 600, bhp: true },
+  { produk_id: 22, produk_nm: "ALKOHOL SWAB", stok: 23, bhp: true },
+  { produk_id: 23, produk_nm: "BPJS -- STRIP GULA DARAH", stok: 42, bhp: true },
+  { produk_id: 24, produk_nm: "BPJS -- BLOOD LANCET 26G", stok: 0, bhp: true },
+];
+const TARIFS = [
+  { tarif_id: 1, tarif_nm: "Dokter Umum Jasa Konsultasi", tarif_harga: "45000.00" },
+  { tarif_id: 2, tarif_nm: "BPJS - Dokter Umum Jasa Konsultasi", tarif_harga: "30000.00" },
+  { tarif_id: 3, tarif_nm: "BPJS TK - Dokter Umum Jasa Konsultasi", tarif_harga: "30000.00" },
 ];
 const ICDS = [
   { icd_kode: "J06.0", en: "Acute laryngopharyngitis", value: "J06.0", label: "J06.0 - Acute laryngopharyngitis" },
@@ -39,6 +51,9 @@ function makeApp({ pasien = {}, path = PATH } = {}) {
     status_pulang: 4,
     jenis_prognosa: null,
     resep: [],
+    tindakan: [],
+    tarif_bhp: [],
+    poli_nm: "POLI UMUM 1",
     ...pasien,
   };
   const opt = (a) => ({
@@ -57,10 +72,12 @@ function makeApp({ pasien = {}, path = PATH } = {}) {
       signa_opt: [{ nama: "3 X 1 SETELAH MAKAN" }, { nama: "1 X 1" }],
       [listKey]: [{ no: 1, val: "", batch: "", batches: [], jumlah: 1, diskon_resep: 0, signa: "" }],
       searches: [],
-      async loadObat(text, update, abort) {
+      async loadObat(text, update, abort, kategori) {
         if (text.length < 2) return abort();
         vm.searches.push(text);
-        const found = PRODUCTS.filter((a) => a.produk_nm.toLowerCase().includes(text.toLowerCase())).map(opt);
+        const found = PRODUCTS.filter(
+          (a) => a.produk_nm.toLowerCase().includes(text.toLowerCase()) && (kategori !== "BHP" || a.bhp),
+        ).map(opt);
         update(() => {
           vm.obat_opt = found;
         });
@@ -78,6 +95,15 @@ function makeApp({ pasien = {}, path = PATH } = {}) {
   };
   const Resep = Object.assign(obatVm("Resep", "input_resep"), {
     resep: [],
+    input_bhp: [{ produk_id: "", qty: 0, batches: [], produk_detail_id: "" }],
+    tab_resep: "resep",
+    batchDetailTarif(row) {
+      const o = Resep.obat_opt.find((x) => x.produk_id === row.produk_id.produk_id);
+      const b = o.produk_detail.filter((d) => d.stock_system > 0);
+      row.batches = b;
+      row.produk_detail_id = b[0].produk_detail_id; // melempar bila stok kosong (sama seperti Medisin)
+    },
+    onSaveBhp: forbidden("Resep.onSaveBhp"),
     onSaveResep: forbidden("Resep.onSaveResep"),
     onSubmit: forbidden("Resep.onSubmit"),
   });
@@ -114,6 +140,27 @@ function makeApp({ pasien = {}, path = PATH } = {}) {
     onSaveDiagnosa: forbidden("Diagnosa.onSaveDiagnosa"),
     onSubmit: forbidden("Diagnosa.onSubmit"),
   };
+  const Tindakan = {
+    $options: { _componentTag: "Tindakan" },
+    $children: [],
+    tarif_opt: [],
+    input_tindakan: [{ no: 1, val: "", diskon_tindakan: 0, jumlah_tindakan: 1, asisten_tindakan: null, keterangan_tindakan: "" }],
+    loadTarif(text, update) {
+      const found = TARIFS.filter((t) => t.tarif_nm.toLowerCase().includes(text.toLowerCase()));
+      Promise.resolve().then(() =>
+        update(() => {
+          Tindakan.tarif_opt = found;
+        }),
+      );
+    },
+    onUpdateInput(o, row) {
+      row.harga_tindakan = "Rp " + o.tarif_harga;
+    },
+    addColom() {
+      Tindakan.input_tindakan.push({ no: Tindakan.input_tindakan.length + 1, val: "" });
+    },
+    onSaveTindakan: forbidden("Tindakan.onSaveTindakan"),
+  };
   const prognosaSelect = {
     $options: { name: "QSelect" },
     $children: [],
@@ -130,7 +177,7 @@ function makeApp({ pasien = {}, path = PATH } = {}) {
   };
   const root = {
     $options: {},
-    $children: [Resep, Racikan, Diagnosa, prognosaSelect],
+    $children: [Resep, Racikan, Diagnosa, Tindakan, prognosaSelect],
     $store: { state: { pelayanan: { pasien: p } } },
     $set: (o, k, v) => {
       o[k] = v;
@@ -144,7 +191,7 @@ function makeApp({ pasien = {}, path = PATH } = {}) {
     localStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, String(v)) },
   };
   const { api } = loadScript(globals);
-  return { api, p, Resep, Racikan, Diagnosa, saveCalls, storage };
+  return { api, p, Resep, Racikan, Diagnosa, Tindakan, saveCalls, storage };
 }
 
 test("fungsi murni Medisin: id kunjungan, umur, ICD, signa, racikan", () => {
@@ -177,11 +224,73 @@ test("fungsi murni Medisin: id kunjungan, umur, ICD, signa, racikan", () => {
   assert.equal(api.drugSearchWord("CETIRIZINE HCL 10 MG"), "CETIRI");
 });
 
-test("urutan nama obat yang dicoba: pilihan dokter dulu, baru nama template", () => {
+test("awalan penjamin: nama obat & tarif mengikuti penjamin pasien", () => {
   const { api } = makeApp();
-  const map = { UMUM: { X: "OBAT UMUM" }, "BPJS KESEHATAN": { X: "OBAT BPJS" } };
-  assert.deepEqual([...api.drugNameCandidates(map, "UMUM", "X", "OBAT")], ["OBAT UMUM", "OBAT BPJS", "OBAT"]);
-  assert.deepEqual([...api.drugNameCandidates({}, "UMUM", "X", "OBAT")], ["OBAT"]);
+  assert.deepEqual({ ...api.splitProductPrefix("BPJS -- ZINC 20 MG") }, { prefix: "BPJS", base: "ZINC 20 MG" });
+  assert.deepEqual({ ...api.splitProductPrefix("BPJS TK -- ZINC 20 MG") }, { prefix: "BPJS TK", base: "ZINC 20 MG" });
+  assert.deepEqual({ ...api.splitProductPrefix("ZINC 20 MG") }, { prefix: "", base: "ZINC 20 MG" });
+  assert.equal(api.penjaminPrefix("BPJS"), "BPJS");
+  assert.equal(api.penjaminPrefix("BPJS Kesehatan"), "BPJS");
+  assert.equal(api.penjaminPrefix("BPJS KET"), "BPJS TK");
+  assert.equal(api.penjaminPrefix("BPJS TK"), "BPJS TK");
+  assert.equal(api.penjaminPrefix("UMUM"), "");
+  assert.equal(api.penjaminPrefix("IMR"), "IMR");
+  const opts = PRODUCTS.map((a) => ({ value: a }));
+  assert.equal(api.pickProductForPenjamin(opts, "PARACETAMOL 500 MG", "BPJS").value.produk_id, 11);
+  assert.equal(api.pickProductForPenjamin(opts, "PARACETAMOL 500 MG", "UMUM").value.produk_id, 1);
+  assert.equal(api.pickProductForPenjamin(opts, "PARACETAMOL 500 MG", "IMR").value.produk_id, 12);
+  assert.equal(api.pickProductForPenjamin(opts, "PARACETAMOL 500 MG", "BPJS TK"), null); // tidak ada -> dokter memilih
+  assert.equal(api.pickProductForPenjamin(opts, "AMBROXOL 30 MG", "BPJS"), null); // tidak jatuh ke stok UMUM
+  assert.equal(api.serviceNameFor("BPJS"), "BPJS - Dokter Umum Jasa Konsultasi");
+  assert.equal(api.serviceNameFor("UMUM"), "Dokter Umum Jasa Konsultasi");
+  assert.equal(api.serviceNameFor("BPJS KET"), "BPJS TK - Dokter Umum Jasa Konsultasi");
+});
+
+test("pasien BPJS: resep memakai obat 'BPJS -- …', bukan stok UMUM", async () => {
+  const { api, Resep, saveCalls } = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  const item = Object.keys(api.ITEMS).find((k) => api.itemBaseName(k) === "PARACETAMOL 500 MG");
+  await api.addRecipeItems([{ item, freq: "3", dose: "1", days: "3", total: "10", instruction: "SETELAH MAKAN" }]);
+  assert.equal(Resep.input_resep[0].val.produk_nm, "BPJS -- PARACETAMOL 500 MG");
+  assert.deepEqual(saveCalls, []);
+});
+
+test("BHP: diisi di baris BHP sesuai penjamin, stok kosong dicatat, tanpa simpan", async () => {
+  const { api, Resep, saveCalls } = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  const notes = await api.addBhpItems([
+    { item: "STRIP_GULA", total: "1" },
+    { item: "ALKOHOL_SWAB", total: "2" },
+    { item: "BLOOD_LANCET_26G", total: "1" },
+  ]);
+  assert.deepEqual(
+    Resep.input_bhp.map((r) => [r.produk_id.value.produk_nm, r.qty]),
+    [["BPJS -- STRIP GULA DARAH", 1], ["BPJS -- ALKOHOL SWAB", 2], ["BPJS -- BLOOD LANCET 26G", 1]],
+  );
+  assert.equal(Resep.input_bhp[0].produk_detail_id, 230);
+  assert.deepEqual([...notes], ["BPJS -- BLOOD LANCET 26G: stok kosong, batch belum terpilih"]);
+  const again = await api.addBhpItems([{ item: "ALKOHOL_SWAB", total: "2" }]);
+  assert.deepEqual([...again], ["BPJS -- ALKOHOL SWAB sudah ada"]);
+  assert.equal(Resep.input_bhp.length, 3);
+  assert.deepEqual(saveCalls, []);
+});
+
+test("tindakan: jasa konsultasi sesuai penjamin, tidak dobel, hanya poli umum, tanpa simpan", async () => {
+  const a = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  assert.equal(await a.api.addService(), true);
+  assert.equal(a.Tindakan.input_tindakan[0].val.tarif_nm, "BPJS - Dokter Umum Jasa Konsultasi");
+  assert.equal(a.Tindakan.input_tindakan[0].harga_tindakan, "Rp 30000.00");
+  assert.equal(await a.api.addService(), false);
+  assert.equal(a.Tindakan.input_tindakan.length, 1);
+  assert.deepEqual(a.saveCalls, []);
+  const u = makeApp();
+  await u.api.addService();
+  assert.equal(u.Tindakan.input_tindakan[0].val.tarif_nm, "Dokter Umum Jasa Konsultasi");
+  const saved = makeApp({ pasien: { tindakan: [{ tarif_nm: "Dokter Umum Jasa Konsultasi" }] } });
+  assert.equal(await saved.api.addService(), false);
+  assert.equal(saved.Tindakan.input_tindakan[0].val, "");
+  const gigi = makeApp({ pasien: { poli_nm: "POLI GIGI" } });
+  assert.equal(await gigi.api.addService(), false);
+  const inh = makeApp({ pasien: { penjamin_nm: "ASURANSI X" } });
+  await assert.rejects(inh.api.addService(), /tidak ada di daftar tarif/);
 });
 
 test("data pasien dibaca dari store, dan tidak dipakai bila store masih pasien lain", () => {
