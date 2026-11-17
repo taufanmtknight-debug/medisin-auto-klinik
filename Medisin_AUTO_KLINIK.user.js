@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.6.0
+// @version      0.6.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.6.0";
+  const SCRIPT_VERSION_FALLBACK = "0.6.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -5168,9 +5168,24 @@
       box.querySelector("#auto-klinik-main").addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        notify(lockMessage(), "warn", 6000);
+        showPinPanel(box);
       });
       return;
+    }
+    if (remoteLocked()) {
+      // Dibuka dengan PIN di perangkat ini: tombol untuk mengunci lagi.
+      const relock = document.createElement("button");
+      relock.type = "button";
+      relock.className = "ak-relock";
+      relock.textContent = "🔒 Kunci lagi di perangkat ini";
+      relock.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setLocalOpen(false);
+        remountLauncher();
+        notify("AUTO KLINIK dikunci lagi di perangkat ini.", "warn", 6000);
+      });
+      box.querySelector("#auto-klinik-submenu")?.appendChild(relock);
     }
 
     const submenu = box.querySelector("#auto-klinik-submenu");
@@ -6446,8 +6461,73 @@
       return { locked: false, pesan: "" };
     }
   })();
-  function akLocked() {
+  // v0.6.1: saat dikunci jarak jauh, perangkat ini bisa dibuka dengan PIN dokter
+  // (disimpan hanya sebagai hash SHA-256) dan dikunci lagi kapan saja dari menu.
+  // Buka-PIN berlaku sampai dokter menekan "Kunci lagi" atau kunci jarak jauh dibuka.
+  const PIN_HASH = "ab3c5ba5484877e28875f458dbdfcd9b74aeb6a787bd8e251782e7ae2741125b";
+  const LOCAL_OPEN_KEY = "auto-klinik-medisin:buka-pin";
+  function readLocalOpen() {
+    try {
+      return localStorage.getItem(LOCAL_OPEN_KEY) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+  function setLocalOpen(on) {
+    try {
+      if (on) localStorage.setItem(LOCAL_OPEN_KEY, "1");
+      else localStorage.removeItem(LOCAL_OPEN_KEY);
+    } catch (_) {}
+  }
+  // (pure, diuji) Terkunci = dikunci jarak jauh DAN belum dibuka PIN di perangkat ini.
+  function lockEffective(remoteLocked, localOpen) {
+    return !!remoteLocked && !localOpen;
+  }
+  function remoteLocked() {
     return !!lockState?.locked;
+  }
+  function akLocked() {
+    return lockEffective(remoteLocked(), readLocalOpen());
+  }
+  async function pinMatches(pin) {
+    const digits = String(pin || "").replace(/\s+/g, "");
+    if (!/^\d{4,8}$/.test(digits) || !window.crypto?.subtle) return false;
+    const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(digits));
+    const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return hex === PIN_HASH;
+  }
+  function remountLauncher() {
+    document.getElementById("auto-klinik-box")?.remove();
+    ensureButtonMounted();
+  }
+  // Panel kecil di atas tombol terkunci: isi PIN lalu BUKA.
+  function showPinPanel(box) {
+    if (box.querySelector(".ak-pin")) return box.querySelector(".ak-pin input")?.focus();
+    const panel = document.createElement("form");
+    panel.className = "ak-pin";
+    panel.innerHTML =
+      '<div class="ak-pin-msg"></div>' +
+      '<div class="ak-pin-row"><input type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="PIN" aria-label="PIN">' +
+      '<button type="submit">BUKA</button><button type="button" class="ak-pin-x" aria-label="Tutup">✕</button></div>';
+    panel.querySelector(".ak-pin-msg").textContent = lockMessage() + " Masukkan PIN untuk membuka di perangkat ini.";
+    panel.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    panel.addEventListener("click", (ev) => ev.stopPropagation());
+    panel.querySelector(".ak-pin-x").addEventListener("click", () => panel.remove());
+    panel.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const input = panel.querySelector("input");
+      if (await pinMatches(input.value)) {
+        setLocalOpen(true);
+        remountLauncher();
+        notify("AUTO KLINIK dibuka dengan PIN di perangkat ini. Kunci lagi lewat menu bila perlu.", "success", 8000);
+      } else {
+        input.value = "";
+        panel.querySelector(".ak-pin-msg").textContent = "PIN salah.";
+        input.focus();
+      }
+    });
+    box.querySelector(".ak-menu").insertBefore(panel, box.querySelector("#auto-klinik-main"));
+    panel.querySelector("input").focus();
   }
   function lockMessage() {
     return "AUTO KLINIK sedang dikunci dokter." + (lockState?.pesan ? " " + lockState.pesan : "");
@@ -6461,14 +6541,16 @@
       if (!res.ok) return;
       const next = parseLockText(await res.text());
       if (!next) return;
-      const changed = next.locked !== akLocked();
+      const before = akLocked();
       lockState = { ...next, t: Date.now() };
+      // Kunci jarak jauh dibuka → buka-PIN dihapus, jadi kunci berikutnya berlaku lagi.
+      if (!next.locked) setLocalOpen(false);
+      const changed = before !== akLocked();
       try {
         localStorage.setItem(LOCK_KEY, JSON.stringify(lockState));
       } catch (_) {}
       if (changed) {
-        document.getElementById("auto-klinik-box")?.remove();
-        ensureButtonMounted();
+        remountLauncher();
         notify(next.locked ? lockMessage() : "AUTO KLINIK dibuka kembali.", next.locked ? "warn" : "success", 8000);
       }
     } catch (e) {
@@ -6483,6 +6565,15 @@
     #auto-klinik-box.ak-dragging #auto-klinik-main{cursor:grabbing!important;opacity:.85!important;transform:scale(1.06)!important;}
     #auto-klinik-box.ak-pos-top,#auto-klinik-box.ak-pos-top .ak-menu{flex-direction:column-reverse!important;}
     #auto-klinik-box.ak-pos-left,#auto-klinik-box.ak-pos-left .ak-menu{align-items:flex-start!important;}
+    #auto-klinik-box .ak-pin{pointer-events:auto!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:12px!important;
+      padding:10px!important;box-shadow:0 8px 24px rgba(15,23,42,.18)!important;max-width:260px!important;font-size:13px!important;color:#0f172a!important;}
+    #auto-klinik-box .ak-pin-msg{margin-bottom:8px!important;line-height:1.35!important;}
+    #auto-klinik-box .ak-pin-row{display:flex!important;gap:6px!important;}
+    #auto-klinik-box .ak-pin input{flex:1!important;min-width:0!important;width:110px!important;padding:8px!important;border:1px solid #94a3b8!important;border-radius:8px!important;font-size:16px!important;letter-spacing:4px!important;}
+    #auto-klinik-box .ak-pin button{padding:8px 12px!important;border:0!important;border-radius:8px!important;background:#ea580c!important;color:#fff!important;font-weight:700!important;cursor:pointer!important;}
+    #auto-klinik-box .ak-pin button.ak-pin-x{background:#e2e8f0!important;color:#334155!important;}
+    #auto-klinik-box .ak-relock{display:block!important;width:100%!important;margin-top:6px!important;padding:8px!important;border:1px dashed #64748b!important;border-radius:10px!important;
+      background:#f1f5f9!important;color:#334155!important;font-weight:700!important;font-size:12px!important;cursor:pointer!important;}
     #auto-klinik-box.ak-locked #auto-klinik-main{background:#64748b!important;box-shadow:0 4px 12px rgba(15,23,42,.2)!important;}
   `;
 
@@ -6580,6 +6671,7 @@
       DIAGNOSIS_TEMPLATES,
       DIAGNOSIS_FROM_COMPLAINT,
       parseLockText,
+      lockEffective,
       clampLauncherPos,
       LOCK_URL,
       RED_FLAGS,

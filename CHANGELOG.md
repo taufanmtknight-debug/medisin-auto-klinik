@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.1 — 2026-11-17
+
+- Saat **dikunci jarak jauh**, tombol 🔒 bisa diketuk untuk memasukkan **PIN dokter**; PIN benar = AUTO KLINIK terbuka **hanya di perangkat itu**. PIN hanya disimpan sebagai hash SHA-256 di script.
+- Di perangkat yang dibuka PIN, menu punya tombol **"Kunci lagi di perangkat ini"**.
+- Buka-PIN berlaku sampai dokter menekan "Kunci lagi", atau sampai kunci jarak jauh dibuka (`"aktif": true`); kunci jarak jauh berikutnya berlaku lagi di semua perangkat.
+
 ## v0.6.0 — 2026-11-17
 
 - **Tombol AUTO KLINIK bisa digeser** ke mana saja: tekan-tahan lalu geser (mouse di laptop, jari di HP). Posisinya diingat per perangkat. Ketuk biasa tetap membuka menu; menu terbuka ke arah tengah layar.

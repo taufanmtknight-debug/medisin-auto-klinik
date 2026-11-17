@@ -40,3 +40,15 @@ test("terkunci: menu, pintasan, dan jalan otomatis berhenti; tombol di semua hal
   // Menu yang butuh pasien hanya jalan di halaman pelayanan.
   assert.match(source, /if \(!item\.anywhere && !isTargetPage\(\)\)/);
 });
+
+test("v0.6.1 PIN: buka di perangkat ini hanya saat dikunci; PIN tidak tertulis polos", () => {
+  assert.equal(api.lockEffective(true, false), true);
+  assert.equal(api.lockEffective(true, true), false);
+  assert.equal(api.lockEffective(false, false), false);
+  assert.equal(api.lockEffective(false, true), false);
+  assert.match(source, /const PIN_HASH = "[0-9a-f]{64}";/);
+  assert.doesNotMatch(source, /\b\d{6}\b(?=[^\n]*PIN)/);
+  // Kunci jarak jauh dibuka → buka-PIN dihapus.
+  assert.match(source, /if \(!next\.locked\) setLocalOpen\(false\);/);
+  assert.match(source, /Kunci lagi di perangkat ini/);
+});
