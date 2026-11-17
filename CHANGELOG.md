@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.8.0 — 2026-11-18
+
+- **Dosis anak dihitung per mg/kg** (tabel lengkap: `docs/medisin/09-dosis-anak-v0.8.0.md`). Rentang BB lebih rapat (2-3, >3-4, … kg) dan jumlah tablet dibulatkan ke ¼ tablet. Dosis di BB terendah tiap rentang tidak melebihi batas atas.
+  - Paracetamol 10-15 mg/kg/dosis.
+  - Ibuprofen 5-10 mg/kg/dosis.
+  - Domperidon maks 0,25 mg/kg/dosis, puyer & sirup.
+  - CTM 0,1 mg/kg/dosis, maks 2 mg.
+  - Dexametason 0,015 mg/kg/dosis.
+  - Guaifenesin 4 mg/kg/dosis.
+  - Ambroxol 0,5 mg/kg/dosis.
+  - Cetirizin 0,25 mg/kg/hari.
+  - Ranitidin 1,5 mg/kg/dosis.
+  - Antasida 1/40 tablet/kg/dosis.
+- **Batas umur**: ibuprofen, CTM, domperidon ≥6 bulan; ranitidin ≥2 tahun; antasida ≥4 tahun.
+  - Pilihan di bawah umur tampil abu-abu dan tidak bisa dicentang, dan tidak disarankan otomatis.
+  - Bayi <6 bulan: Racikan ISPA & Bapil 2 dibuat **tanpa CTM**.
+  - Umur 2-4 tahun: Racikan Lambung berisi ranitidin saja.
+- **Baru**: Antasida DOEN sirup anak ≥4 th (2,5 / 5 / 10 mL menurut umur) dan Racikan Antasida anak ≥4 th (BB).
+- Kotak peringatan bayi tidak lagi menyebut obat yang sekarang sudah dikunci umur. mg kecil (dexa) ditampilkan lebih teliti.
+
 ## v0.7.1 — 2026-11-18
 
 - **Info obat & racikan lebih ringkas**: racikan ditulis "Puyer 10 bungkus", signa satu baris ("3 × 1 bungkus/hari · 3 hari · setelah makan"), tiap bahan "PARACETAMOL 500 MG 1 tab → 50 mg/bungkus = 12,5 mg/kg". Obat biasa satu baris ("1 sachet × 1/hari · 1 hari → 4 sachet"), sirup dengan mg/kg. Awalan "BPJS --" disembunyikan di tampilan.

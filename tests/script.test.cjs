@@ -611,6 +611,10 @@ test("v0.8.0: ibuprofen/CTM/domperidon <6 bln, ranitidin <2 th, antasida <4 th t
   assert.match(res("ANTASIDA_ANAK", 14, 3.9).note, /≥4 tahun/);
   assert.match(res("ANTASIDA_PUYER_ANAK", 14, 3.9).note, /≥4 tahun/);
   assert.equal(res("ANTASIDA_PUYER_ANAK", 16, 4).racikans[0].tpl.ingredients[0].item, "ANTASIDA_TABLET");
+  const sy = (age) => res("ANTASIDA_SYRUP_ANAK", 20, age);
+  assert.match(sy(3.5).note, /≥4 tahun/);
+  assert.deepEqual([sy(4.5).medicines[0].item, sy(4.5).medicines[0].dose, sy(8).medicines[0].dose, sy(13).medicines[0].dose], ["ANTASIDA_SYRUP", "2.5", "5", "10"]);
+  assert.equal(api.ITEMS.ANTASIDA_SYRUP.target, "BPJS -- ANTASIDA DOEN SYRUP");
   assert.match(res("LAMBUNG_MUAL_RACIKAN_BARU", 10, 1.9).note, /≥2 tahun/);
   // 2-4 th: ranitidin saja (antasida dibuang); >=4 th: keduanya.
   const lm3 = res("LAMBUNG_MUAL_RACIKAN_BARU", 13, 3);
