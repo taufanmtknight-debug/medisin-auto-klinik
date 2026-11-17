@@ -581,7 +581,7 @@ test("v0.8.0: dosis anak per mg/kg, tablet BULAT, jumlah bungkus menyesuaikan", 
     assert.equal(t.duration, String(Math.max(1, Math.round(n / Number(t.doseFreq)))));
     for (const ing of t.ingredients) {
       assert.match(ing.quantity, /^[1-9]\d*$/, `${label} ${ing.item}: ${ing.quantity} bukan bulat`);
-      const r = api.PEDIATRIC_DOSE_RULES[ing.item];
+      const r = (t.doseRules || {})[ing.item] || api.PEDIATRIC_DOSE_RULES[ing.item];
       const mg = (S[ing.item] * Number(ing.quantity)) / n;
       assert.ok(mg / kg <= r.hi + 1e-9, `${label} ${kg} kg ${ing.item}: ${mg / kg} > ${r.hi}`);
       assert.ok(mg <= r.maxDose + 1e-9, `${label} ${kg} kg ${ing.item}: ${mg} mg > maks`);
@@ -719,4 +719,24 @@ test("v0.3.2 Medisin: jumlah obat sesuai permintaan dokter", () => {
   assert.equal(tot("MECOBALAMIN_500_DEWASA").total, "6");
   assert.equal(tot("ACYCLOVIR_400_DEWASA").days, "3");
   assert.equal(tot("ACYCLOVIR_400_DEWASA").total, "30");
+});
+
+test("v0.8.4: racikan bapil cetirizin (tanpa CTM) & nama racikan singkatan obat", () => {
+  const it = api.MEDICATION_ITEMS_FLAT.find((x) => x.key === "BAPIL_CETIRIZIN_ANAK");
+  const r = plain(api.resolveMedicationItem(it, 10, 1));
+  const t = r.racikans[0].tpl;
+  assert.deepEqual(t.ingredients.map((i) => i.item), ["GUAIFENESIN_100", "CETIRIZINE_10", "DEXAMETHASONE_05"]);
+  assert.ok(!t.ingredients.some((i) => i.item === "CTM_4"));
+  // cetirizine 0,25 mg/kg/hari dibagi 3
+  const n = api.racikanQtyFor(t);
+  const ctz = (10 * Number(t.ingredients[1].quantity)) / n;
+  assert.ok(ctz / 10 <= 0.1 + 1e-9 && ctz / 10 >= 0.06, String(ctz));
+  assert.equal(api.racikanShortName(t), "GG-CTZ-DEXA");
+  // bayi kecil: bisa dipakai (tanpa CTM sejak awal), mulai 4 kg
+  assert.equal(plain(api.resolveMedicationItem(it, 5, 0.3)).racikans.length, 1);
+  assert.equal(api.getWeightTemplate("BARU_BAPIL_CTZ_", 3.5), null);
+  assert.equal(api.racikanShortName(api.getWeightTemplate("ISPA_ANAK_", 12).tpl), "GG-CTM-DEXA");
+  assert.equal(api.racikanShortName(api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 20).tpl), "ANTS-RANI");
+  assert.equal(api.racikanShortName(api.getWeightTemplate("DEMAM_ANAK_", 12).tpl), ""); // 1 obat: nama lama
+  assert.equal(api.racikanShortName(api.SALEP_RACIKAN), ""); // salep: nama lama
 });

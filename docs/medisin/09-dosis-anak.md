@@ -1,4 +1,4 @@
-# Dosis anak AUTO KLINIK v0.8.1 (untuk dievaluasi dokter)
+# Dosis anak AUTO KLINIK v0.8.4 (untuk dievaluasi dokter)
 
 Dihitung otomatis per mg/kg (permintaan dokter 2026-11-18). 1 bungkus sekali minum.
 
@@ -27,6 +27,10 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 
 ## Antasida tablet anak (tidak berubah)
 4–10 th: ½ tablet 3x sehari · >10 th: 1 tablet 3x sehari.
+
+
+- v0.8.4: Racikan Bapil Cetirizin (GG-CTZ-DEXA) = guaifenesin + cetirizin + dexa, 3x sehari; cetirizin 0,25 mg/kg/hari dibagi 3 (0,083 mg/kg/dosis, maks 3,3 mg/dosis); mulai BB 4 kg.
+- Nama racikan puyer berisi ≥2 obat = singkatan: PCT, IBU, GG (guaifenesin), CTM, DEXA, AMB (ambroxol), CTZ (cetirizin), DOMP, RANI, ANTS (antasida), AMOX, CFD (cefadroxil).
 
 
 ### Racikan ISPA — 3x sehari
@@ -230,6 +234,29 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 | >28-31 kg | 10 | 9 | 5 | 5 | Dexa 0,45 mg (0,015–0,016/kg); CTM 2 mg (0,065–0,071/kg); Ambroxol 15 mg (0,48–0,54/kg) |
 | >31-35 kg | 10 | 10 | 5 | 5 | Dexa 0,5 mg (0,014–0,016/kg); CTM 2 mg (0,057–0,065/kg); Ambroxol 15 mg (0,43–0,48/kg) |
 | >35-40 kg | 10 | 10 | 5 | 6 | Dexa 0,5 mg (0,013–0,014/kg); CTM 2 mg (0,05–0,057/kg); Ambroxol 18 mg (0,45–0,51/kg) |
+
+### BAPIL CETIRIZIN — 3x sehari
+
+| BB | Bungkus | Guaifenesin (tab) | Cetirizin (tab) | Dexa (tab) | Per bungkus |
+|---|---|---|---|---|---|
+| 4-5 kg | 25 | 4 | 1 | 3 | Guaifenesin 16 mg (3,2–4/kg); Cetirizin 0,4 mg (0,08–0,1/kg); Dexa 0,06 mg (0,012–0,015/kg) |
+| >5-6 kg | 20 | 4 | 1 | 3 | Guaifenesin 20 mg (3,33–4/kg); Cetirizin 0,5 mg (0,083–0,1/kg); Dexa 0,075 mg (0,012–0,015/kg) |
+| >6-7 kg | 17 | 4 | 1 | 3 | Guaifenesin 23,5 mg (3,36–3,92/kg); Cetirizin 0,588 mg (0,084–0,098/kg); Dexa 0,088 mg (0,013–0,015/kg) |
+| >7-8 kg | 15 | 4 | 1 | 3 | Guaifenesin 26,7 mg (3,33–3,81/kg); Cetirizin 0,667 mg (0,083–0,095/kg); Dexa 0,1 mg (0,013–0,014/kg) |
+| >8-9 kg | 13 | 4 | 1 | 3 | Guaifenesin 30,8 mg (3,42–3,85/kg); Cetirizin 0,769 mg (0,085–0,096/kg); Dexa 0,115 mg (0,013–0,014/kg) |
+| >9-10 kg | 12 | 5 | 1 | 3 | Guaifenesin 41,7 mg (4,17–4,63/kg); Cetirizin 0,833 mg (0,083–0,093/kg); Dexa 0,125 mg (0,013–0,014/kg) |
+| >10-11 kg | 10 | 4 | 1 | 3 | Guaifenesin 40 mg (3,64–4/kg); Cetirizin 1 mg (0,091–0,1/kg); Dexa 0,15 mg (0,014–0,015/kg) |
+| >11-12 kg | 10 | 5 | 1 | 3 | Guaifenesin 50 mg (4,17–4,55/kg); Cetirizin 1 mg (0,083–0,091/kg); Dexa 0,15 mg (0,012–0,014/kg) |
+| >12-14 kg | 10 | 5 | 1 | 4 | Guaifenesin 50 mg (3,57–4,17/kg); Cetirizin 1 mg (0,071–0,083/kg); Dexa 0,2 mg (0,014–0,017/kg) |
+| >14-16 kg | 15 | 9 | 2 | 7 | Guaifenesin 60 mg (3,75–4,29/kg); Cetirizin 1,3 mg (0,083–0,095/kg); Dexa 0,233 mg (0,015–0,017/kg) |
+| >16-18 kg | 13 | 9 | 2 | 7 | Guaifenesin 69,2 mg (3,85–4,33/kg); Cetirizin 1,5 mg (0,085–0,096/kg); Dexa 0,269 mg (0,015–0,017/kg) |
+| >18-20 kg | 12 | 9 | 2 | 7 | Guaifenesin 75 mg (3,75–4,17/kg); Cetirizin 1,7 mg (0,083–0,093/kg); Dexa 0,292 mg (0,015–0,016/kg) |
+| >20-22 kg | 10 | 8 | 2 | 6 | Guaifenesin 80 mg (3,64–4/kg); Cetirizin 2 mg (0,091–0,1/kg); Dexa 0,3 mg (0,014–0,015/kg) |
+| >22-25 kg | 10 | 9 | 2 | 7 | Guaifenesin 90 mg (3,6–4,09/kg); Cetirizin 2 mg (0,08–0,091/kg); Dexa 0,35 mg (0,014–0,016/kg) |
+| >25-28 kg | 10 | 10 | 2 | 8 | Guaifenesin 100 mg (3,57–4/kg); Cetirizin 2 mg (0,071–0,08/kg); Dexa 0,4 mg (0,014–0,016/kg) |
+| >28-31 kg | 11 | 11 | 3 | 10 | Guaifenesin 100 mg (3,23–3,57/kg); Cetirizin 2,7 mg (0,088–0,097/kg); Dexa 0,455 mg (0,015–0,016/kg) |
+| >31-35 kg | 10 | 10 | 3 | 10 | Guaifenesin 100 mg (2,86–3,23/kg); Cetirizin 3 mg (0,086–0,097/kg); Dexa 0,5 mg (0,014–0,016/kg) |
+| >35-40 kg | 10 | 10 | 3 | 10 | Guaifenesin 100 mg (2,5–2,86/kg); Cetirizin 3 mg (0,075–0,086/kg); Dexa 0,5 mg (0,013–0,014/kg) |
 
 ### Racikan Antasida (≥4 th) — 3x sehari
 

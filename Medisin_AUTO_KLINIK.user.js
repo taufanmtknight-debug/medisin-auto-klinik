@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.3
+// @version      0.8.4
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.3";
+  const SCRIPT_VERSION_FALLBACK = "0.8.4";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -412,7 +412,7 @@
   // v0.8.0 (koreksi dokter): Medisin hanya menerima jumlah tablet BULAT. Maka jumlah
   // bungkus (10-30) yang disesuaikan: dipilih jumlah bungkus terkecil yang membuat
   // semua bahan dekat target (±15%), dosis di BB terendah tidak melebihi batas atas. (pure, diuji)
-  function dosedRacikanPlan(items, band) {
+  function dosedRacikanPlan(items, band, rules = {}) {
     const gm = Math.sqrt(band.minKg * band.maxKg);
     let best = null;
     for (let n = 10; n <= 30; n++) {
@@ -420,7 +420,7 @@
       let worst = 0;
       const qty = {};
       for (const k of items) {
-        const r = PEDIATRIC_DOSE_RULES[k];
+        const r = rules[k] || PEDIATRIC_DOSE_RULES[k];
         const u = n / r.mg;
         const cap = Math.floor(r.maxDose * u + 1e-9);
         const q = Math.min(Math.round(r.perKg * gm * u), Math.floor(r.hi * band.minKg * u + 1e-9), cap);
@@ -442,7 +442,7 @@
     return best ? { n: best.n, qty: best.qty } : null;
   }
   function buildDosedRacikan(base, items, band) {
-    const plan = dosedRacikanPlan(items, band);
+    const plan = dosedRacikanPlan(items, band, base.doseRules || {});
     if (!plan) return null;
     const freq = Number(base.doseFreq) || 1;
     return {
@@ -497,6 +497,10 @@
     { prefix: "BARU_AMOXICILLIN_", title: "AMOXICILLIN", name: "amoxicillin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
     { prefix: "BARU_CETIRIZINE_", dosed: true, title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },
     { prefix: "BARU_BAPIL2_", dosed: true, title: "BAPIL 2", name: "batuk pilek 2", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DEXAMETHASONE_05", "CTM_4", "AMBROXOL_30"] },
+    // v0.8.4 (permintaan dokter): batuk pilek dengan CETIRIZINE pengganti CTM (guaifenesin + cetirizine + dexa), 3x sehari.
+    // Cetirizine 0,25 mg/kg/hari dibagi 3 = 0,083 mg/kg/dosis.
+    { prefix: "BARU_BAPIL_CTZ_", dosed: true, minKg: 4, title: "BAPIL CETIRIZIN", name: "batuk pilek cetirizin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["GUAIFENESIN_100", "CETIRIZINE_10", "DEXAMETHASONE_05"],
+      doseRules: { CETIRIZINE_10: { mg: 10, perKg: 0.083, lo: 0.067, hi: 0.1, maxDose: 3.33, text: "0,25 mg/kg/hari dibagi 3" } } },
     // v0.8.0 (permintaan dokter): puyer antasida anak >=4 tahun, 3x sehari sebelum makan.
     { prefix: "BARU_ANTASIDA_", dosed: true, minKg: 8, title: "ANTASIDA ANAK", name: "antasida", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET"] },
   ];
@@ -523,7 +527,7 @@
   for (const s of CHILD_PUYER_SERIES.filter((x) => x.dosed)) {
     for (const band of dosedBands(s.maxKg, s.minKg)) {
       const key = s.prefix + bandKey(band);
-      const tpl = buildDosedRacikan(RACIKAN_TEMPLATES[key], s.items.map((it) => (typeof it === "string" ? it : it.item)), band);
+      const tpl = buildDosedRacikan({ ...RACIKAN_TEMPLATES[key], ...(s.doseRules ? { doseRules: s.doseRules } : {}) }, s.items.map((it) => (typeof it === "string" ? it : it.item)), band);
       if (tpl) RACIKAN_TEMPLATES[key] = tpl;
       else delete RACIKAN_TEMPLATES[key];
     }
@@ -739,6 +743,14 @@
           type: "weight-racikan",
           prefix: "BARU_BAPIL2_",
           title: "RACIKAN BAPIL 2",
+          population: "child",
+        },
+        {
+          key: "BAPIL_CETIRIZIN_ANAK",
+          label: "Racikan Bapil Cetirizin (tanpa CTM) — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_BAPIL_CTZ_",
+          title: "RACIKAN BAPIL CETIRIZIN",
           population: "child",
         },
         {
@@ -1236,7 +1248,7 @@
   {
     const REGROUP = [
       ["NYERI_DEMAM", "Analgesik / NSAID", ["PARACETAMOL_DEWASA", "PARACETAMOL_ANAK", "IBUPROFEN_400", "IBUPROFEN_ANAK", "DICLOFENAC_50", "ASAM_MEFENAMAT_500_DEWASA"]],
-      ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
+      ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "BAPIL_CETIRIZIN_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
       ["ALERGI_STEROID", "Antihistamin / Kortikosteroid", ["CETIRIZINE_10_DEWASA", "CETIRIZINE_RACIKAN_BARU", "LORATADINE_10_DEWASA", "CTM_4_DEWASA", "DEXAMETHASONE_05", "METHYLPREDNISOLONE_4_DEWASA"]],
       ["ANTIINFEKSI", "Antibiotik / Antivirus", ["AMOXICILLIN_500_DEWASA", "AMOXICILLIN_SYRUP", "AMOXICILLIN_500_RACIKAN_BARU", "CEFADROXIL_500_DEWASA", "CEFADROXIL_SYRUP", "CEFADROXIL_PUYER_ANAK", "CIPROFLOXACIN_500_DEWASA", "METRONIDAZOLE_500_DEWASA", "ACYCLOVIR_400_DEWASA"]],
       ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "ANTASIDA_SYRUP_ANAK", "ANTASIDA_PUYER_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
@@ -3797,6 +3809,26 @@
 
   // ---------------- RACIKAN ----------------
   // Satuan template lama -> Jenis Racikan Medisin. (pure, diuji)
+  // v0.8.4 (permintaan dokter): puyer berisi >=2 obat dinamai singkatan obatnya,
+  // mis. "GG-CTM-DEXA". (pure, diuji)
+  const DRUG_SHORT = [
+    [/PARACETAMOL/, "PCT"], [/IBUPROFEN/, "IBU"], [/GUAIFENESIN/, "GG"], [/\bCTM\b|CHLORPHENIRAMIN/, "CTM"],
+    [/DEXAMETHASON/, "DEXA"], [/AMBROXOL/, "AMB"], [/CETIRIZIN/, "CTZ"], [/DOMPERIDON/, "DOMP"],
+    [/RANITIDIN/, "RANI"], [/ANTASIDA/, "ANTS"], [/AMOXICILLIN/, "AMOX"], [/CEFADROXIL/, "CFD"],
+    [/METHYLPREDNISOLON/, "MP"], [/SALBUTAMOL/, "SALB"], [/LORATADIN/, "LORA"], [/ZINC/, "ZINC"],
+  ];
+  function drugShortName(itemKey) {
+    const t = String(ITEMS[itemKey]?.target || itemKey).toUpperCase();
+    const hit = DRUG_SHORT.find(([re]) => re.test(t));
+    return hit ? hit[1] : splitProductPrefix(t).base.split(/\s+/)[0];
+  }
+  function racikanShortName(tpl) {
+    if (!tpl || racikanJenisFor(tpl) !== "kertas_puyer") return "";
+    const drugs = (tpl.ingredients || []).filter((i) => i.item !== "POT_PLASTIK" && ITEMS[i.item]?.unit !== "pcs");
+    if (drugs.length < 2) return "";
+    return [...new Set(drugs.map((i) => drugShortName(i.item)))].join("-");
+  }
+
   function racikanJenisFor(tpl) {
     const unit = norm(tpl?.unit || "pulvis");
     if (unit === "oles") return "pot_salep";
@@ -3854,7 +3886,7 @@
       );
     }
     const signa = matchSignaMaster(rk.signa_opt, racikanSignaFor(tpl));
-    rk.form.racikan_nama = tpl.name || title;
+    rk.form.racikan_nama = racikanShortName(tpl) || tpl.name || title;
     lastAutoRacikan.rk = rk;
     lastAutoRacikan.name = rk.form.racikan_nama;
     rk.form.racikan_jenis = racikanJenisFor(tpl);
@@ -4224,7 +4256,8 @@
     ]
       .filter(Boolean)
       .join(" · ");
-    return `<div class="ak-live-preview-racikan"><div class="akr-head"><b>${escapePreviewHtml(tpl.title || tpl.name || r.sourceLabel || "RACIKAN")}</b><span class="akr-form">${escapePreviewHtml(form)}</span></div><div class="akr-signa">${signa}</div><div class="akr-ing">${ing || "<span>Komponen racikan tidak tersedia.</span>"}</div></div>`;
+    const shortNm = racikanShortName(tpl);
+    return `<div class="ak-live-preview-racikan"><div class="akr-head"><b>${escapePreviewHtml(tpl.title || tpl.name || r.sourceLabel || "RACIKAN")}${shortNm ? ` · ${escapePreviewHtml(shortNm)}` : ""}</b><span class="akr-form">${escapePreviewHtml(form)}</span></div><div class="akr-signa">${signa}</div><div class="akr-ing">${ing || "<span>Komponen racikan tidak tersedia.</span>"}</div></div>`;
   }
 
   // v0.7.1: peringatan obat untuk bayi <6 bulan atau <7 kg (dosis TIDAK diubah). (pure, diuji)
@@ -7589,6 +7622,8 @@
       pediatricQty,
       dosedRacikanPlan,
       productOptionsFromList,
+      racikanShortName,
+      drugShortName,
       packageItemDrugKeys,
       itemStockBlock,
       itemAgeBlock,

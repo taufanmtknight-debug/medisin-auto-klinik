@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.4 — 2026-11-18
+
+- **Racikan Bapil Cetirizin (tanpa CTM)** untuk anak, 3x sehari setelah makan (permintaan dokter):
+  - Isi: guaifenesin + cetirizine + dexametason.
+  - Dosis cetirizine 0,25 mg/kg/hari dibagi 3. Tablet bulat, jumlah bungkus menyesuaikan.
+  - Untuk BB 4–40 kg, termasuk bayi <6 bulan.
+- **Nama racikan puyer berisi ≥2 obat = singkatan obat penyusunnya**, mis. "GG-CTM-DEXA", "DEXA-CTM-AMB", "GG-CTZ-DEXA", "ANTS-RANI".
+  - Nama ini dipakai sebagai Nama Racikan di Medisin dan tampil di preview.
+  - Racikan 1 obat dan salep tetap memakai nama lama.
+
 ## v0.8.3 — 2026-11-18
 
 - **Obat stok 0 tidak bisa dipilih** di panel Paket Resep Golongan (permintaan dokter). Pilihannya tampil abu-abu dengan keterangan merah "stok 0: NAMA OBAT".
