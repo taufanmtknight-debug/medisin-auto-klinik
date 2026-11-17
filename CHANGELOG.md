@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.0 — 2026-11-17 (alur cepat, permintaan dokter)
+
+- **SIMPAN SEMUA** (menu / Alt+S): setelah dokter mereview, menekan SIMPAN milik Medisin berurutan Diagnosa → Resep → BHP → Tindakan, dengan dialog konfirmasi lebih dulu. Selama menyimpan, komponen hanya boleh mengirim ke 4 alamat simpan itu; PCare (rest2), PUT, dan alamat lain diblokir. **SUBMIT, SUBMIT BPJS/SATUSEHAT, PROSES KASIR dan simpan racikan tetap tidak pernah ditekan** (dijaga tes). Gagal per bagian dilaporkan.
+- **RESEP ULANG** (Alt+U): ambil diagnosa + obat satuan dari kunjungan terakhir pasien (riwayat 2 tahun), konfirmasi, lalu isi; obat diambil dari stok penjamin SEKARANG (nama UMUM → "BPJS -- …" untuk pasien BPJS). Racikan tidak diulang. Tidak menyimpan.
+- **JALAN OTOMATIS**: saat halaman pasien dibuka (sekali per kunjungan, hanya bila belum ada diagnosa/resep tersimpan) RESUME + DIAGNOSIS + Paket Resep langsung berjalan. Bisa dimatikan di menu.
+- **SURAT SAKIT** (Alt+K): pilih 1/2/3 hari → buka tab SURAT dan isi "Perlu Istirahat", tanggal mulai hari ini, tampilkan diagnosa. Dokter yang menekan SIMPAN/CETAK. Rujukan BPJS tidak diotomatiskan (lewat PCare).
+- **EDUKASI per diagnosis**: kolom Edukasi diisi bila kosong (45 diagnosis bawaan), ikut tersimpan saat SUBMIT.
+- **PASIEN BERIKUTNYA** (Alt+N): konfirmasi → buka antrean POLI DOKTER → tekan PELAYANAN untuk pasien menunggu pertama (atau beri tahu bila kosong).
+- Shortcut: Alt+R RESUME+DIAGNOSIS, Alt+P Paket Resep, Alt+U, Alt+S, Alt+K, Alt+N.
+
 ## v0.3.2 — 2026-11-17 (koreksi dokter)
 
 - **Salbutamol (tablet/puyer) dihapus** dan tidak pernah disarankan (dijaga tes). Asma kembali hanya Methylprednisolone.
