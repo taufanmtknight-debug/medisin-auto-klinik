@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.2
+// @version      0.8.3
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.2";
+  const SCRIPT_VERSION_FALLBACK = "0.8.3";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -3541,6 +3541,91 @@
   }
 
   // Opsi obat Medisin untuk satu item template; null bila dokter melewati.
+  // v0.8.3 (permintaan dokter): stok obat untuk panel Paket Resep. Satu GET daftar
+  // produk Medisin (sama dengan pencarian obat Medisin, tanpa batas 15 hasil). Hanya baca.
+  let stockCache = null;
+  async function loadStockOptions() {
+    const p = pasienAktif();
+    const vm = findVm("Resep") || findVm("Racikan");
+    if (!p || !vm) return null;
+    const cacheKey = `${p.penjamin_nm}|${p.antrian_poli_id}`;
+    if (stockCache && stockCache.key === cacheKey && Date.now() - stockCache.at < 180000) return stockCache.opts;
+    const params = { filter: "", penjamin: p.penjamin_nm, kategori_type: null, poli_id: p.antrian_poli_id, rowsPerPage: 5000 };
+    const r = await vm.$klinik.get("master/product", { params });
+    const opts = productOptionsFromList(r?.data?.data);
+    stockCache = { key: cacheKey, at: Date.now(), opts };
+    return opts;
+  }
+  // Bentuk opsi sama seperti loadObat Medisin: stok = jumlah stock_system lokasi non-gudang. (pure, diuji)
+  function productOptionsFromList(list) {
+    return (Array.isArray(list) ? list : []).map((a) => {
+      const det = (a?.produk_detail || []).filter((d) => Number(d.is_storage) === 0);
+      return {
+        label: a?.produk_nm,
+        value: a,
+        produk_id: a?.produk_id,
+        totalStockSystem: det.reduce((sum, d) => sum + (Number(d.stock_system) || 0), 0),
+        hasValidDetails: det.length > 0,
+      };
+    });
+  }
+  // Produk Medisin untuk item master tanpa dialog: pemetaan dokter dulu, lalu nama persis penjamin. (pure)
+  function productForItemSync(opts, itemKey, penjamin) {
+    const mine = loadDrugMap()?.[penjamin]?.[itemKey] || "";
+    if (mine) {
+      const hit = exactProduct(opts, mine);
+      if (hit) return hit;
+    }
+    return pickProductForPenjamin(opts, itemBaseName(itemKey), penjamin);
+  }
+  // Obat-obat (ITEMS) yang dipakai satu pilihan Paket Resep, untuk umur ini. (pure)
+  function packageItemDrugKeys(item, ageYears) {
+    const keys = new Set();
+    const add = (k) => k && keys.add(k);
+    const child = !(Number.isFinite(ageYears) && ageYears > 17);
+    const ageOk = (k) => !child || !PEDIATRIC_MIN_AGE[k] || (Number.isFinite(ageYears) && ageYears >= PEDIATRIC_MIN_AGE[k]);
+    switch (item?.type) {
+      case "recipe":
+        for (const m of RECIPE_TEMPLATES[item.recipeKey]?.medicines || []) add(m.item);
+        break;
+      case "recipe-inline":
+        add(item.medicine?.item);
+        break;
+      case "racikan-static":
+        for (const i of item.tpl?.ingredients || []) add(i.item);
+        break;
+      case "weight-racikan":
+        for (const [k, t] of Object.entries(RACIKAN_TEMPLATES))
+          if (k.startsWith(item.prefix)) for (const i of t.ingredients || []) if (ageOk(i.item)) add(i.item);
+        break;
+      case "weight-syrup":
+        for (const [k, t] of Object.entries(RECIPE_TEMPLATES))
+          if (k.startsWith(item.prefix)) for (const m of t.medicines || []) add(m.item);
+        break;
+      case "age-antacid":
+        add("ANTASIDA_TABLET");
+        break;
+      case "age-antacid-syrup":
+        add("ANTASIDA_SYRUP");
+        break;
+      case "age-zinc":
+        add("ZINC_20");
+        break;
+    }
+    return [...keys];
+  }
+  // "" bila boleh; selain itu keterangan "stok 0: …". Obat yang tidak ditemukan tidak dikunci. (pure, diuji)
+  function itemStockBlock(item, opts, penjamin, ageYears) {
+    if (!opts) return "";
+    const empty = [];
+    for (const k of packageItemDrugKeys(item, ageYears)) {
+      if (ITEMS[k]?.regularOnly) continue;
+      const opt = productForItemSync(opts, k, penjamin);
+      if (opt && !(Number(opt.totalStockSystem) > 0)) empty.push(splitProductPrefix(productName(opt)).base);
+    }
+    return empty.length ? `stok 0: ${empty.join(", ")}` : "";
+  }
+
   async function resolveProduct(vm, itemKey, kategori) {
     const base = itemBaseName(itemKey);
     const penjamin = currentPenjamin();
@@ -5208,6 +5293,11 @@
       const choice = (i) => {
         const [name, sub] = String(i.label).split(" — ");
         const blocked = group === "child" && itemAgeBlock(i, ageYears);
+        const noStock = !blocked && itemStockBlock(i, stockOpts, stockPenjamin, ageYears);
+        if (noStock) {
+          selectedMedicationKeys.delete(i.key);
+          return `<label class="ak-package-choice akm-age-blocked akm-no-stock" title="${escapePreviewHtml(noStock)}"><input type="checkbox" disabled><span class="akm-name">${escapePreviewHtml(name)}<small>${escapePreviewHtml(noStock)}</small></span></label>`;
+        }
         if (blocked) {
           selectedMedicationKeys.delete(i.key);
           return `<label class="ak-package-choice akm-age-blocked" title="${escapePreviewHtml(blocked)}"><input type="checkbox" disabled><span class="akm-name">${escapePreviewHtml(name)}<small>${escapePreviewHtml(Number.isFinite(ageYears) ? `hanya umur ≥${ageLabelYears(i.minAgeYears)}` : "umur belum terbaca")}</small></span></label>`;
@@ -5255,6 +5345,19 @@
         : "Belum ada obat dipilih";
       updateMedicationGroupLivePreview(shade, ageYears);
     };
+    // v0.8.3: stok dibaca sekali saat panel dibuka; pilihan stok 0 tidak bisa dicentang.
+    let stockOpts = null;
+    const stockPenjamin = currentPenjamin();
+    loadStockOptions()
+      .then((opts) => {
+        if (!opts || !shade.isConnected) return;
+        stockOpts = opts;
+        if (currentGroup) {
+          renderItemsForGroup(currentGroup);
+          updateSelected();
+        }
+      })
+      .catch((e) => LOG("Stok obat tidak terbaca: " + (e?.message || e)));
     const showGroup = (group) => {
       if (group !== currentGroup) {
         currentGroup = group;
@@ -6142,6 +6245,7 @@
     .akm .ak-package-anamnesis{margin-top:0!important;min-height:64px!important;}
     .akm-items{display:flex!important;flex-direction:column!important;gap:12px!important;}
     .ak-package-choice.akm-age-blocked{opacity:.45!important;cursor:not-allowed!important;}
+    .ak-package-choice.akm-no-stock small{color:#c62828!important;font-weight:700!important;}
     .akm-group-title{margin:0 0 6px!important;font:800 10.5px ${AK_FONT}!important;color:#64748b!important;text-transform:uppercase!important;letter-spacing:.5px!important;}
     .akm-choices{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important;}
     .akm .ak-package-choice{min-height:40px!important;padding:7px 10px!important;gap:9px!important;font:600 13px/1.3 ${AK_FONT}!important;color:#1e293b!important;}
@@ -7484,6 +7588,9 @@
       dosedBands,
       pediatricQty,
       dosedRacikanPlan,
+      productOptionsFromList,
+      packageItemDrugKeys,
+      itemStockBlock,
       itemAgeBlock,
       stripIngredientsForAge,
       drugStrengthMg,

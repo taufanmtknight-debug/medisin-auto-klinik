@@ -459,7 +459,10 @@ test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare t
   const LOCK_FETCH = 'await fetch(`${LOCK_URL}?t=${Date.now()}`, { method: "GET", cache: "no-store", credentials: "omit" })';
   assert.equal(source.split(LOCK_FETCH).length, 2, "fetch kunci tepat satu, GET tanpa kredensial");
   assert.match(source, /const LOCK_URL =\s*"https:\/\/raw\.githubusercontent\.com\/[^"]+\/kunci\.json";/);
-  const outside = (source.slice(0, a) + source.slice(b)).replace(LOCK_FETCH, "").replace(/\/\/[^\n]*/g, "");
+  // v0.8.3: satu-satunya akses API di luar blok tulis = GET daftar produk (baca stok).
+  const STOCK_GET = 'const r = await vm.$klinik.get("master/product", { params });';
+  assert.ok(source.includes(STOCK_GET));
+  const outside = (source.slice(0, a) + source.slice(b)).replace(LOCK_FETCH, "").replace(STOCK_GET, "").replace(/\/\/[^\n]*/g, "");
   // Di luar blok: tidak ada pemanggilan simpan/submit/API tulis sama sekali.
   for (const re of [
     /\.onSave\w*\s*\(/,
@@ -831,3 +834,25 @@ test("v0.7.1: info racikan ringkas: bentuk, signa, mg per bungkus & mg/kg; perin
   assert.deepEqual(plain(api.infantCautions(p, 0.3, 4.5)), []);
   assert.deepEqual(plain(api.infantCautions(p, 3, 14)), [], "bukan bayi: tanpa peringatan");
 });
+
+test("v0.8.3: obat stok 0 di Medisin tidak bisa dipilih di Paket Resep (keterangan stok 0)", () => {
+  const { api } = makeApp();
+  const prod = (nm, stocks) => ({ produk_id: nm, produk_nm: nm, produk_detail: stocks.map((x) => ({ is_storage: x[0], stock_system: x[1] })) });
+  const opts = api.productOptionsFromList([
+    prod("BPJS -- CTM 4 MG", [[0, 0], [1, 500]]), // stok gudang tidak dihitung
+    prod("BPJS -- GUAIFENESIN 100 MG", [[0, 40]]),
+    prod("BPJS -- DEXAMETHASONE 0,5 MG", [[0, 90]]),
+    prod("CTM 4 MG", [[0, 99]]), // stok UMUM tidak dipakai untuk BPJS
+    prod("BPJS -- PARACETAMOL 500 MG", [[0, 7]]),
+  ]);
+  assert.equal(opts[0].totalStockSystem, 0);
+  const it = (k) => api.MEDICATION_ITEMS_FLAT.find((x) => x.key === k);
+  assert.equal(api.itemStockBlock(it("ISPA_ANAK"), opts, "BPJS", 3), "stok 0: CTM 4 MG");
+  // Bayi <6 bulan: CTM tidak dipakai, jadi ISPA tetap bisa dipilih.
+  assert.equal(api.itemStockBlock(it("ISPA_ANAK"), opts, "BPJS", 0.3), "");
+  assert.equal(api.itemStockBlock(it("PARACETAMOL_ANAK"), opts, "BPJS", 3), "");
+  // Obat tidak ditemukan di daftar: tidak dikunci (dokter memilih lewat dialog).
+  assert.equal(api.itemStockBlock(it("AMOXICILLIN_SYRUP"), opts, "BPJS", 3), "");
+  assert.equal(api.itemStockBlock(it("ISPA_ANAK"), null, "BPJS", 3), "");
+});
+
