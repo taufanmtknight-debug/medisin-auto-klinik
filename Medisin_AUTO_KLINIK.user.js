@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.7
+// @version      0.8.8
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.7";
+  const SCRIPT_VERSION_FALLBACK = "0.8.8";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -372,7 +372,7 @@
     IBUPROFEN_400: { mg: 400, perKg: 7.5, lo: 5, hi: 10, maxDose: 400, text: "5-10 mg/kg/dosis" },
     DOMPERIDONE_10: { mg: 10, perKg: 0.2, lo: 0.15, hi: 0.25, maxDose: 10, text: "maks 0,25 mg/kg/dosis" },
     DOMPERIDONE_SYRUP: { mg: 1, perKg: 0.2, lo: 0.15, hi: 0.25, maxDose: 10, inc: 0.5, text: "maks 0,25 mg/kg/dosis (1 mg/mL)" },
-    CTM_4: { mg: 4, perKg: 0.1, lo: 0.08, hi: 0.12, maxDose: 2, text: "0,1 mg/kg/dosis (0,3 mg/kg/hari), maks 2 mg" },
+    CTM_4: { mg: 4, perKg: 0.08, lo: 0.04, hi: 0.12, maxDose: 2, text: "dosis minimal ~0,08 mg/kg/dosis, maks 1 tab per 5 kg & 2 mg/dosis" },
     DEXAMETHASONE_05: { mg: 0.5, perKg: 0.0083, lo: 0.006, hi: 0.0125, maxDose: 0.5, text: "dosis minimal ~0,008 mg/kg/dosis (10 kg = 2 tab/12 bungkus)" },
     GUAIFENESIN_100: { mg: 100, perKg: 1.67, lo: 1.2, hi: 2.5, maxDose: 100, text: "dosis minimal ~1,7 mg/kg/dosis (10 kg = 2 tab/12 bungkus)" },
     AMBROXOL_30: { mg: 30, perKg: 0.5, lo: 0.35, hi: 0.75, maxDose: 30, text: "dosis minimal 0,5 mg/kg/dosis (10 kg = 2 tab/12 bungkus)" },
@@ -393,15 +393,25 @@
   };
   const DOSE_BANDS_KG = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 25, 28, 30, 32, 35, 38, 40, 45, 50];
   // v0.8.6 (permintaan dokter): bahan berjumlah minimal tetap per kelipatan 5 kg. (pure, diuji)
-  const FIXED_MIN_ITEMS = ["GUAIFENESIN_100", "AMBROXOL_30", "DEXAMETHASONE_05"];
+  const FIXED_MIN_ITEMS = ["GUAIFENESIN_100", "AMBROXOL_30", "DEXAMETHASONE_05", "CTM_4"];
   // v0.8.7: dosis minimal per kg (10 kg = 2 tablet / 12 bungkus). Tablet = bulat dari BB atas
   // rentang, minimal 1; bila 1 tablet masih > 1,5x dosis minimal di BB terendah, bungkus ditambah.
   const MINIMAL_PER_KG = {
     GUAIFENESIN_100: { mg: 100, perKg: 200 / 120 }, // ~1,7 mg/kg/dosis
     AMBROXOL_30: { mg: 30, perKg: 60 / 120 }, // 0,5 mg/kg/dosis
     DEXAMETHASONE_05: { mg: 0.5, perKg: 1 / 120 }, // ~0,008 mg/kg/dosis
+    // v0.8.8: CTM 1 tablet per 5 kg dalam 10 bungkus (0,08 mg/kg/dosis), bulat ke bawah,
+    // maks 1 tablet per kelipatan 5 kg & maks 2 mg/dosis.
+    CTM_4: { mg: 4, perKg: 0.08, roundDown: true, maxPer5Kg: true, maxDose: 2 },
   };
-  const minimalQty = (k, band, n) => Math.max(1, Math.round((MINIMAL_PER_KG[k].perKg * band.maxKg * n) / MINIMAL_PER_KG[k].mg + 1e-6));
+  const minimalQty = (k, band, n) => {
+    const r = MINIMAL_PER_KG[k];
+    const raw = (r.perKg * band.maxKg * n) / r.mg;
+    let q = r.roundDown ? Math.floor(raw + 1e-6) : Math.round(raw + 1e-6);
+    if (r.maxPer5Kg) q = Math.min(q, Math.ceil(band.maxKg / 5 - 1e-9));
+    if (r.maxDose) q = Math.min(q, Math.floor((r.maxDose * n) / r.mg + 1e-9));
+    return Math.max(1, q);
+  };
   const fixedMinQty = (band, k = "GUAIFENESIN_100", n = 12) => minimalQty(k, band, n);
   function dosedBands(maxKg, minKg = DOSE_BANDS_KG[0]) {
     const edges = DOSE_BANDS_KG.filter((k) => k >= minKg && k <= maxKg);

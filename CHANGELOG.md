@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.8 — 2026-11-18
+
+- **CTM juga dosis paling minimal** (koreksi dokter): ~0,08 mg/kg/dosis, dibulatkan ke bawah, **maks 1 tablet per kelipatan 5 kg** (20 kg = maks 4 tablet) dan maks 2 mg/dosis. Contoh BB 20 kg GG-CTM-DEXA = GG 3, CTM 4, DEXA 3 tablet, 10 bungkus.
+
 ## v0.8.7 — 2026-11-18
 
 - **Koreksi aturan v0.8.6**: guaifenesin, ambroxol, dan dexa sekarang memakai **dosis minimal per kg**. Patokannya BB 10 kg = 2 tablet dalam 12 bungkus.

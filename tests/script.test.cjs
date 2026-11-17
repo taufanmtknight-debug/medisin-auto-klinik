@@ -756,7 +756,7 @@ test("v0.8.7: GG/ambroxol/dexa dosis minimal per kg (10 kg = 2 tab dalam 12 bung
   assert.equal(t10.compoundInstruction, "buat 12");
   assert.deepEqual(plain(t10.ingredients.map((i) => i.quantity)), ["2", "1", "2"]);
   // di bawah 10 kg lebih sedikit (atau bungkus lebih banyak)
-  assert.deepEqual(plain(api.getWeightTemplate("ISPA_ANAK_", 8).tpl.ingredients.map((i) => i.quantity)), ["1", "2", "1"]);
+  assert.deepEqual(plain(api.getWeightTemplate("ISPA_ANAK_", 8).tpl.ingredients.map((i) => i.quantity)), ["1", "1", "1"]);
   for (const p of ["ISPA_ANAK_", "BARU_BAPIL2_", "BARU_BAPIL_CTZ_", "BARU_BAPIL_AMB_CTZ_"])
     for (let kg = 4; kg <= 40; kg += 0.5) {
       const t = api.getWeightTemplate(p, kg).tpl;
@@ -768,3 +768,18 @@ test("v0.8.7: GG/ambroxol/dexa dosis minimal per kg (10 kg = 2 tab dalam 12 bung
       }
     }
 });
+
+test("v0.8.8: CTM dosis minimal: maks 1 tablet per kelipatan 5 kg (20 kg maks 4 tab)", () => {
+  for (const p of ["ISPA_ANAK_", "BARU_BAPIL2_"])
+    for (let kg = 2; kg <= 40; kg += 0.5) {
+      const t = api.getWeightTemplate(p, kg).tpl;
+      const q = Number(t.ingredients.find((i) => i.item === "CTM_4").quantity);
+      const n = api.racikanQtyFor(t);
+      assert.ok(q <= Math.max(1, Math.ceil(kg / 5)), `${p} ${kg} kg: ${q} tab`);
+      assert.ok((4 * q) / n <= 2 + 1e-9, `${p} ${kg} kg: > 2 mg`);
+    }
+  const q20 = (p) => api.getWeightTemplate(p, 20).tpl.ingredients.find((i) => i.item === "CTM_4").quantity;
+  assert.equal(q20("ISPA_ANAK_"), "4");
+  assert.equal(q20("BARU_BAPIL2_"), "4");
+});
+
