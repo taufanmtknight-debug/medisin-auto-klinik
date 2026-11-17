@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.6 — 2026-11-18
+
+- **Guaifenesin, ambroxol, dan dexa di semua racikan = jumlah minimal tetap** (permintaan dokter):
+  - BB ≤10 kg: 2 tablet. BB 11–15 kg: 3 tablet. Naik 1 tablet tiap 5 kg, berapa pun jumlah bungkusnya.
+  - Contoh: BB 10 kg GG-CTZ-DEXA = GG 2, CTZ 1, DEXA 2 tablet, buat 12 bungkus.
+- Jumlah bungkus ditentukan obat lain (CTM/cetirizine). Bila perlu, jumlah bungkus ditambah (maks 30) supaya dosis per bungkus tidak berlebihan.
+- Rentang BB kini berbatas di kelipatan 5 kg (…, 10, 11, …, 15, 16, 18, 20, 22, 25, 28, 30, 32, 35, 38, 40, …).
+
 ## v0.8.5 — 2026-11-18
 
 - **Racikan AMB-CTZ-DEXA (tanpa CTM)** untuk anak BB 4–40 kg (permintaan dokter): ambroxol + cetirizine + dexametason, 3x sehari setelah makan. Dosis cetirizine 0,25 mg/kg/hari dibagi 3, ambroxol 0,5 mg/kg/dosis.

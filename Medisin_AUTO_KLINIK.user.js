@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.5
+// @version      0.8.6
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.5";
+  const SCRIPT_VERSION_FALLBACK = "0.8.6";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -391,7 +391,10 @@
     RANITIDINE_HCL: 2,
     ANTASIDA_TABLET: 4,
   };
-  const DOSE_BANDS_KG = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 25, 28, 31, 35, 40, 45, 50];
+  const DOSE_BANDS_KG = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 25, 28, 30, 32, 35, 38, 40, 45, 50];
+  // v0.8.6 (permintaan dokter): bahan berjumlah minimal tetap per kelipatan 5 kg. (pure, diuji)
+  const FIXED_MIN_ITEMS = ["GUAIFENESIN_100", "AMBROXOL_30", "DEXAMETHASONE_05"];
+  const fixedMinQty = (band) => Math.max(2, Math.ceil(band.maxKg / 5 - 1e-9));
   function dosedBands(maxKg, minKg = DOSE_BANDS_KG[0]) {
     const edges = DOSE_BANDS_KG.filter((k) => k >= minKg && k <= maxKg);
     return edges.slice(1).map((b, i) => ({ index: i + 1, minKg: edges[i], maxKg: b }));
@@ -420,6 +423,17 @@
       let worst = 0;
       const qty = {};
       for (const k of items) {
+        if (FIXED_MIN_ITEMS.includes(k)) {
+          qty[k] = fixedMinQty(band);
+          // tetap tidak melebihi batas atas: bungkus ditambah bila perlu (maks 30)
+          const rf = rules[k] || PEDIATRIC_DOSE_RULES[k];
+          const over = (rf.mg * qty[k]) / n / band.minKg / rf.hi;
+          if (over > 1 + 1e-9) {
+            ok = false;
+            worst = Math.max(worst, over); // tidak bisa di bawah batas: pilih bungkus terbanyak
+          }
+          continue;
+        }
         const r = rules[k] || PEDIATRIC_DOSE_RULES[k];
         const u = n / r.mg;
         const cap = Math.floor(r.maxDose * u + 1e-9);
@@ -7634,6 +7648,8 @@
       dosedBands,
       pediatricQty,
       dosedRacikanPlan,
+      FIXED_MIN_ITEMS,
+      fixedMinQty,
       productOptionsFromList,
       racikanShortName,
       drugShortName,

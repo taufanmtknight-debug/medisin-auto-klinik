@@ -581,11 +581,16 @@ test("v0.8.0: dosis anak per mg/kg, tablet BULAT, jumlah bungkus menyesuaikan", 
     assert.equal(t.duration, String(Math.max(1, Math.round(n / Number(t.doseFreq)))));
     for (const ing of t.ingredients) {
       assert.match(ing.quantity, /^[1-9]\d*$/, `${label} ${ing.item}: ${ing.quantity} bukan bulat`);
+      // v0.8.6: GG/ambroxol/dexa = jumlah minimal tetap (2 tab s.d. 10 kg, +1 tiap 5 kg)
+      if (api.FIXED_MIN_ITEMS.includes(ing.item)) {
+        assert.equal(ing.quantity, String(api.fixedMinQty(t.band)), `${label} ${kg} kg ${ing.item}`);
+        continue;
+      }
       const r = (t.doseRules || {})[ing.item] || api.PEDIATRIC_DOSE_RULES[ing.item];
       const mg = (S[ing.item] * Number(ing.quantity)) / n;
       assert.ok(mg / kg <= r.hi + 1e-9, `${label} ${kg} kg ${ing.item}: ${mg / kg} > ${r.hi}`);
       assert.ok(mg <= r.maxDose + 1e-9, `${label} ${kg} kg ${ing.item}: ${mg} mg > maks`);
-      if (mg < r.maxDose - 1e-9 && kg >= 4) assert.ok(mg / kg >= r.lo * 0.75, `${label} ${kg} kg ${ing.item}: ${mg / kg} terlalu rendah`);
+      if (Number(ing.quantity) < Math.floor((r.maxDose * n) / S[ing.item] + 1e-9) && kg >= 4) assert.ok(mg / kg >= r.lo * 0.75, `${label} ${kg} kg ${ing.item}: ${mg / kg} terlalu rendah`);
     }
   };
   for (const s of api.CHILD_PUYER_SERIES.filter((x) => x.dosed)) {
@@ -744,3 +749,16 @@ test("v0.8.4: racikan bapil cetirizin (tanpa CTM) & nama racikan singkatan obat"
   assert.equal(api.racikanShortName(api.getWeightTemplate("DEMAM_ANAK_", 12).tpl), ""); // 1 obat: nama lama
   assert.equal(api.racikanShortName(api.SALEP_RACIKAN), ""); // salep: nama lama
 });
+
+test("v0.8.6: GG/ambroxol/dexa minimal: 2 tab s.d. 10 kg, 11-15 kg 3 tab, +1 tiap 5 kg", () => {
+  const q = (p, kg, item) => api.getWeightTemplate(p, kg).tpl.ingredients.find((i) => i.item === item).quantity;
+  for (const [kg, tab] of [[4.5, "2"], [10, "2"], [10.5, "3"], [15, "3"], [15.5, "4"], [20, "4"], [21, "5"], [30, "6"]]) {
+    assert.equal(q("BARU_BAPIL_CTZ_", kg, "GUAIFENESIN_100"), tab, kg + " kg GG");
+    assert.equal(q("BARU_BAPIL_CTZ_", kg, "DEXAMETHASONE_05"), tab, kg + " kg dexa");
+    assert.equal(q("BARU_BAPIL_AMB_CTZ_", kg, "AMBROXOL_30"), tab, kg + " kg ambroxol");
+  }
+  // contoh dokter: BB 10 kg GG-CTZ-DEXA = 2 tab GG & dexa walau 12 bungkus
+  const t = api.getWeightTemplate("BARU_BAPIL_CTZ_", 10).tpl;
+  assert.equal(t.compoundInstruction, "buat 12");
+});
+
