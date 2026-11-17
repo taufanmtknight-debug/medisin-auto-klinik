@@ -9,7 +9,7 @@ const { api, source } = loadScript();
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 test("kunci.json: aktif false = terkunci, true = terbuka, rusak = abaikan", () => {
-  const p = (t) => plain(api.parseLockText(t));
+  const p = (t) => { const r = plain(api.parseLockText(t)); if (r) delete r.stamp; return r; };
   assert.deepEqual(p('{"aktif": true, "pesan": ""}'), { locked: false, pesan: "" });
   assert.deepEqual(p('{"aktif": false, "pesan": "Dokter tidak jaga"}'), { locked: true, pesan: "Dokter tidak jaga" });
   assert.equal(p('{"aktif": "tidak"}').locked, true);
@@ -51,4 +51,14 @@ test("v0.6.1 PIN: buka di perangkat ini hanya saat dikunci; PIN tidak tertulis p
   // Kunci jarak jauh dibuka → buka-PIN dihapus.
   assert.match(source, /if \(!next\.locked\) setLocalOpen\(false\);/);
   assert.match(source, /Kunci lagi di perangkat ini/);
+});
+
+test("v0.6.2: buka-PIN batal bila kunci.json diubah lagi (kunci ulang jarak jauh)", () => {
+  const a = api.parseLockText('{"aktif": false, "pesan": "", "kunci_ke": 1}');
+  const b = api.parseLockText('{"aktif": false, "pesan": "", "kunci_ke": 2}');
+  const c = api.parseLockText('{"aktif": false, "pesan": "Dokter tidak jaga", "kunci_ke": 1}');
+  assert.notEqual(a.stamp, b.stamp);
+  assert.notEqual(a.stamp, c.stamp);
+  assert.equal(a.stamp, api.parseLockText('{ "aktif":false,"pesan":"","kunci_ke":1 }').stamp);
+  assert.match(source, /return !!v && v === String\(lockState\?\.stamp \|\| "lama"\);/);
 });

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.2 — 2026-11-17
+
+- Perangkat yang dibuka dengan PIN bisa **dikunci lagi dari jarak jauh** tanpa membuka kunci dulu: cukup ubah `kunci.json` lagi (misalnya naikkan `"kunci_ke"` 1 → 2, atau ganti `"pesan"`). Buka-PIN hanya berlaku untuk isi `kunci.json` saat PIN dimasukkan.
+
 ## v0.6.1 — 2026-11-17
 
 - Saat **dikunci jarak jauh**, tombol 🔒 bisa diketuk untuk memasukkan **PIN dokter**; PIN benar = AUTO KLINIK terbuka **hanya di perangkat itu**. PIN hanya disimpan sebagai hash SHA-256 di script.

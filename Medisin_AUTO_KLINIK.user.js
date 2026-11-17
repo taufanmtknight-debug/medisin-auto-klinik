@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.6.1
+// @version      0.6.2
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.6.1";
+  const SCRIPT_VERSION_FALLBACK = "0.6.2";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -6447,11 +6447,12 @@
       const j = JSON.parse(t);
       if (j && typeof j === "object" && "aktif" in j) {
         const off = j.aktif === false || /^(?:false|tidak|mati|off|0|kunci)$/i.test(String(j.aktif).trim());
-        return { locked: off, pesan: String(j.pesan || "") };
+        // stamp = isi file; bila file diubah lagi (mis. pesan / kunci_ke), buka-PIN batal.
+        return { locked: off, pesan: String(j.pesan || ""), stamp: JSON.stringify(j) };
       }
     } catch (_) {}
     const m = t.match(/"?aktif"?\s*:\s*"?(\w+)"?/i);
-    if (m) return { locked: /^(?:false|tidak|mati|off|0|kunci)$/i.test(m[1]), pesan: "" };
+    if (m) return { locked: /^(?:false|tidak|mati|off|0|kunci)$/i.test(m[1]), pesan: "", stamp: t.replace(/\s+/g, "") };
     return null;
   }
   let lockState = (() => {
@@ -6466,16 +6467,18 @@
   // Buka-PIN berlaku sampai dokter menekan "Kunci lagi" atau kunci jarak jauh dibuka.
   const PIN_HASH = "ab3c5ba5484877e28875f458dbdfcd9b74aeb6a787bd8e251782e7ae2741125b";
   const LOCAL_OPEN_KEY = "auto-klinik-medisin:buka-pin";
+  // Buka-PIN berlaku hanya untuk isi kunci.json yang sama seperti saat PIN dimasukkan.
   function readLocalOpen() {
     try {
-      return localStorage.getItem(LOCAL_OPEN_KEY) === "1";
+      const v = localStorage.getItem(LOCAL_OPEN_KEY);
+      return !!v && v === String(lockState?.stamp || "lama");
     } catch (_) {
       return false;
     }
   }
   function setLocalOpen(on) {
     try {
-      if (on) localStorage.setItem(LOCAL_OPEN_KEY, "1");
+      if (on) localStorage.setItem(LOCAL_OPEN_KEY, String(lockState?.stamp || "lama"));
       else localStorage.removeItem(LOCAL_OPEN_KEY);
     } catch (_) {}
   }
