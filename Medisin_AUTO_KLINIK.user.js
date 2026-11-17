@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.4.3
+// @version      0.4.4
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.4.3";
+  const SCRIPT_VERSION_FALLBACK = "0.4.4";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -1094,6 +1094,34 @@
       ],
     },
   ];
+
+  // v0.4.4 (permintaan dokter): golongan diringkas. Obat (kunci & dosis) sama; hanya
+  // kelompok tampilannya digabung. Obat yang belum terdaftar di sini masuk "Lain-lain".
+  {
+    const REGROUP = [
+      ["NYERI_DEMAM", "Analgesik / NSAID", ["PARACETAMOL_DEWASA", "PARACETAMOL_ANAK", "IBUPROFEN_400", "IBUPROFEN_ANAK", "DICLOFENAC_50", "ASAM_MEFENAMAT_500_DEWASA"]],
+      ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
+      ["ALERGI_STEROID", "Antihistamin / Kortikosteroid", ["CETIRIZINE_10_DEWASA", "CETIRIZINE_RACIKAN_BARU", "LORATADINE_10_DEWASA", "CTM_4_DEWASA", "DEXAMETHASONE_05", "METHYLPREDNISOLONE_4_DEWASA"]],
+      ["ANTIINFEKSI", "Antibiotik / Antivirus", ["AMOXICILLIN_500_DEWASA", "AMOXICILLIN_SYRUP", "AMOXICILLIN_500_RACIKAN_BARU", "CEFADROXIL_500_DEWASA", "CEFADROXIL_SYRUP", "CEFADROXIL_PUYER_ANAK", "CIPROFLOXACIN_500_DEWASA", "METRONIDAZOLE_500_DEWASA", "ACYCLOVIR_400_DEWASA"]],
+      ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
+      ["KRONIS", "Obat Kronis (HT, DM, Kolesterol, Asam Urat)", ["AMLODIPINE_5", "AMLODIPINE_10", "CAPTOPRIL_12_5", "CAPTOPRIL_25", "METFORMIN_500", "GLIMEPIRIDE_1", "GLIMEPIRIDE_2", "SIMVASTATIN_10", "ALLOPURINOL_100"]],
+      ["VITAMIN_SARAF", "Vitamin / Saraf", ["VITAMIN_B_COMPLEX", "CALCIUM_500", "TABLET_TAMBAH_DARAH", "MECOBALAMIN_500_DEWASA", "BETAHISTIN_6_DEWASA"]],
+      ["MATA_TELINGA", "Mata / Telinga", ["CENDO_XITROL_TETES", "CENDO_LYTEERS_TETES", "RECO_SALEP_MATA", "RECO_TETES_TELINGA"]],
+      ["KULIT_TOPIKAL", "Kulit / Topikal", ["MICONAZOLE_SALEP", "ACYCLOVIR_SALEP", "BEDAK_SALICYL", "SALEP_RACIKAN_BARU"]],
+    ];
+    const all = MEDICATION_GROUP_PACKAGES.flatMap((g) => g.items);
+    const used = new Set();
+    const groups = REGROUP.map(([key, label, keys]) => ({
+      key,
+      label,
+      items: keys
+        .map((k) => all.find((i) => i.key === k))
+        .filter((i) => i && !used.has(i.key) && used.add(i.key)),
+    })).filter((g) => g.items.length);
+    const rest = all.filter((i) => !used.has(i.key));
+    if (rest.length) groups.push({ key: "LAIN_LAIN", label: "Lain-lain", items: rest });
+    MEDICATION_GROUP_PACKAGES.splice(0, MEDICATION_GROUP_PACKAGES.length, ...groups);
+  }
 
   // SARAN OBAT DARI KELUHAN UTAMA (Paket Resep Golongan)
   // Kata kunci di Keluhan Utama (cadangan: Anamnesa) -> pilihan obat (key

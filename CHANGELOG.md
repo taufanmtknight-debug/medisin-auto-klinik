@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.4 — 2026-11-17 (golongan obat diringkas)
+
+- Paket Resep: 16 golongan digabung menjadi 9 — Analgesik / NSAID; Batuk-Pilek; Antihistamin / Kortikosteroid; Antibiotik / Antivirus; Saluran Cerna; Obat Kronis (HT, DM, Kolesterol, Asam Urat); Vitamin / Saraf; Mata / Telinga; Kulit / Topikal. "Obat Lain (FKTP)" dan "Obat Lain (tambahan)" dibagi ke golongan yang sesuai. Obat, dosis, dan saran tidak berubah.
+
 ## v0.4.3 — 2026-11-17 (Paket Resep ringkas)
 
 - Warna lebih tegas: judul tiap bagian dan tiap golongan obat berwarna penuh (teks putih), pilihan tercentang oranye tua, batas kotak lebih jelas.

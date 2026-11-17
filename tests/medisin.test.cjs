@@ -653,3 +653,14 @@ test("pilihan & pencarian diagnosis", async () => {
   assert.deepEqual(plain(a.api.selectedIcdEntries().map((e) => e.code)), ["I10"]);
   assert.deepEqual(a.saveCalls, []);
 });
+
+test("Paket Resep: 9 golongan ringkas, tiap obat tepat di satu golongan, tanpa 'Lain-lain'", () => {
+  const { api } = loadScript();
+  const g = api.MEDICATION_GROUP_PACKAGES;
+  assert.equal(g.length, 9);
+  assert.ok(!g.some((x) => x.key === "LAIN_LAIN"));
+  const keys = g.flatMap((x) => x.items.map((i) => i.key));
+  assert.equal(new Set(keys).size, keys.length);
+  assert.ok(keys.includes("PARACETAMOL_DEWASA") && keys.includes("IBUPROFEN_400"));
+  assert.equal(g[0].items.some((i) => i.key === "IBUPROFEN_400"), true);
+});
