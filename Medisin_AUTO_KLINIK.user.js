@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.5.0
+// @version      0.5.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.5.0";
+  const SCRIPT_VERSION_FALLBACK = "0.5.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -399,7 +399,7 @@
     // Cefadroxil puyer: pola jumlah tablet sama seperti Amoxicillin, tetapi 2x sehari.
     { prefix: "CEFADROXIL_ANAK_", title: "CEFADROXIL", name: "cefadroxil", maxKg: 40, duration: "5", doseFreq: "2", instruction: "setelah makan", items: ["CEFADROXIL_500"] },
     // v7.4.2: racikan "baru" (BB <= 40 kg). Dosis/instruksi mengikuti input pengguna.
-    { prefix: "BARU_LAMBUNG_MUAL_", title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET", "RANITIDINE_HCL"] },
+    { prefix: "BARU_LAMBUNG_MUAL_", title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] }, // v0.5.1: ranitidin dosis terendah (1/2 tablet per 5 kg)
     { prefix: "BARU_MUAL_MUNTAH_", title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
     { prefix: "BARU_AMOXICILLIN_", title: "AMOXICILLIN", name: "amoxicillin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
     { prefix: "BARU_CETIRIZINE_", title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },
@@ -419,7 +419,7 @@
         unit: "Pulvis",
         instruction: s.instruction,
         compoundInstruction: "buat 10",
-        ingredients: s.items.map((item) => ({ item, quantity: String(band.index) })),
+        ingredients: s.items.map((it) => (typeof it === "string" ? { item: it, quantity: String(band.index) } : { item: it.item, quantity: String(band.index * it.perBand) })),
       };
     }
   }
@@ -3156,8 +3156,9 @@
     return signaText(tpl?.doseFreq, tpl?.doseAmount, unitWord, instruction);
   }
 
-  // Buka dialog "Tambah Racikan", isi semuanya, lalu TUNGGU dokter menekan SIMPAN
-  // (atau menutup dialog). Script tidak menyimpan racikan.
+  // Buka dialog "Tambah Racikan", isi semuanya, lalu (v0.5.1, disetujui dokter
+  // 2026-11-17) langsung tekan SIMPAN dialog itu bila semua bahan masuk & stok cukup,
+  // agar racikan berikutnya bisa lanjut. Bila tidak, TUNGGU dokter menyimpan/menutup.
   const lastAutoRacikan = { rk: null, name: "" };
   async function addRacikan(tpl) {
     const rk = needVm("Racikan", "Racikan");
@@ -3206,9 +3207,19 @@
       if (Number.isFinite(stock) && Number(row.jumlah) > stock)
         lowStock.push(`${productName(part.opt)} (butuh ${row.jumlah}, stok ${stock})`);
     }
-    LOG(`Racikan ${title} terisi di dialog (belum disimpan)`);
+    LOG(`Racikan ${title} terisi di dialog`);
+    if (!missing.length && !lowStock.length) {
+      await sleep(300);
+      const saved = await saveRacikanDialog(rk).catch((e) => ({ errors: [String(e?.message || e)] }));
+      if (!rk.modal_add) {
+        notify(`Racikan ${title} tersimpan. Review di daftar Racikan.`, "success", 6000);
+        await sleep(300);
+        return { saved: true };
+      }
+      LOG(`Racikan ${title} belum tersimpan otomatis: ${(saved?.errors || []).join("; ")}`);
+    }
     notify(
-      `Racikan terisi di dialog Tambah Racikan: ${title}. Periksa, lalu tekan SIMPAN di dialog itu (atau tutup bila batal).` +
+      `Racikan terisi di dialog Tambah Racikan: ${title}. Belum tersimpan: periksa, lalu tekan SIMPAN di dialog itu (atau tutup bila batal).` +
         (missing.length ? ` Bahan belum masuk: ${missing.join(", ")}.` : "") +
         (lowStock.length ? ` STOK KURANG: ${lowStock.join(", ")}.` : ""),
       lowStock.length ? "error" : missing.length ? "warn" : "info",
@@ -4860,7 +4871,7 @@
       else await setConsciousness();
 
       // RESUME + DIAGNOSIS: Diagnosa + ICD dari Keluhan Utama, SEBELUM layanan
-      if (withDiagnosis) {
+      if (isResume) {
         const vitals = assessVitals(readVitalsFromPage(), getPatientAgeFromIdentity()?.ageYears ?? null);
         dxDetected = detectDiagnosisFromComplaint(readChiefComplaintFromPage().text, { vitals });
         const dx = dxDetected && DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key);
@@ -4951,9 +4962,18 @@
         return;
       }
 
+      const dxNote = !isResume
+        ? ""
+        : dxResult
+          ? ` Diagnosa: ${DIAGNOSIS_TEMPLATES.find((d) => d.key === dxDetected.key)?.label || dxDetected.key} (ICD ${dxResult.icdCode}), dari "${dxDetected.keyword}".`
+          : dxError?.existing
+            ? ` Diagnosa sudah terisi (${dxError.existing.map((e) => e.code).join(", ")}).`
+            : dxError
+              ? ` Diagnosa gagal diisi: ${dxError.message}`
+              : " Diagnosa tidak dikenali dari keluhan; isi manual.";
       notify(
         (isResume
-          ? "AUTO KLINIK - RESUME selesai. Diagnosa dan Resep tidak diisi. Silakan periksa sebelum SUBMIT."
+          ? "AUTO KLINIK - RESUME selesai." + dxNote + " Resep tidak diisi. Silakan periksa sebelum SUBMIT."
           : "AUTO KLINIK - ISPA DEWASA selesai. Draft sudah diisi; silakan periksa sebelum SIMPAN/SUBMIT.") + failNote,
         failed.length ? "warn" : "success",
         failed.length ? 20000 : 9000,
@@ -6075,7 +6095,7 @@
   ];
   // Selama satu simpan, permintaan tulis komponen hanya boleh ke alamat di atas;
   // PCare (rest2) selalu diblokir. globalThis.__AK_DRY_RUN__ = uji tanpa mengirim.
-  async function withGuard(vm, fn, { waitMs = 4000 } = {}) {
+  async function withGuard(vm, fn, { waitMs = 4000, allow = SAVE_ALLOWED } = {}) {
     const log = { calls: [], errors: [] };
     const dry = !!globalThis.__AK_DRY_RUN__;
     const klinik = vm.$klinik;
@@ -6088,7 +6108,7 @@
     const guard = {
       get: (...a) => klinik.get(...a),
       post: (url, body, cfg) => {
-        if (!SAVE_ALLOWED.some((re) => re.test(String(url)))) return blocked(url);
+        if (!allow.some((re) => re.test(String(url)))) return blocked(url);
         log.calls.push(String(url));
         const pr = dry ? Promise.resolve({ data: { message: "UJI: tidak dikirim", data: [] } }) : klinik.post(url, body, cfg);
         pending.push(
@@ -6127,6 +6147,20 @@
         if (saved[i]) Object.defineProperty(vm, k, saved[i]);
       });
     }
+  }
+
+  // SIMPAN di dialog Tambah Racikan (permintaan dokter 2026-11-17): hanya 2 alamat
+  // simpan racikan Medisin. Menunggu dialog tertutup (= tersimpan) maks 15 detik.
+  const RACIKAN_SAVE_ALLOWED = [/^master\/kunjungan\/racikan$/, /^racikan-kunjungan\/add\/[^/]+$/];
+  async function saveRacikanDialog(rk) {
+    return withGuard(
+      rk,
+      async () => {
+        await rk.onSubmitAdd();
+        await waitFor(() => !rk.modal_add, 15000, 200, "racikan tersimpan").catch(() => {});
+      },
+      { allow: RACIKAN_SAVE_ALLOWED },
+    );
   }
 
   // Jasa konsultasi diisi lalu LANGSUNG disimpan (permintaan dokter 2026-11-17), seperti
@@ -6425,6 +6459,7 @@
       pendingSections,
       saveSections,
       withGuard,
+      saveRacikanDialog,
       saveAll,
       repeatLastVisit,
       fillSickLetter,

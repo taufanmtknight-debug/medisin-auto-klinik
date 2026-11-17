@@ -76,7 +76,8 @@ test("regresi dosis berbasis BB sama dengan v8.1.6", () => {
   assert.deepEqual(plain(qty("MUAL_MUNTAH_ANAK_", 20)), ["4"]);
   assert.deepEqual(plain(qty("CEFADROXIL_ANAK_", 40)), ["8"]);
   assert.deepEqual(plain(qty("BARU_BAPIL2_", 9)), ["2", "2", "2"]);
-  assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 33)), ["7", "7"]);
+  assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 33)), ["7", "3.5"]); // v0.5.1: ranitidin dosis terendah
+  assert.deepEqual(plain(qty("BARU_LAMBUNG_MUAL_", 4)), ["1", "0.5"]);
 
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 3), "1");
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 9), "2");

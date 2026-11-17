@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.1 — 2026-11-17 (masukan dokter)
+
+- **RESUME saja** sekarang juga mengisi Diagnosa (ICD) dari keluhan; Paket Resep tidak dibuka. Diagnosa yang sudah diisi dokter tidak diubah.
+- **Racikan langsung tersimpan** (disetujui dokter): setelah dialog Tambah Racikan terisi, script menekan SIMPAN dialog itu lalu lanjut ke racikan berikutnya; dokter mereview semuanya di akhir. Hanya alamat simpan racikan yang diizinkan (SUBMIT/PCare tetap diblokir). Bila ada bahan tidak ditemukan atau stok kurang, racikan TIDAK disimpan dan menunggu dokter seperti dulu.
+- **Puyer lambung + mual**: Ranitidin memakai dosis terendah, 1/2 tablet per 5 kg BB dalam 10 bungkus (sebelumnya 1 tablet per 5 kg). Antasida tidak berubah.
+
 ## v0.5.0 — 2026-11-17 (pengetahuan keluhan → diagnosis diperluas)
 
 - **116 diagnosis baru** (total 161) untuk keluhan umum FKTP: napas/THT, mata, saluran cerna & mulut, kemih/kelamin/kebidanan, otot-tulang-saraf, kulit, infeksi tropis (DBD, malaria, chikungunya, campak, flu Singapura, leptospirosis), anak, jiwa, jantung-pembuluh, serta pemeriksaan umum (KB, ANC, surat sehat, sunat). Semua dengan kode ICD-10 dan edukasi.

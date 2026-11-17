@@ -373,10 +373,9 @@ test("resume: anamnesa & prognosa hanya diisi bila kosong", async () => {
   assert.equal(b.p.jenis_prognosa, "01");
 });
 
-test("racikan: dialog diisi lalu MENUNGGU dokter; script tidak menyimpan", async () => {
-  const { api, Racikan, saveCalls } = makeApp();
-  const pct = Object.keys(api.ITEMS).find((k) => api.itemBaseName(k) === "PARACETAMOL 500 MG");
-  const tpl = {
+function racikanTpl(api, item, quantity = "5") {
+  const pct = Object.keys(api.ITEMS).find((k) => api.itemBaseName(k) === item);
+  return {
     title: "DEMAM ANAK",
     name: "puyer demam",
     duration: "3",
@@ -385,25 +384,64 @@ test("racikan: dialog diisi lalu MENUNGGU dokter; script tidak menyimpan", async
     unit: "Pulvis",
     instruction: "setelah makan",
     compoundInstruction: "buat 10",
-    ingredients: [{ item: pct, quantity: "5" }],
+    ingredients: [{ item: pct, quantity }],
   };
+}
+function fakeRacikanSave(Racikan, sent) {
+  const base = { post: async (url) => (sent.push(url), { data_resep: { id_resep_kunjungan: 9 } }) };
+  Racikan.$klinik = base;
+  Racikan.$rest2 = { post: async (url) => sent.push("REST2 " + url) };
+  Racikan.onSubmitAdd = async function () {
+    const e = await this.$klinik.post("master/kunjungan/racikan", {});
+    if (e.data_resep) {
+      await this.$klinik.post("racikan-kunjungan/add/" + ID, {});
+      this.modal_add = false;
+    }
+  };
+  return base;
+}
+
+test("racikan v0.5.1: dialog diisi lalu SIMPAN dialog ditekan (disetujui dokter), lanjut", async () => {
+  const { api, Racikan } = makeApp();
+  const sent = [];
+  const base = fakeRacikanSave(Racikan, sent);
+  const r = await api.addRacikan(racikanTpl(api, "PARACETAMOL 500 MG"));
+  assert.equal(r.saved, true);
+  assert.equal(Racikan.modal_add, false);
+  assert.equal(Racikan.form.racikan_nama, "puyer demam");
+  assert.equal(Racikan.form.racikan_qty, 10);
+  assert.equal(Racikan.input_racikan[0].jumlah, 5);
+  assert.deepEqual(sent, ["master/kunjungan/racikan", "racikan-kunjungan/add/" + ID]);
+  assert.equal(Racikan.$klinik, base, "penjaga dilepas");
+});
+
+test("racikan: stok kurang -> TIDAK disimpan, menunggu dokter", async () => {
+  const { api, Racikan } = makeApp();
+  const sent = [];
+  fakeRacikanSave(Racikan, sent);
   let done = false;
-  const job = api.addRacikan(tpl).then(() => {
-    done = true;
-  });
+  const job = api.addRacikan(racikanTpl(api, "CTM 4 MG", "8")).then(() => (done = true));
   await new Promise((r) => setTimeout(r, 900));
   assert.equal(done, false, "masih menunggu dokter");
   assert.equal(Racikan.modal_add, true);
-  assert.equal(Racikan.form.racikan_nama, "puyer demam");
-  assert.equal(Racikan.form.racikan_jenis, "kertas_puyer");
-  assert.equal(Racikan.form.racikan_qty, 10);
-  assert.equal(Racikan.form.racikan_signa, "3 X 1 SETELAH MAKAN");
-  assert.equal(Racikan.input_racikan[0].val.produk_id, 1);
-  assert.equal(Racikan.input_racikan[0].jumlah, 5);
+  assert.deepEqual(sent, []);
   Racikan.modal_add = false; // dokter menekan SIMPAN / menutup dialog
   await job;
-  assert.equal(done, true);
-  assert.deepEqual(saveCalls, []);
+});
+
+test("racikan: simpan dialog hanya boleh ke alamat racikan", async () => {
+  const { api, Racikan } = makeApp();
+  const sent = [];
+  fakeRacikanSave(Racikan, sent);
+  Racikan.onSubmitAdd = async function () {
+    await this.$klinik.post("master/kunjungan/" + ID + "/submit", {}).catch(() => {});
+    await this.$rest2.post("pcare", {}).catch(() => {});
+  };
+  Racikan.modal_add = true;
+  const g = await api.saveRacikanDialog(Racikan);
+  assert.deepEqual(sent, []);
+  assert.equal(g.errors.length, 2);
+  Racikan.modal_add = false;
 });
 
 test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare tidak pernah", () => {
@@ -433,11 +471,12 @@ test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare t
   ])
     assert.doesNotMatch(outside, re);
   // Di seluruh script: SUBMIT, SUBMIT BPJS/SATUSEHAT, PCare, racikan simpan TIDAK PERNAH.
+  // v0.5.1: kecuali SIMPAN dialog Tambah Racikan (onSubmitAdd), hanya di dalam blok.
   for (const re of [
-    /\.onSubmit\w*\s*\(/,
+    /\.onSubmit(?!Add\b)\w*\s*\(/,
     /\.saveData\s*\(/,
     /submitBpjs|submitSatuSehat|onSaveTindakanBpjs|onSaveResepBpjs|onSubmitRujukan\w*/,
-    /\.onSaveRacikan\s*\(|\.onSubmitAdd\s*\(/,
+    /\.onSaveRacikan\s*\(/,
     /\.\$rest2\b/,
     /\bfetch\s*\(/,
     /XMLHttpRequest/,
@@ -450,6 +489,7 @@ test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare t
   const posts = [...block.matchAll(/(\w+)\.post\s*\(\s*([^,)]*)/g)].map((m) => m[1] + ":" + m[2].trim());
   assert.deepEqual(posts.sort(), ['ax:"admin/pelayanan/pasien/riwayat"', "klinik:url"]);
   assert.equal([...block.matchAll(/\.doPelayanan\s*\(/g)].length, 1);
+  assert.deepEqual([...block.matchAll(/\.(onSubmit\w*)\s*\(/g)].map((m) => m[1]), ["onSubmitAdd"]);
 });
 
 // ---------------- v0.4.0 alur cepat ----------------
