@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.3.1
+// @version      0.3.2
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.3.1";
+  const SCRIPT_VERSION_FALLBACK = "0.3.2";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -87,7 +87,6 @@
     BEDAK_SALICYL: { keyword: "BPJS -- BEDAK SALICYL", target: "BPJS -- BEDAK SALICYL", unit: "pcs", usageUnit: "TABUR" },
     ACYCLOVIR_400: { keyword: "BPJS -- ACYCLOVIR 400 MG", target: "BPJS -- ACYCLOVIR 400 MG", unit: "tablet" },
     SCOPMA: { keyword: "BPJS -- SCOPMA", target: "BPJS -- SCOPMA", unit: "tablet" },
-    SALBUTAMOL_2: { keyword: "BPJS -- SALBUTAMOL 2 MG", target: "BPJS -- SALBUTAMOL 2 MG", unit: "tablet" },
     TABLET_TAMBAH_DARAH: { keyword: "BPJS -- TABLET TAMBAH DARAH", target: "BPJS -- TABLET TAMBAH DARAH", unit: "tablet" },
     MECOBALAMIN_500: { keyword: "BPJS -- MECOBALAMIN 500 MG", target: "BPJS -- MECOBALAMIN 500 MG", unit: "tablet" },
     SUPERHOID_SUPP: { keyword: "BPJS -- SUPERHOID SUPP", target: "BPJS -- SUPERHOID SUPP", unit: "suppositoria", usageUnit: "SUPP" },
@@ -893,14 +892,14 @@
           label: "Ciprofloxacin 500 mg",
           type: "recipe-inline",
           population: "adult",
-          medicine: { item: "CIPROFLOXACIN_500", freq: "2", dose: "1", days: "5", total: "10", instruction: "SETELAH MAKAN" },
+          medicine: { item: "CIPROFLOXACIN_500", freq: "2", dose: "1", days: "3", total: "6", instruction: "SETELAH MAKAN" },
         },
         {
           key: "METRONIDAZOLE_500_DEWASA",
           label: "Metronidazole 500 mg",
           type: "recipe-inline",
           population: "adult",
-          medicine: { item: "METRONIDAZOLE_500", freq: "3", dose: "1", days: "5", total: "15", instruction: "SETELAH MAKAN" },
+          medicine: { item: "METRONIDAZOLE_500", freq: "3", dose: "1", days: "3", total: "9", instruction: "SETELAH MAKAN" },
         },
       ],
     },
@@ -980,20 +979,18 @@
           medicine: { item: "MICONAZOLE_SALEP", freq: "2", dose: "1", days: "14", total: "1", instruction: "DI LESI" } },
         { key: "ACYCLOVIR_SALEP", label: "Acyclovir salep", type: "recipe-inline", population: "all",
           medicine: { item: "ACYCLOVIR_SALEP", freq: "5", dose: "1", days: "5", total: "1", instruction: "DI LESI" } },
-        { key: "ACYCLOVIR_400_DEWASA", label: "Acyclovir 400 mg (zoster/varisela)", type: "recipe-inline", population: "adult",
-          medicine: { item: "ACYCLOVIR_400", freq: "5", dose: "2", days: "7", total: "70", instruction: "" } },
+        { key: "ACYCLOVIR_400_DEWASA", label: "Acyclovir 400 mg (zoster)", type: "recipe-inline", population: "adult",
+          medicine: { item: "ACYCLOVIR_400", freq: "5", dose: "2", days: "3", total: "30", instruction: "" } },
         { key: "BEDAK_SALICYL", label: "Bedak salicyl", type: "recipe-inline", population: "all",
           medicine: { item: "BEDAK_SALICYL", freq: "2", dose: "1", days: "7", total: "1", instruction: "DI KULIT YANG GATAL" } },
         { key: "SCOPMA_DEWASA", label: "Scopma (kolik/kram perut)", type: "recipe-inline", population: "adult",
           medicine: { item: "SCOPMA", freq: "3", dose: "1", days: "3", total: "9", instruction: "JIKA NYERI PERUT" } },
-        { key: "SALBUTAMOL_2_DEWASA", label: "Salbutamol 2 mg", type: "recipe-inline", population: "adult",
-          medicine: { item: "SALBUTAMOL_2", freq: "3", dose: "1", days: "3", total: "9", instruction: "JIKA SESAK" } },
         { key: "TABLET_TAMBAH_DARAH", label: "Tablet tambah darah", type: "recipe-inline", population: "adult",
-          medicine: { item: "TABLET_TAMBAH_DARAH", freq: "1", dose: "1", days: "30", total: "30", instruction: "SETELAH MAKAN" } },
+          medicine: { item: "TABLET_TAMBAH_DARAH", freq: "1", dose: "1", days: "5", total: "5", instruction: "SETELAH MAKAN" } },
         { key: "MECOBALAMIN_500_DEWASA", label: "Mecobalamin (kesemutan)", type: "recipe-inline", population: "adult",
-          medicine: { item: "MECOBALAMIN_500", freq: "3", dose: "1", days: "5", total: "15", instruction: "SETELAH MAKAN" } },
+          medicine: { item: "MECOBALAMIN_500", freq: "3", dose: "1", days: "2", total: "6", instruction: "SETELAH MAKAN" } },
         { key: "SUPERHOID_SUPP", label: "Superhoid supp (wasir)", type: "recipe-inline", population: "adult",
-          medicine: { item: "SUPERHOID_SUPP", freq: "2", dose: "1", days: "5", total: "10", instruction: "DI ANUS" } },
+          medicine: { item: "SUPERHOID_SUPP", freq: "1", dose: "1", days: "1", total: "1", instruction: "DI ANUS" } },
       ],
     },
     {
@@ -1197,12 +1194,6 @@
       label: "Asam urat kambuh (gout)",
       pattern: /\bgout\b|pirai|asam\s+urat\s+(?:kambuh|nyeri|sakit|bengkak)|jempol\s+kaki\s+(?:bengkak|nyeri|sakit|merah)/,
       adult: ["DICLOFENAC_50"],
-      child: [],
-    },
-    {
-      label: "Sesak / mengi",
-      pattern: /\basma\b|mengi|\bsesak\b/,
-      adult: ["SALBUTAMOL_2_DEWASA"],
       child: [],
     },
     {
@@ -1441,7 +1432,7 @@
     { key: "RINITIS_ALERGI", label: "Rinitis alergi", icd: ["J30.4", "J30.3"], query: "allergic rhinitis",
       adult: ["LORATADINE_10_DEWASA"], child: ["CETIRIZINE_RACIKAN_BARU"] },
     { key: "ASMA", label: "Asma", icd: ["J45.9", "J45"], query: "asthma",
-      adult: ["SALBUTAMOL_2_DEWASA", "METHYLPREDNISOLONE_4_DEWASA"], child: [] },
+      adult: ["METHYLPREDNISOLONE_4_DEWASA"], child: [] },
     { key: "KONJUNGTIVITIS", label: "Konjungtivitis", icd: ["H10.9", "H10"], query: "conjunctivitis",
       adult: ["CENDO_XITROL_TETES"], child: ["CENDO_XITROL_TETES"] },
     { key: "GASTRITIS", label: "Gastritis", icd: ["K29.7", "K29"], query: "gastritis",

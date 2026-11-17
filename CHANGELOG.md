@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.2 — 2026-11-17 (koreksi dokter)
+
+- **Salbutamol (tablet/puyer) dihapus** dan tidak pernah disarankan (dijaga tes). Asma kembali hanya Methylprednisolone.
+- Superhoid supp 1 x 1, 1 buah. Metronidazole 500: 3 x 1, 9 tablet. Ciprofloxacin 500: 2 x 1, 6 tablet. Tablet tambah darah: 5 tablet. Mecobalamin: 3 x 1, 6 tablet. Acyclovir 400 (zoster): 5 x 2 selama 3 hari, 30 tablet.
+
 ## v0.3.1 — 2026-11-17 (salep mata + pengetahuan keluhan tambahan)
 
 Obat dipilih hanya dari master obat BPJS klinik yang berstok (135 nama dicek di Medisin).

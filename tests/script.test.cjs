@@ -627,10 +627,31 @@ test("v0.3.1 Medisin: keluhan baru -> diagnosis & obat", () => {
   assert.deepEqual(s("ambeien"), ["SUPERHOID_SUPP"]);
   assert.ok(s("cacar api di pinggang").includes("ACYCLOVIR_400_DEWASA"));
   assert.ok(s("panu di punggung").includes("MICONAZOLE_SALEP"));
-  assert.ok(s("sesak napas, mengi").includes("SALBUTAMOL_2_DEWASA"));
-  // Obat yang hanya untuk dewasa tidak disarankan untuk anak.
-  assert.ok(!s("sesak napas", "child").includes("SALBUTAMOL_2_DEWASA"));
   // 1 minidose saja (permintaan dokter).
   const x = api.MEDICATION_ITEMS_FLAT.find((i) => i.key === "CENDO_XITROL_TETES");
   assert.equal(x.medicine.total, "1");
+});
+
+test("v0.3.2 Medisin: salbutamol (tablet/puyer) tidak pernah disarankan", () => {
+  // Permintaan dokter 2026-11-17: hapus salbutamol tab/puyer, jangan pernah disarankan.
+  const all = JSON.stringify({
+    items: api.ITEMS, picker: api.MEDICATION_ITEMS_FLAT, rules: api.ANAMNESIS_SUGGESTION_RULES.map((r) => [r.adult, r.child]),
+    dx: api.DIAGNOSIS_TEMPLATES, racikan: api.RACIKAN_TEMPLATES, recipes: api.RECIPE_TEMPLATES,
+  });
+  assert.doesNotMatch(all, /salbutamol/i);
+  for (const t of ["sesak napas, mengi", "asma kambuh"]) {
+    for (const g of ["adult", "child"]) assert.deepEqual(plain(api.suggestMedicationsFromAnamnesis(t, g)).keys.filter((k) => /SALBU/.test(k)), []);
+  }
+});
+
+test("v0.3.2 Medisin: jumlah obat sesuai permintaan dokter", () => {
+  const tot = (k) => api.MEDICATION_ITEMS_FLAT.find((i) => i.key === k).medicine;
+  assert.equal(tot("SUPERHOID_SUPP").total, "1");
+  assert.equal(tot("SUPERHOID_SUPP").freq, "1");
+  assert.equal(tot("METRONIDAZOLE_500_DEWASA").total, "9");
+  assert.equal(tot("CIPROFLOXACIN_500_DEWASA").total, "6");
+  assert.equal(tot("TABLET_TAMBAH_DARAH").total, "5");
+  assert.equal(tot("MECOBALAMIN_500_DEWASA").total, "6");
+  assert.equal(tot("ACYCLOVIR_400_DEWASA").days, "3");
+  assert.equal(tot("ACYCLOVIR_400_DEWASA").total, "30");
 });
