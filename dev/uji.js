@@ -93,6 +93,7 @@
     POT_PLASTIK: { keyword: "BPJS -- POT PLASTIK 30 CC", target: "BPJS -- POT PLASTIK 30 CC", unit: "pcs" },
     CETIRIZINE_10: { keyword: "BPJS -- CETIRIZINE HCL 10 MG", target: "BPJS -- CETIRIZINE HCL 10 MG", unit: "tablet" },
     ANTASIDA_TABLET: { keyword: "BPJS -- ANTASIDA DOEN TABLET", target: "BPJS -- ANTASIDA DOEN TABLET", unit: "tablet" },
+    ANTASIDA_SYRUP: { keyword: "BPJS -- ANTASIDA DOEN SYRUP", target: "BPJS -- ANTASIDA DOEN SYRUP", unit: "bottle" },
     PARACETAMOL_500: { keyword: "BPJS -- PARACETAMOL 500 MG", target: "BPJS -- PARACETAMOL 500 MG", unit: "tablet" },
     DICLOFENAC_50: { keyword: "BPJS -- NATRIUM DICLOFENAC 50 MG", target: "BPJS -- NATRIUM DICLOFENAC 50 MG", unit: "tablet" },
     DEXAMETHASONE_05: { keyword: "BPJS -- DEXAMETHASONE 0,5 MG", target: "BPJS -- DEXAMETHASONE 0,5 MG", unit: "tablet" },
@@ -511,6 +512,16 @@
     return null;
   }
 
+  // v0.8.0 (permintaan dokter): antasida sirup hanya >=4 th: 4-<6 th 2,5 mL, 6-12 th 5 mL, >12 th 10 mL, 3x sehari ac.
+  function makeAntasidaSyrupAnakRecipe(ageYears) {
+    if (!Number.isFinite(ageYears) || ageYears < 4) return null;
+    const dose = ageYears < 6 ? "2.5" : ageYears <= 12 ? "5" : "10";
+    return {
+      title: `ANTASIDA SIRUP ANAK ${ageYears < 6 ? "4-6" : ageYears <= 12 ? "6-12" : ">12"} TAHUN`,
+      medicines: [{ item: "ANTASIDA_SYRUP", freq: "3", dose, days: "", total: "1", instruction: "SEBELUM MAKAN" }],
+    };
+  }
+
   function makeZincChildRecipe(ageYears) {
     if (ageYears == null) return null;
     if (ageYears < 0.5) {
@@ -760,6 +771,13 @@
           key: "ANTASIDA_ANAK",
           label: "Antasida DOEN tablet — Anak ≥4 th (umur)",
           type: "age-antacid",
+          population: "child",
+          minAgeYears: 4,
+        },
+        {
+          key: "ANTASIDA_SYRUP_ANAK",
+          label: "Antasida DOEN sirup — Anak ≥4 th (umur)",
+          type: "age-antacid-syrup",
           population: "child",
           minAgeYears: 4,
         },
@@ -1171,7 +1189,7 @@
       ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
       ["ALERGI_STEROID", "Antihistamin / Kortikosteroid", ["CETIRIZINE_10_DEWASA", "CETIRIZINE_RACIKAN_BARU", "LORATADINE_10_DEWASA", "CTM_4_DEWASA", "DEXAMETHASONE_05", "METHYLPREDNISOLONE_4_DEWASA"]],
       ["ANTIINFEKSI", "Antibiotik / Antivirus", ["AMOXICILLIN_500_DEWASA", "AMOXICILLIN_SYRUP", "AMOXICILLIN_500_RACIKAN_BARU", "CEFADROXIL_500_DEWASA", "CEFADROXIL_SYRUP", "CEFADROXIL_PUYER_ANAK", "CIPROFLOXACIN_500_DEWASA", "METRONIDAZOLE_500_DEWASA", "ACYCLOVIR_400_DEWASA"]],
-      ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "ANTASIDA_PUYER_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
+      ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "ANTASIDA_SYRUP_ANAK", "ANTASIDA_PUYER_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
       ["KRONIS", "Obat Kronis (HT, DM, Kolesterol, Asam Urat)", ["AMLODIPINE_5", "AMLODIPINE_10", "CAPTOPRIL_12_5", "CAPTOPRIL_25", "METFORMIN_500", "GLIMEPIRIDE_1", "GLIMEPIRIDE_2", "SIMVASTATIN_10", "ALLOPURINOL_100"]],
       ["VITAMIN_SARAF", "Vitamin / Saraf", ["VITAMIN_B_COMPLEX", "CALCIUM_500", "TABLET_TAMBAH_DARAH", "MECOBALAMIN_500_DEWASA", "BETAHISTIN_6_DEWASA"]],
       ["MATA_TELINGA", "Mata / Telinga", ["CENDO_XITROL_TETES", "CENDO_LYTEERS_TETES", "RECO_SALEP_MATA", "RECO_TETES_TELINGA"]],
@@ -4057,7 +4075,7 @@
         const qUnit = String(info.unit || "").replace(/^tablet$/i, "tab");
         const dose = racikanIngredientDose(tpl, i, weightKg);
         const doseText = dose
-          ? ` <span class="akr-kg">→ ${fmtNum(dose.mg)} mg/${unitWord}${dose.mgKg != null ? ` = ${fmtNum(dose.mgKg, 2)} mg/kg` : ""}${dose.assumed ? " (anggap 150 mg)" : ""}</span>`
+          ? ` <span class="akr-kg">→ ${fmtNum(dose.mg, dose.mg < 1 ? 3 : 1)} mg/${unitWord}${dose.mgKg != null ? ` = ${fmtNum(dose.mgKg, dose.mgKg < 0.1 ? 3 : 2)} mg/kg` : ""}${dose.assumed ? " (anggap 150 mg)" : ""}</span>`
           : "";
         return `<div>• ${escapePreviewHtml(shortDrugName(info.target || i.item))} <b>${escapePreviewHtml(String(i.quantity).replace(".", ","))} ${escapePreviewHtml(qUnit)}</b>${doseText}</div>`;
       })
@@ -4364,6 +4382,7 @@
           break;
         }
         case "age-antacid":
+        case "age-antacid-syrup":
         case "age-zinc":
           // Template dibuat dinamis melalui resolver; target komponennya diaudit
           // dari object resep yang dihasilkan saat runtime.
@@ -4421,7 +4440,7 @@
   function auditMedicationPackageRuntimeResolvers() {
     const errors = [];
     const dynamicItems = MEDICATION_ITEMS_FLAT.filter((x) =>
-      ["weight-racikan", "weight-syrup", "age-antacid", "age-zinc"].includes(
+      ["weight-racikan", "weight-syrup", "age-antacid", "age-antacid-syrup", "age-zinc"].includes(
         x.type,
       ),
     );
@@ -4444,6 +4463,11 @@
         { weightKg: 10, ageYears: 4 },
         { weightKg: 20, ageYears: 10 },
         { weightKg: 30, ageYears: 17 },
+      ],
+      "age-antacid-syrup": [
+        { weightKg: 16, ageYears: 4 },
+        { weightKg: 20, ageYears: 7 },
+        { weightKg: 40, ageYears: 13 },
       ],
       "age-zinc": [
         { weightKg: 5, ageYears: 0.25 },
@@ -4613,6 +4637,12 @@
               racikans: [],
               note: `${item.label}: umur <4 tahun belum memiliki template`,
             };
+      }
+      case "age-antacid-syrup": {
+        const recipe = makeAntasidaSyrupAnakRecipe(ageYears);
+        return recipe
+          ? { medicines: [...recipe.medicines], racikans: [] }
+          : { medicines: [], racikans: [], note: `${item.label}: hanya untuk umur ≥4 tahun` };
       }
       case "age-zinc": {
         const recipe = makeZincChildRecipe(ageYears);
