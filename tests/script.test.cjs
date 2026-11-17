@@ -736,6 +736,10 @@ test("v0.8.4: racikan bapil cetirizin (tanpa CTM) & nama racikan singkatan obat"
   assert.equal(plain(api.resolveMedicationItem(it, 5, 0.3)).racikans.length, 1);
   assert.equal(api.getWeightTemplate("BARU_BAPIL_CTZ_", 3.5), null);
   assert.equal(api.racikanShortName(api.getWeightTemplate("ISPA_ANAK_", 12).tpl), "GG-CTM-DEXA");
+  assert.equal(api.racikanShortName(api.getWeightTemplate("BARU_BAPIL2_", 12).tpl), "AMB-CTM-DEXA");
+  const ac = api.getWeightTemplate("BARU_BAPIL_AMB_CTZ_", 10).tpl;
+  assert.equal(api.racikanShortName(ac), "AMB-CTZ-DEXA");
+  assert.ok(api.MEDICATION_ITEMS_FLAT.some((x) => x.key === "BAPIL_AMB_CTZ_ANAK"));
   assert.equal(api.racikanShortName(api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 20).tpl), "ANTS-RANI");
   assert.equal(api.racikanShortName(api.getWeightTemplate("DEMAM_ANAK_", 12).tpl), ""); // 1 obat: nama lama
   assert.equal(api.racikanShortName(api.SALEP_RACIKAN), ""); // salep: nama lama

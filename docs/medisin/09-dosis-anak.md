@@ -1,4 +1,4 @@
-# Dosis anak AUTO KLINIK v0.8.4 (untuk dievaluasi dokter)
+# Dosis anak AUTO KLINIK v0.8.5 (untuk dievaluasi dokter)
 
 Dihitung otomatis per mg/kg (permintaan dokter 2026-11-18). 1 bungkus sekali minum.
 
@@ -31,6 +31,8 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 
 - v0.8.4: Racikan Bapil Cetirizin (GG-CTZ-DEXA) = guaifenesin + cetirizin + dexa, 3x sehari; cetirizin 0,25 mg/kg/hari dibagi 3 (0,083 mg/kg/dosis, maks 3,3 mg/dosis); mulai BB 4 kg.
 - Nama racikan puyer berisi ≥2 obat = singkatan: PCT, IBU, GG (guaifenesin), CTM, DEXA, AMB (ambroxol), CTZ (cetirizin), DOMP, RANI, ANTS (antasida), AMOX, CFD (cefadroxil).
+
+- v0.8.5: Racikan AMB-CTZ-DEXA = ambroxol + cetirizin + dexa, 3x sehari, cetirizin sama seperti GG-CTZ-DEXA; mulai BB 4 kg. Urutan singkatan: pengencer dahak (GG/AMB), antihistamin (CTM/CTZ), lalu DEXA.
 
 
 ### Racikan ISPA — 3x sehari
@@ -257,6 +259,29 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 | >28-31 kg | 11 | 11 | 3 | 10 | Guaifenesin 100 mg (3,23–3,57/kg); Cetirizin 2,7 mg (0,088–0,097/kg); Dexa 0,455 mg (0,015–0,016/kg) |
 | >31-35 kg | 10 | 10 | 3 | 10 | Guaifenesin 100 mg (2,86–3,23/kg); Cetirizin 3 mg (0,086–0,097/kg); Dexa 0,5 mg (0,014–0,016/kg) |
 | >35-40 kg | 10 | 10 | 3 | 10 | Guaifenesin 100 mg (2,5–2,86/kg); Cetirizin 3 mg (0,075–0,086/kg); Dexa 0,5 mg (0,013–0,014/kg) |
+
+### AMB-CTZ-DEXA — 3x sehari
+
+| BB | Bungkus | Ambroxol (tab) | Cetirizin (tab) | Dexa (tab) | Per bungkus |
+|---|---|---|---|---|---|
+| 4-5 kg | 25 | 2 | 1 | 3 | Ambroxol 2,4 mg (0,48–0,6/kg); Cetirizin 0,4 mg (0,08–0,1/kg); Dexa 0,06 mg (0,012–0,015/kg) |
+| >5-6 kg | 20 | 2 | 1 | 3 | Ambroxol 3 mg (0,5–0,6/kg); Cetirizin 0,5 mg (0,083–0,1/kg); Dexa 0,075 mg (0,012–0,015/kg) |
+| >6-7 kg | 17 | 2 | 1 | 3 | Ambroxol 3,5 mg (0,5–0,59/kg); Cetirizin 0,588 mg (0,084–0,098/kg); Dexa 0,088 mg (0,013–0,015/kg) |
+| >7-8 kg | 15 | 2 | 1 | 3 | Ambroxol 4 mg (0,5–0,57/kg); Cetirizin 0,667 mg (0,083–0,095/kg); Dexa 0,1 mg (0,013–0,014/kg) |
+| >8-9 kg | 13 | 2 | 1 | 3 | Ambroxol 4,6 mg (0,51–0,58/kg); Cetirizin 0,769 mg (0,085–0,096/kg); Dexa 0,115 mg (0,013–0,014/kg) |
+| >9-10 kg | 12 | 2 | 1 | 3 | Ambroxol 5 mg (0,5–0,56/kg); Cetirizin 0,833 mg (0,083–0,093/kg); Dexa 0,125 mg (0,013–0,014/kg) |
+| >10-11 kg | 10 | 2 | 1 | 3 | Ambroxol 6 mg (0,55–0,6/kg); Cetirizin 1 mg (0,091–0,1/kg); Dexa 0,15 mg (0,014–0,015/kg) |
+| >11-12 kg | 10 | 2 | 1 | 3 | Ambroxol 6 mg (0,5–0,55/kg); Cetirizin 1 mg (0,083–0,091/kg); Dexa 0,15 mg (0,012–0,014/kg) |
+| >12-14 kg | 10 | 2 | 1 | 4 | Ambroxol 6 mg (0,43–0,5/kg); Cetirizin 1 mg (0,071–0,083/kg); Dexa 0,2 mg (0,014–0,017/kg) |
+| >14-16 kg | 15 | 4 | 2 | 7 | Ambroxol 8 mg (0,5–0,57/kg); Cetirizin 1,3 mg (0,083–0,095/kg); Dexa 0,233 mg (0,015–0,017/kg) |
+| >16-18 kg | 13 | 4 | 2 | 7 | Ambroxol 9,2 mg (0,51–0,58/kg); Cetirizin 1,5 mg (0,085–0,096/kg); Dexa 0,269 mg (0,015–0,017/kg) |
+| >18-20 kg | 12 | 4 | 2 | 7 | Ambroxol 10 mg (0,5–0,56/kg); Cetirizin 1,7 mg (0,083–0,093/kg); Dexa 0,292 mg (0,015–0,016/kg) |
+| >20-22 kg | 10 | 3 | 2 | 6 | Ambroxol 9 mg (0,41–0,45/kg); Cetirizin 2 mg (0,091–0,1/kg); Dexa 0,3 mg (0,014–0,015/kg) |
+| >22-25 kg | 10 | 4 | 2 | 7 | Ambroxol 12 mg (0,48–0,55/kg); Cetirizin 2 mg (0,08–0,091/kg); Dexa 0,35 mg (0,014–0,016/kg) |
+| >25-28 kg | 10 | 4 | 2 | 8 | Ambroxol 12 mg (0,43–0,48/kg); Cetirizin 2 mg (0,071–0,08/kg); Dexa 0,4 mg (0,014–0,016/kg) |
+| >28-31 kg | 11 | 5 | 3 | 10 | Ambroxol 13,6 mg (0,44–0,49/kg); Cetirizin 2,7 mg (0,088–0,097/kg); Dexa 0,455 mg (0,015–0,016/kg) |
+| >31-35 kg | 10 | 5 | 3 | 10 | Ambroxol 15 mg (0,43–0,48/kg); Cetirizin 3 mg (0,086–0,097/kg); Dexa 0,5 mg (0,014–0,016/kg) |
+| >35-40 kg | 10 | 6 | 3 | 10 | Ambroxol 18 mg (0,45–0,51/kg); Cetirizin 3 mg (0,075–0,086/kg); Dexa 0,5 mg (0,013–0,014/kg) |
 
 ### Racikan Antasida (≥4 th) — 3x sehari
 

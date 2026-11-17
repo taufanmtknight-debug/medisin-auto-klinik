@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.4
+// @version      0.8.5
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.4";
+  const SCRIPT_VERSION_FALLBACK = "0.8.5";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -501,6 +501,9 @@
     // Cetirizine 0,25 mg/kg/hari dibagi 3 = 0,083 mg/kg/dosis.
     { prefix: "BARU_BAPIL_CTZ_", dosed: true, minKg: 4, title: "BAPIL CETIRIZIN", name: "batuk pilek cetirizin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["GUAIFENESIN_100", "CETIRIZINE_10", "DEXAMETHASONE_05"],
       doseRules: { CETIRIZINE_10: { mg: 10, perKg: 0.083, lo: 0.067, hi: 0.1, maxDose: 3.33, text: "0,25 mg/kg/hari dibagi 3" } } },
+    // v0.8.5 (permintaan dokter): ambroxol + cetirizine + dexa, 3x sehari.
+    { prefix: "BARU_BAPIL_AMB_CTZ_", dosed: true, minKg: 4, title: "AMB-CTZ-DEXA", name: "batuk pilek amb ctz", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMBROXOL_30", "CETIRIZINE_10", "DEXAMETHASONE_05"],
+      doseRules: { CETIRIZINE_10: { mg: 10, perKg: 0.083, lo: 0.067, hi: 0.1, maxDose: 3.33, text: "0,25 mg/kg/hari dibagi 3" } } },
     // v0.8.0 (permintaan dokter): puyer antasida anak >=4 tahun, 3x sehari sebelum makan.
     { prefix: "BARU_ANTASIDA_", dosed: true, minKg: 8, title: "ANTASIDA ANAK", name: "antasida", maxKg: 40, duration: "3", doseFreq: "3", instruction: "ac", items: ["ANTASIDA_TABLET"] },
   ];
@@ -731,7 +734,7 @@
       items: [
         {
           key: "ISPA_ANAK",
-          label: "Racikan ISPA Anak (BB)",
+          label: "Racikan ISPA GG-CTM-DEXA — Anak (BB)",
           type: "weight-racikan",
           prefix: "ISPA_ANAK_",
           title: "RACIKAN ISPA ANAK",
@@ -739,7 +742,7 @@
         },
         {
           key: "BAPIL_2_ANAK",
-          label: "Racikan Bapil 2 — Anak (BB)",
+          label: "Racikan Bapil 2 AMB-CTM-DEXA — Anak (BB)",
           type: "weight-racikan",
           prefix: "BARU_BAPIL2_",
           title: "RACIKAN BAPIL 2",
@@ -747,10 +750,18 @@
         },
         {
           key: "BAPIL_CETIRIZIN_ANAK",
-          label: "Racikan Bapil Cetirizin (tanpa CTM) — Anak (BB)",
+          label: "Racikan GG-CTZ-DEXA (tanpa CTM) — Anak (BB)",
           type: "weight-racikan",
           prefix: "BARU_BAPIL_CTZ_",
           title: "RACIKAN BAPIL CETIRIZIN",
+          population: "child",
+        },
+        {
+          key: "BAPIL_AMB_CTZ_ANAK",
+          label: "Racikan AMB-CTZ-DEXA (tanpa CTM) — Anak (BB)",
+          type: "weight-racikan",
+          prefix: "BARU_BAPIL_AMB_CTZ_",
+          title: "RACIKAN AMB-CTZ-DEXA",
           population: "child",
         },
         {
@@ -1248,7 +1259,7 @@
   {
     const REGROUP = [
       ["NYERI_DEMAM", "Analgesik / NSAID", ["PARACETAMOL_DEWASA", "PARACETAMOL_ANAK", "IBUPROFEN_400", "IBUPROFEN_ANAK", "DICLOFENAC_50", "ASAM_MEFENAMAT_500_DEWASA"]],
-      ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "BAPIL_CETIRIZIN_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
+      ["BATUK_PILEK", "Batuk-Pilek", ["ISPA_ANAK", "BAPIL_2_ANAK", "BAPIL_CETIRIZIN_ANAK", "BAPIL_AMB_CTZ_ANAK", "AMBROXOL_30_DEWASA", "GUAIFENESIN_100_DEWASA", "ALPARA_DEWASA"]],
       ["ALERGI_STEROID", "Antihistamin / Kortikosteroid", ["CETIRIZINE_10_DEWASA", "CETIRIZINE_RACIKAN_BARU", "LORATADINE_10_DEWASA", "CTM_4_DEWASA", "DEXAMETHASONE_05", "METHYLPREDNISOLONE_4_DEWASA"]],
       ["ANTIINFEKSI", "Antibiotik / Antivirus", ["AMOXICILLIN_500_DEWASA", "AMOXICILLIN_SYRUP", "AMOXICILLIN_500_RACIKAN_BARU", "CEFADROXIL_500_DEWASA", "CEFADROXIL_SYRUP", "CEFADROXIL_PUYER_ANAK", "CIPROFLOXACIN_500_DEWASA", "METRONIDAZOLE_500_DEWASA", "ACYCLOVIR_400_DEWASA"]],
       ["SALURAN_CERNA", "Saluran Cerna", ["ANTASIDA_DEWASA", "ANTASIDA_ANAK", "ANTASIDA_SYRUP_ANAK", "ANTASIDA_PUYER_ANAK", "OMEPRAZOLE_20_DEWASA", "AKITA", "DOMPERIDONE_10_DEWASA", "DOMPERIDONE_SYRUP", "SCOPMA_DEWASA", "LAMBUNG_MUAL_RACIKAN_BARU", "MUAL_MUNTAH_RACIKAN_BARU", "ORALIT_ANAK", "ZINC_ANAK", "SUPERHOID_SUPP"]],
@@ -3826,7 +3837,9 @@
     if (!tpl || racikanJenisFor(tpl) !== "kertas_puyer") return "";
     const drugs = (tpl.ingredients || []).filter((i) => i.item !== "POT_PLASTIK" && ITEMS[i.item]?.unit !== "pcs");
     if (drugs.length < 2) return "";
-    return [...new Set(drugs.map((i) => drugShortName(i.item)))].join("-");
+    const ORDER = ["PCT", "IBU", "GG", "AMB", "CTM", "CTZ", "LORA", "DEXA", "MP", "DOMP", "ANTS", "RANI", "AMOX", "CFD", "ZINC"];
+    const rank = (x) => (ORDER.indexOf(x) < 0 ? 99 : ORDER.indexOf(x));
+    return [...new Set(drugs.map((i) => drugShortName(i.item)))].sort((a, b) => rank(a) - rank(b)).join("-");
   }
 
   function racikanJenisFor(tpl) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.5 — 2026-11-18
+
+- **Racikan AMB-CTZ-DEXA (tanpa CTM)** untuk anak BB 4–40 kg (permintaan dokter): ambroxol + cetirizine + dexametason, 3x sehari setelah makan. Dosis cetirizine 0,25 mg/kg/hari dibagi 3, ambroxol 0,5 mg/kg/dosis.
+- **Nama singkatan diurutkan tetap**: pengencer dahak (GG/AMB) → antihistamin (CTM/CTZ) → DEXA. Bapil 2 sekarang bernama **AMB-CTM-DEXA**.
+- Label pilihan racikan di Paket Resep ikut memakai singkatannya.
+
 ## v0.8.4 — 2026-11-18
 
 - **Racikan Bapil Cetirizin (tanpa CTM)** untuk anak, 3x sehari setelah makan (permintaan dokter):
