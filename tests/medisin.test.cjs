@@ -23,9 +23,9 @@ const PRODUCTS = [
   { produk_id: 24, produk_nm: "BPJS -- BLOOD LANCET 26G", stok: 0, bhp: true },
 ];
 const TARIFS = [
-  { tarif_id: 1, tarif_nm: "Dokter Umum Jasa Konsultasi", tarif_harga: "45000.00" },
-  { tarif_id: 2, tarif_nm: "BPJS - Dokter Umum Jasa Konsultasi", tarif_harga: "30000.00" },
-  { tarif_id: 3, tarif_nm: "BPJS TK - Dokter Umum Jasa Konsultasi", tarif_harga: "30000.00" },
+  { tarif_id: "TRF1", tarif_nm: "Dokter Umum Jasa Konsultasi", tarif_harga: "45000.00" },
+  { tarif_id: "TRF2", tarif_nm: "BPJS - Dokter Umum Jasa Konsultasi", tarif_harga: "30000.00" },
+  { tarif_id: "TRF3", tarif_nm: "BPJS TK - Dokter Umum Jasa Konsultasi", tarif_harga: "30000.00" },
 ];
 const ICDS = [
   { icd_kode: "J06.0", en: "Acute laryngopharyngitis", value: "J06.0", label: "J06.0 - Acute laryngopharyngitis" },
@@ -277,14 +277,15 @@ test("BHP: diisi di baris BHP sesuai penjamin, stok kosong dicatat, tanpa simpan
 test("tindakan: jasa konsultasi sesuai penjamin, tidak dobel, hanya poli umum, tanpa simpan", async () => {
   const a = makeApp({ pasien: { penjamin_nm: "BPJS" } });
   assert.equal(await a.api.addService(), true);
-  assert.equal(a.Tindakan.input_tindakan[0].val.tarif_nm, "BPJS - Dokter Umum Jasa Konsultasi");
+  // nilai kolom = tarif_id (emit-value Medisin), bukan objek
+  assert.equal(a.Tindakan.input_tindakan[0].val, "TRF2");
   assert.equal(a.Tindakan.input_tindakan[0].harga_tindakan, "Rp 30000.00");
   assert.equal(await a.api.addService(), false);
   assert.equal(a.Tindakan.input_tindakan.length, 1);
   assert.deepEqual(a.saveCalls, []);
   const u = makeApp();
   await u.api.addService();
-  assert.equal(u.Tindakan.input_tindakan[0].val.tarif_nm, "Dokter Umum Jasa Konsultasi");
+  assert.equal(u.Tindakan.input_tindakan[0].val, "TRF1");
   const saved = makeApp({ pasien: { tindakan: [{ tarif_nm: "Dokter Umum Jasa Konsultasi" }] } });
   assert.equal(await saved.api.addService(), false);
   assert.equal(saved.Tindakan.input_tindakan[0].val, "");
@@ -605,4 +606,50 @@ test("jalan otomatis: bisa dimatikan & dinyalakan (disimpan di localStorage)", (
   assert.equal(a.storage.get("auto-klinik-medisin:otomatis"), "0");
   a.api.toggleAutoRun();
   assert.equal(a.storage.get("auto-klinik-medisin:otomatis"), "1");
+});
+
+
+// ---------------- v0.4.2 ----------------
+test("jasa konsultasi: diisi lalu LANGSUNG disimpan (hanya bila tidak ada tindakan lain)", async () => {
+  const a = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  const sent = [];
+  fakeSavers(a, sent);
+  assert.equal(await a.api.addServiceAndSave(), true);
+  assert.equal(await a.api.serviceAutoSave.last, true);
+  assert.deepEqual(sent, ["master/kunjungan/tindakan"]);
+  // ada tindakan lain yang belum disimpan -> tidak disimpan otomatis
+  const b = makeApp({ pasien: { penjamin_nm: "BPJS" } });
+  const sent2 = [];
+  fakeSavers(b, sent2);
+  b.Tindakan.input_tindakan[0].val = { tarif_nm: "Nebulizer" };
+  assert.equal(await b.api.addServiceAndSave(), true);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(sent2, []);
+});
+
+test("keluhan: Anamnesa dibaca dulu, Keluhan Utama cadangan", () => {
+  const a = makeApp({ pasien: { keluhan: "migrain", keluhan_lainya: "sakit kepala sebagian 2 hari" } });
+  assert.deepEqual(plain(a.api.readChiefComplaintFromPage()), { text: "sakit kepala sebagian 2 hari", source: "Anamnesa" });
+  const b = makeApp({ pasien: { keluhan: "batuk pilek" } });
+  assert.equal(b.api.readChiefComplaintFromPage().text, "batuk pilek");
+});
+
+test("pilihan & pencarian diagnosis", async () => {
+  const { api } = loadScript();
+  const c = api.diagnosisCandidates("demam batuk pilek sakit kepala").map((d) => d.key);
+  assert.ok(c.length >= 2 && c.length <= 5);
+  assert.equal(c[0], "ISPA");
+  assert.ok(c.includes("CEPHALGIA") || c.includes("FEVER"));
+  assert.deepEqual(plain(api.diagnosisCandidates("kaki kena paku")), []);
+  assert.ok(api.searchDiagnosisTemplates("gastritis").some((d) => d.key === "GASTRITIS"));
+  assert.ok(api.searchDiagnosisTemplates("I10").some((d) => d.key === "HT"));
+  assert.ok(api.searchDiagnosisTemplates("pusing berputar").some((d) => d.key === "VERTIGO"));
+  // pilih diagnosis: baris isian script diganti, pilihan dokter tidak
+  const a = makeApp();
+  await a.api.fillDiagnosis(a.api.DIAGNOSIS_TEMPLATES.find((d) => d.key === "ISPA"));
+  assert.equal(a.Diagnosa.input_icdx[0].val.icd_kode, "J06.9");
+  const r = await a.api.applyDiagnosisChoice(a.api.DIAGNOSIS_TEMPLATES.find((d) => d.key === "HT"));
+  assert.match(r.note, /I10/);
+  assert.deepEqual(a.api.selectedIcdEntries().map((e) => e.code), ["I10"]);
+  assert.deepEqual(a.saveCalls, []);
 });
