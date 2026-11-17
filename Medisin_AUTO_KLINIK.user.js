@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.6
+// @version      0.8.7
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.6";
+  const SCRIPT_VERSION_FALLBACK = "0.8.7";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -373,9 +373,9 @@
     DOMPERIDONE_10: { mg: 10, perKg: 0.2, lo: 0.15, hi: 0.25, maxDose: 10, text: "maks 0,25 mg/kg/dosis" },
     DOMPERIDONE_SYRUP: { mg: 1, perKg: 0.2, lo: 0.15, hi: 0.25, maxDose: 10, inc: 0.5, text: "maks 0,25 mg/kg/dosis (1 mg/mL)" },
     CTM_4: { mg: 4, perKg: 0.1, lo: 0.08, hi: 0.12, maxDose: 2, text: "0,1 mg/kg/dosis (0,3 mg/kg/hari), maks 2 mg" },
-    DEXAMETHASONE_05: { mg: 0.5, perKg: 0.015, lo: 0.01, hi: 0.02, maxDose: 0.5, text: "0,015 mg/kg/dosis, maks 0,5 mg" },
-    GUAIFENESIN_100: { mg: 100, perKg: 4, lo: 3, hi: 5, maxDose: 100, text: "4 mg/kg/dosis (12 mg/kg/hari), maks 100 mg" },
-    AMBROXOL_30: { mg: 30, perKg: 0.5, lo: 0.4, hi: 0.6, maxDose: 30, text: "0,5 mg/kg/dosis (1,5 mg/kg/hari)" },
+    DEXAMETHASONE_05: { mg: 0.5, perKg: 0.0083, lo: 0.006, hi: 0.0125, maxDose: 0.5, text: "dosis minimal ~0,008 mg/kg/dosis (10 kg = 2 tab/12 bungkus)" },
+    GUAIFENESIN_100: { mg: 100, perKg: 1.67, lo: 1.2, hi: 2.5, maxDose: 100, text: "dosis minimal ~1,7 mg/kg/dosis (10 kg = 2 tab/12 bungkus)" },
+    AMBROXOL_30: { mg: 30, perKg: 0.5, lo: 0.35, hi: 0.75, maxDose: 30, text: "dosis minimal 0,5 mg/kg/dosis (10 kg = 2 tab/12 bungkus)" },
     CETIRIZINE_10: { mg: 10, perKg: 0.25, lo: 0.2, hi: 0.3, maxDose: 10, text: "0,25 mg/kg/hari 1x sehari" },
     RANITIDINE_HCL: { mg: 150, perKg: 1.5, lo: 1.2, hi: 2, maxDose: 150, text: "1,5 mg/kg/dosis 2x sehari" },
     // Antasida DOEN (Al(OH)3 200 mg + Mg(OH)2 200 mg): dalam tablet/kg.
@@ -394,7 +394,15 @@
   const DOSE_BANDS_KG = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 25, 28, 30, 32, 35, 38, 40, 45, 50];
   // v0.8.6 (permintaan dokter): bahan berjumlah minimal tetap per kelipatan 5 kg. (pure, diuji)
   const FIXED_MIN_ITEMS = ["GUAIFENESIN_100", "AMBROXOL_30", "DEXAMETHASONE_05"];
-  const fixedMinQty = (band) => Math.max(2, Math.ceil(band.maxKg / 5 - 1e-9));
+  // v0.8.7: dosis minimal per kg (10 kg = 2 tablet / 12 bungkus). Tablet = bulat dari BB atas
+  // rentang, minimal 1; bila 1 tablet masih > 1,5x dosis minimal di BB terendah, bungkus ditambah.
+  const MINIMAL_PER_KG = {
+    GUAIFENESIN_100: { mg: 100, perKg: 200 / 120 }, // ~1,7 mg/kg/dosis
+    AMBROXOL_30: { mg: 30, perKg: 60 / 120 }, // 0,5 mg/kg/dosis
+    DEXAMETHASONE_05: { mg: 0.5, perKg: 1 / 120 }, // ~0,008 mg/kg/dosis
+  };
+  const minimalQty = (k, band, n) => Math.max(1, Math.round((MINIMAL_PER_KG[k].perKg * band.maxKg * n) / MINIMAL_PER_KG[k].mg + 1e-6));
+  const fixedMinQty = (band, k = "GUAIFENESIN_100", n = 12) => minimalQty(k, band, n);
   function dosedBands(maxKg, minKg = DOSE_BANDS_KG[0]) {
     const edges = DOSE_BANDS_KG.filter((k) => k >= minKg && k <= maxKg);
     return edges.slice(1).map((b, i) => ({ index: i + 1, minKg: edges[i], maxKg: b }));
@@ -424,10 +432,10 @@
       const qty = {};
       for (const k of items) {
         if (FIXED_MIN_ITEMS.includes(k)) {
-          qty[k] = fixedMinQty(band);
-          // tetap tidak melebihi batas atas: bungkus ditambah bila perlu (maks 30)
-          const rf = rules[k] || PEDIATRIC_DOSE_RULES[k];
-          const over = (rf.mg * qty[k]) / n / band.minKg / rf.hi;
+          qty[k] = minimalQty(k, band, n);
+          // tidak lebih dari 1,5x dosis minimal: bungkus ditambah bila perlu (maks 30)
+          const rf = MINIMAL_PER_KG[k];
+          const over = (rf.mg * qty[k]) / n / band.minKg / (rf.perKg * 1.5);
           if (over > 1 + 1e-9) {
             ok = false;
             worst = Math.max(worst, over); // tidak bisa di bawah batas: pilih bungkus terbanyak
@@ -7649,6 +7657,8 @@
       pediatricQty,
       dosedRacikanPlan,
       FIXED_MIN_ITEMS,
+      MINIMAL_PER_KG,
+      minimalQty,
       fixedMinQty,
       productOptionsFromList,
       racikanShortName,

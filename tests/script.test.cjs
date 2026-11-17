@@ -583,7 +583,7 @@ test("v0.8.0: dosis anak per mg/kg, tablet BULAT, jumlah bungkus menyesuaikan", 
       assert.match(ing.quantity, /^[1-9]\d*$/, `${label} ${ing.item}: ${ing.quantity} bukan bulat`);
       // v0.8.6: GG/ambroxol/dexa = jumlah minimal tetap (2 tab s.d. 10 kg, +1 tiap 5 kg)
       if (api.FIXED_MIN_ITEMS.includes(ing.item)) {
-        assert.equal(ing.quantity, String(api.fixedMinQty(t.band)), `${label} ${kg} kg ${ing.item}`);
+        assert.equal(ing.quantity, String(api.minimalQty(ing.item, t.band, n)), `${label} ${kg} kg ${ing.item}`);
         continue;
       }
       const r = (t.doseRules || {})[ing.item] || api.PEDIATRIC_DOSE_RULES[ing.item];
@@ -750,15 +750,21 @@ test("v0.8.4: racikan bapil cetirizin (tanpa CTM) & nama racikan singkatan obat"
   assert.equal(api.racikanShortName(api.SALEP_RACIKAN), ""); // salep: nama lama
 });
 
-test("v0.8.6: GG/ambroxol/dexa minimal: 2 tab s.d. 10 kg, 11-15 kg 3 tab, +1 tiap 5 kg", () => {
-  const q = (p, kg, item) => api.getWeightTemplate(p, kg).tpl.ingredients.find((i) => i.item === item).quantity;
-  for (const [kg, tab] of [[4.5, "2"], [10, "2"], [10.5, "3"], [15, "3"], [15.5, "4"], [20, "4"], [21, "5"], [30, "6"]]) {
-    assert.equal(q("BARU_BAPIL_CTZ_", kg, "GUAIFENESIN_100"), tab, kg + " kg GG");
-    assert.equal(q("BARU_BAPIL_CTZ_", kg, "DEXAMETHASONE_05"), tab, kg + " kg dexa");
-    assert.equal(q("BARU_BAPIL_AMB_CTZ_", kg, "AMBROXOL_30"), tab, kg + " kg ambroxol");
-  }
-  // contoh dokter: BB 10 kg GG-CTZ-DEXA = 2 tab GG & dexa walau 12 bungkus
-  const t = api.getWeightTemplate("BARU_BAPIL_CTZ_", 10).tpl;
-  assert.equal(t.compoundInstruction, "buat 12");
+test("v0.8.7: GG/ambroxol/dexa dosis minimal per kg (10 kg = 2 tab dalam 12 bungkus)", () => {
+  const S = { GUAIFENESIN_100: 100, AMBROXOL_30: 30, DEXAMETHASONE_05: 0.5 };
+  const t10 = api.getWeightTemplate("BARU_BAPIL_CTZ_", 10).tpl;
+  assert.equal(t10.compoundInstruction, "buat 12");
+  assert.deepEqual(plain(t10.ingredients.map((i) => i.quantity)), ["2", "1", "2"]);
+  // di bawah 10 kg lebih sedikit (atau bungkus lebih banyak)
+  assert.deepEqual(plain(api.getWeightTemplate("ISPA_ANAK_", 8).tpl.ingredients.map((i) => i.quantity)), ["1", "2", "1"]);
+  for (const p of ["ISPA_ANAK_", "BARU_BAPIL2_", "BARU_BAPIL_CTZ_", "BARU_BAPIL_AMB_CTZ_"])
+    for (let kg = 4; kg <= 40; kg += 0.5) {
+      const t = api.getWeightTemplate(p, kg).tpl;
+      const n = api.racikanQtyFor(t);
+      for (const i of t.ingredients.filter((x) => S[x.item])) {
+        const perKg = (S[i.item] * Number(i.quantity)) / n / kg;
+        const min = api.MINIMAL_PER_KG[i.item].perKg;
+        assert.ok(perKg <= min * 1.5 + 1e-9 && perKg >= min * 0.5, `${p} ${kg} kg ${i.item}: ${perKg}`);
+      }
+    }
 });
-

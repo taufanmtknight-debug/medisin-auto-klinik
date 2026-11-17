@@ -1,4 +1,4 @@
-# Dosis anak AUTO KLINIK v0.8.6 (untuk dievaluasi dokter)
+# Dosis anak AUTO KLINIK v0.8.7 (untuk dievaluasi dokter)
 
 Dihitung otomatis per mg/kg (permintaan dokter 2026-11-18). 1 bungkus sekali minum.
 
@@ -34,39 +34,40 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 
 - v0.8.5: Racikan AMB-CTZ-DEXA = ambroxol + cetirizin + dexa, 3x sehari, cetirizin sama seperti GG-CTZ-DEXA; mulai BB 4 kg. Urutan singkatan: pengencer dahak (GG/AMB), antihistamin (CTM/CTZ), lalu DEXA.
 
-- v0.8.6 (permintaan dokter): **GG, ambroxol, dexa = jumlah minimal tetap**: BB ≤10 kg 2 tablet, 11–15 kg 3, 16–20 kg 4, dst. (+1 tiap 5 kg), berapa pun jumlah bungkusnya. Bungkus ditentukan obat lain (CTM/CTZ); bila perlu ditambah (maks 30) supaya GG/dexa/ambroxol tidak melebihi batas atas. Pada bayi sangat kecil (2–3 kg) batas itu tidak selalu tercapai walau 30 bungkus.
+- v0.8.7 (koreksi dokter): **GG, ambroxol, dexa = dosis minimal per kg**, patokan BB 10 kg = 2 tablet dalam 12 bungkus (GG ~1,7 mg/kg, ambroxol 0,5 mg/kg, dexa ~0,008 mg/kg per minum). Tablet bulat dari BB atas rentang, minimal 1; bila 1 tablet masih >1,5x dosis minimal, bungkus diperbanyak (maks 30).
+
 
 
 ### Racikan ISPA — 3x sehari
 
 | BB | Bungkus | Guaifenesin (tab) | CTM (tab) | Dexa (tab) | Per bungkus |
 |---|---|---|---|---|---|
-| 2-3 kg | 25 | 2 | 1 | 2 | Guaifenesin 8 mg (2,67–4/kg); CTM 0,16 mg (0,053–0,08/kg); Dexa 0,04 mg (0,013–0,02/kg) |
-| >3-4 kg | 23 | 2 | 2 | 2 | Guaifenesin 8,7 mg (2,17–2,9/kg); CTM 0,348 mg (0,087–0,12/kg); Dexa 0,043 mg (0,011–0,014/kg) |
-| >4-5 kg | 17 | 2 | 2 | 2 | Guaifenesin 11,8 mg (2,35–2,94/kg); CTM 0,471 mg (0,094–0,12/kg); Dexa 0,059 mg (0,012–0,015/kg) |
-| >5-6 kg | 14 | 2 | 2 | 2 | Guaifenesin 14,3 mg (2,38–2,86/kg); CTM 0,571 mg (0,095–0,11/kg); Dexa 0,071 mg (0,012–0,014/kg) |
-| >6-7 kg | 12 | 2 | 2 | 2 | Guaifenesin 16,7 mg (2,38–2,78/kg); CTM 0,667 mg (0,095–0,11/kg); Dexa 0,083 mg (0,012–0,014/kg) |
-| >7-8 kg | 10 | 2 | 2 | 2 | Guaifenesin 20 mg (2,5–2,86/kg); CTM 0,8 mg (0,1–0,11/kg); Dexa 0,1 mg (0,013–0,014/kg) |
+| 2-3 kg | 20 | 1 | 1 | 1 | Guaifenesin 5 mg (1,67–2,5/kg); CTM 0,2 mg (0,067–0,1/kg); Dexa 0,025 mg (0,008–0,013/kg) |
+| >3-4 kg | 27 | 2 | 2 | 2 | Guaifenesin 7,4 mg (1,85–2,47/kg); CTM 0,296 mg (0,074–0,099/kg); Dexa 0,037 mg (0,009–0,012/kg) |
+| >4-5 kg | 10 | 1 | 1 | 1 | Guaifenesin 10 mg (2–2,5/kg); CTM 0,4 mg (0,08–0,1/kg); Dexa 0,05 mg (0,01–0,013/kg) |
+| >5-6 kg | 14 | 1 | 2 | 1 | Guaifenesin 7,1 mg (1,19–1,43/kg); CTM 0,571 mg (0,095–0,11/kg); Dexa 0,036 mg (0,006–0,007/kg) |
+| >6-7 kg | 12 | 1 | 2 | 1 | Guaifenesin 8,3 mg (1,19–1,39/kg); CTM 0,667 mg (0,095–0,11/kg); Dexa 0,042 mg (0,006–0,007/kg) |
+| >7-8 kg | 10 | 1 | 2 | 1 | Guaifenesin 10 mg (1,25–1,43/kg); CTM 0,8 mg (0,1–0,11/kg); Dexa 0,05 mg (0,006–0,007/kg) |
 | >8-9 kg | 10 | 2 | 2 | 2 | Guaifenesin 20 mg (2,22–2,5/kg); CTM 0,8 mg (0,089–0,1/kg); Dexa 0,1 mg (0,011–0,013/kg) |
 | >9-10 kg | 12 | 2 | 3 | 2 | Guaifenesin 16,7 mg (1,67–1,85/kg); CTM 1 mg (0,1–0,11/kg); Dexa 0,083 mg (0,008–0,009/kg) |
-| >10-11 kg | 10 | 3 | 3 | 3 | Guaifenesin 30 mg (2,73–3/kg); CTM 1,2 mg (0,11–0,12/kg); Dexa 0,15 mg (0,014–0,015/kg) |
-| >11-12 kg | 10 | 3 | 3 | 3 | Guaifenesin 30 mg (2,5–2,73/kg); CTM 1,2 mg (0,1–0,11/kg); Dexa 0,15 mg (0,012–0,014/kg) |
-| >12-13 kg | 10 | 3 | 3 | 3 | Guaifenesin 30 mg (2,31–2,5/kg); CTM 1,2 mg (0,092–0,1/kg); Dexa 0,15 mg (0,012–0,012/kg) |
-| >13-14 kg | 10 | 3 | 3 | 3 | Guaifenesin 30 mg (2,14–2,31/kg); CTM 1,2 mg (0,086–0,092/kg); Dexa 0,15 mg (0,011–0,012/kg) |
+| >10-11 kg | 10 | 2 | 3 | 2 | Guaifenesin 20 mg (1,82–2/kg); CTM 1,2 mg (0,11–0,12/kg); Dexa 0,1 mg (0,009–0,01/kg) |
+| >11-12 kg | 10 | 2 | 3 | 2 | Guaifenesin 20 mg (1,67–1,82/kg); CTM 1,2 mg (0,1–0,11/kg); Dexa 0,1 mg (0,008–0,009/kg) |
+| >12-13 kg | 10 | 2 | 3 | 2 | Guaifenesin 20 mg (1,54–1,67/kg); CTM 1,2 mg (0,092–0,1/kg); Dexa 0,1 mg (0,008–0,008/kg) |
+| >13-14 kg | 10 | 2 | 3 | 2 | Guaifenesin 20 mg (1,43–1,54/kg); CTM 1,2 mg (0,086–0,092/kg); Dexa 0,1 mg (0,007–0,008/kg) |
 | >14-15 kg | 10 | 3 | 4 | 3 | Guaifenesin 30 mg (2–2,14/kg); CTM 1,6 mg (0,11–0,11/kg); Dexa 0,15 mg (0,01–0,011/kg) |
-| >15-16 kg | 10 | 4 | 4 | 4 | Guaifenesin 40 mg (2,5–2,67/kg); CTM 1,6 mg (0,1–0,11/kg); Dexa 0,2 mg (0,013–0,013/kg) |
-| >16-18 kg | 10 | 4 | 4 | 4 | Guaifenesin 40 mg (2,22–2,5/kg); CTM 1,6 mg (0,089–0,1/kg); Dexa 0,2 mg (0,011–0,013/kg) |
-| >18-20 kg | 10 | 4 | 5 | 4 | Guaifenesin 40 mg (2–2,22/kg); CTM 2 mg (0,1–0,11/kg); Dexa 0,2 mg (0,01–0,011/kg) |
-| >20-22 kg | 10 | 5 | 5 | 5 | Guaifenesin 50 mg (2,27–2,5/kg); CTM 2 mg (0,091–0,1/kg); Dexa 0,25 mg (0,011–0,013/kg) |
-| >22-25 kg | 10 | 5 | 5 | 5 | Guaifenesin 50 mg (2–2,27/kg); CTM 2 mg (0,08–0,091/kg); Dexa 0,25 mg (0,01–0,011/kg) |
-| >25-28 kg | 10 | 6 | 5 | 6 | Guaifenesin 60 mg (2,14–2,4/kg); CTM 2 mg (0,071–0,08/kg); Dexa 0,3 mg (0,011–0,012/kg) |
-| >28-30 kg | 10 | 6 | 5 | 6 | Guaifenesin 60 mg (2–2,14/kg); CTM 2 mg (0,067–0,071/kg); Dexa 0,3 mg (0,01–0,011/kg) |
-| >30-32 kg | 10 | 7 | 5 | 7 | Guaifenesin 70 mg (2,19–2,33/kg); CTM 2 mg (0,063–0,067/kg); Dexa 0,35 mg (0,011–0,012/kg) |
-| >32-35 kg | 10 | 7 | 5 | 7 | Guaifenesin 70 mg (2–2,19/kg); CTM 2 mg (0,057–0,063/kg); Dexa 0,35 mg (0,01–0,011/kg) |
-| >35-38 kg | 10 | 8 | 5 | 8 | Guaifenesin 80 mg (2,11–2,29/kg); CTM 2 mg (0,053–0,057/kg); Dexa 0,4 mg (0,011–0,011/kg) |
-| >38-40 kg | 10 | 8 | 5 | 8 | Guaifenesin 80 mg (2–2,11/kg); CTM 2 mg (0,05–0,053/kg); Dexa 0,4 mg (0,01–0,011/kg) |
-| >40-45 kg | 10 | 9 | 5 | 9 | Guaifenesin 90 mg (2–2,25/kg); CTM 2 mg (0,044–0,05/kg); Dexa 0,45 mg (0,01–0,011/kg) |
-| >45-50 kg | 10 | 10 | 5 | 10 | Guaifenesin 100 mg (2–2,22/kg); CTM 2 mg (0,04–0,044/kg); Dexa 0,5 mg (0,01–0,011/kg) |
+| >15-16 kg | 10 | 3 | 4 | 3 | Guaifenesin 30 mg (1,88–2/kg); CTM 1,6 mg (0,1–0,11/kg); Dexa 0,15 mg (0,009–0,01/kg) |
+| >16-18 kg | 10 | 3 | 4 | 3 | Guaifenesin 30 mg (1,67–1,88/kg); CTM 1,6 mg (0,089–0,1/kg); Dexa 0,15 mg (0,008–0,009/kg) |
+| >18-20 kg | 10 | 3 | 5 | 3 | Guaifenesin 30 mg (1,5–1,67/kg); CTM 2 mg (0,1–0,11/kg); Dexa 0,15 mg (0,008–0,008/kg) |
+| >20-22 kg | 10 | 4 | 5 | 4 | Guaifenesin 40 mg (1,82–2/kg); CTM 2 mg (0,091–0,1/kg); Dexa 0,2 mg (0,009–0,01/kg) |
+| >22-25 kg | 10 | 4 | 5 | 4 | Guaifenesin 40 mg (1,6–1,82/kg); CTM 2 mg (0,08–0,091/kg); Dexa 0,2 mg (0,008–0,009/kg) |
+| >25-28 kg | 10 | 5 | 5 | 5 | Guaifenesin 50 mg (1,79–2/kg); CTM 2 mg (0,071–0,08/kg); Dexa 0,25 mg (0,009–0,01/kg) |
+| >28-30 kg | 10 | 5 | 5 | 5 | Guaifenesin 50 mg (1,67–1,79/kg); CTM 2 mg (0,067–0,071/kg); Dexa 0,25 mg (0,008–0,009/kg) |
+| >30-32 kg | 10 | 5 | 5 | 5 | Guaifenesin 50 mg (1,56–1,67/kg); CTM 2 mg (0,063–0,067/kg); Dexa 0,25 mg (0,008–0,008/kg) |
+| >32-35 kg | 10 | 6 | 5 | 6 | Guaifenesin 60 mg (1,71–1,88/kg); CTM 2 mg (0,057–0,063/kg); Dexa 0,3 mg (0,009–0,009/kg) |
+| >35-38 kg | 10 | 6 | 5 | 6 | Guaifenesin 60 mg (1,58–1,71/kg); CTM 2 mg (0,053–0,057/kg); Dexa 0,3 mg (0,008–0,009/kg) |
+| >38-40 kg | 10 | 7 | 5 | 7 | Guaifenesin 70 mg (1,75–1,84/kg); CTM 2 mg (0,05–0,053/kg); Dexa 0,35 mg (0,009–0,009/kg) |
+| >40-45 kg | 10 | 8 | 5 | 8 | Guaifenesin 80 mg (1,78–2/kg); CTM 2 mg (0,044–0,05/kg); Dexa 0,4 mg (0,009–0,01/kg) |
+| >45-50 kg | 10 | 8 | 5 | 8 | Guaifenesin 80 mg (1,6–1,78/kg); CTM 2 mg (0,04–0,044/kg); Dexa 0,4 mg (0,008–0,009/kg) |
 
 ### Racikan Demam — 3x sehari
 
@@ -246,30 +247,30 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 
 | BB | Bungkus | Dexa (tab) | CTM (tab) | Ambroxol (tab) | Per bungkus |
 |---|---|---|---|---|---|
-| 2-3 kg | 30 | 2 | 1 | 2 | Dexa 0,033 mg (0,011–0,017/kg); CTM 0,133 mg (0,044–0,067/kg); Ambroxol 2 mg (0,67–1/kg) |
-| >3-4 kg | 30 | 2 | 2 | 2 | Dexa 0,033 mg (0,008–0,011/kg); CTM 0,267 mg (0,067–0,089/kg); Ambroxol 2 mg (0,5–0,67/kg) |
-| >4-5 kg | 25 | 2 | 3 | 2 | Dexa 0,04 mg (0,008–0,01/kg); CTM 0,48 mg (0,096–0,12/kg); Ambroxol 2,4 mg (0,48–0,6/kg) |
-| >5-6 kg | 20 | 2 | 3 | 2 | Dexa 0,05 mg (0,008–0,01/kg); CTM 0,6 mg (0,1–0,12/kg); Ambroxol 3 mg (0,5–0,6/kg) |
-| >6-7 kg | 17 | 2 | 3 | 2 | Dexa 0,059 mg (0,008–0,01/kg); CTM 0,706 mg (0,1–0,12/kg); Ambroxol 3,5 mg (0,5–0,59/kg) |
-| >7-8 kg | 15 | 2 | 3 | 2 | Dexa 0,067 mg (0,008–0,01/kg); CTM 0,8 mg (0,1–0,11/kg); Ambroxol 4 mg (0,5–0,57/kg) |
-| >8-9 kg | 13 | 2 | 3 | 2 | Dexa 0,077 mg (0,009–0,01/kg); CTM 0,923 mg (0,1–0,12/kg); Ambroxol 4,6 mg (0,51–0,58/kg) |
+| 2-3 kg | 20 | 1 | 1 | 1 | Dexa 0,025 mg (0,008–0,013/kg); CTM 0,2 mg (0,067–0,1/kg); Ambroxol 1,5 mg (0,5–0,75/kg) |
+| >3-4 kg | 27 | 2 | 2 | 2 | Dexa 0,037 mg (0,009–0,012/kg); CTM 0,296 mg (0,074–0,099/kg); Ambroxol 2,2 mg (0,56–0,74/kg) |
+| >4-5 kg | 10 | 1 | 1 | 1 | Dexa 0,05 mg (0,01–0,013/kg); CTM 0,4 mg (0,08–0,1/kg); Ambroxol 3 mg (0,6–0,75/kg) |
+| >5-6 kg | 14 | 1 | 2 | 1 | Dexa 0,036 mg (0,006–0,007/kg); CTM 0,571 mg (0,095–0,11/kg); Ambroxol 2,1 mg (0,36–0,43/kg) |
+| >6-7 kg | 12 | 1 | 2 | 1 | Dexa 0,042 mg (0,006–0,007/kg); CTM 0,667 mg (0,095–0,11/kg); Ambroxol 2,5 mg (0,36–0,42/kg) |
+| >7-8 kg | 10 | 1 | 2 | 1 | Dexa 0,05 mg (0,006–0,007/kg); CTM 0,8 mg (0,1–0,11/kg); Ambroxol 3 mg (0,38–0,43/kg) |
+| >8-9 kg | 10 | 2 | 2 | 2 | Dexa 0,1 mg (0,011–0,013/kg); CTM 0,8 mg (0,089–0,1/kg); Ambroxol 6 mg (0,67–0,75/kg) |
 | >9-10 kg | 12 | 2 | 3 | 2 | Dexa 0,083 mg (0,008–0,009/kg); CTM 1 mg (0,1–0,11/kg); Ambroxol 5 mg (0,5–0,56/kg) |
-| >10-11 kg | 15 | 3 | 4 | 3 | Dexa 0,1 mg (0,009–0,01/kg); CTM 1,1 mg (0,097–0,11/kg); Ambroxol 6 mg (0,55–0,6/kg) |
-| >11-12 kg | 14 | 3 | 4 | 3 | Dexa 0,107 mg (0,009–0,01/kg); CTM 1,1 mg (0,095–0,1/kg); Ambroxol 6,4 mg (0,54–0,58/kg) |
-| >12-13 kg | 13 | 3 | 4 | 3 | Dexa 0,115 mg (0,009–0,01/kg); CTM 1,2 mg (0,095–0,1/kg); Ambroxol 6,9 mg (0,53–0,58/kg) |
-| >13-14 kg | 12 | 3 | 4 | 3 | Dexa 0,125 mg (0,009–0,01/kg); CTM 1,3 mg (0,095–0,1/kg); Ambroxol 7,5 mg (0,54–0,58/kg) |
-| >14-15 kg | 11 | 3 | 4 | 3 | Dexa 0,136 mg (0,009–0,01/kg); CTM 1,5 mg (0,097–0,1/kg); Ambroxol 8,2 mg (0,55–0,58/kg) |
-| >15-16 kg | 14 | 4 | 5 | 4 | Dexa 0,143 mg (0,009–0,01/kg); CTM 1,4 mg (0,089–0,095/kg); Ambroxol 8,6 mg (0,54–0,57/kg) |
-| >16-18 kg | 13 | 4 | 6 | 4 | Dexa 0,154 mg (0,009–0,01/kg); CTM 1,8 mg (0,1–0,12/kg); Ambroxol 9,2 mg (0,51–0,58/kg) |
-| >18-20 kg | 12 | 4 | 6 | 4 | Dexa 0,167 mg (0,008–0,009/kg); CTM 2 mg (0,1–0,11/kg); Ambroxol 10 mg (0,5–0,56/kg) |
-| >20-22 kg | 13 | 5 | 6 | 5 | Dexa 0,192 mg (0,009–0,01/kg); CTM 1,8 mg (0,084–0,092/kg); Ambroxol 11,5 mg (0,52–0,58/kg) |
-| >22-25 kg | 12 | 5 | 6 | 5 | Dexa 0,208 mg (0,008–0,009/kg); CTM 2 mg (0,08–0,091/kg); Ambroxol 12,5 mg (0,5–0,57/kg) |
-| >25-28 kg | 12 | 6 | 6 | 6 | Dexa 0,25 mg (0,009–0,01/kg); CTM 2 mg (0,071–0,08/kg); Ambroxol 15 mg (0,54–0,6/kg) |
-| >28-30 kg | 11 | 6 | 5 | 6 | Dexa 0,273 mg (0,009–0,01/kg); CTM 1,8 mg (0,061–0,065/kg); Ambroxol 16,4 mg (0,55–0,58/kg) |
-| >30-32 kg | 12 | 7 | 6 | 7 | Dexa 0,292 mg (0,009–0,01/kg); CTM 2 mg (0,063–0,067/kg); Ambroxol 17,5 mg (0,55–0,58/kg) |
-| >32-35 kg | 11 | 7 | 5 | 7 | Dexa 0,318 mg (0,009–0,01/kg); CTM 1,8 mg (0,052–0,057/kg); Ambroxol 19,1 mg (0,55–0,6/kg) |
-| >35-38 kg | 12 | 8 | 6 | 8 | Dexa 0,333 mg (0,009–0,01/kg); CTM 2 mg (0,053–0,057/kg); Ambroxol 20 mg (0,53–0,57/kg) |
-| >38-40 kg | 11 | 8 | 5 | 8 | Dexa 0,364 mg (0,009–0,01/kg); CTM 1,8 mg (0,045–0,048/kg); Ambroxol 21,8 mg (0,55–0,57/kg) |
+| >10-11 kg | 10 | 2 | 3 | 2 | Dexa 0,1 mg (0,009–0,01/kg); CTM 1,2 mg (0,11–0,12/kg); Ambroxol 6 mg (0,55–0,6/kg) |
+| >11-12 kg | 10 | 2 | 3 | 2 | Dexa 0,1 mg (0,008–0,009/kg); CTM 1,2 mg (0,1–0,11/kg); Ambroxol 6 mg (0,5–0,55/kg) |
+| >12-13 kg | 10 | 2 | 3 | 2 | Dexa 0,1 mg (0,008–0,008/kg); CTM 1,2 mg (0,092–0,1/kg); Ambroxol 6 mg (0,46–0,5/kg) |
+| >13-14 kg | 10 | 2 | 3 | 2 | Dexa 0,1 mg (0,007–0,008/kg); CTM 1,2 mg (0,086–0,092/kg); Ambroxol 6 mg (0,43–0,46/kg) |
+| >14-15 kg | 10 | 3 | 4 | 3 | Dexa 0,15 mg (0,01–0,011/kg); CTM 1,6 mg (0,11–0,11/kg); Ambroxol 9 mg (0,6–0,64/kg) |
+| >15-16 kg | 10 | 3 | 4 | 3 | Dexa 0,15 mg (0,009–0,01/kg); CTM 1,6 mg (0,1–0,11/kg); Ambroxol 9 mg (0,56–0,6/kg) |
+| >16-18 kg | 10 | 3 | 4 | 3 | Dexa 0,15 mg (0,008–0,009/kg); CTM 1,6 mg (0,089–0,1/kg); Ambroxol 9 mg (0,5–0,56/kg) |
+| >18-20 kg | 10 | 3 | 5 | 3 | Dexa 0,15 mg (0,008–0,008/kg); CTM 2 mg (0,1–0,11/kg); Ambroxol 9 mg (0,45–0,5/kg) |
+| >20-22 kg | 10 | 4 | 5 | 4 | Dexa 0,2 mg (0,009–0,01/kg); CTM 2 mg (0,091–0,1/kg); Ambroxol 12 mg (0,55–0,6/kg) |
+| >22-25 kg | 10 | 4 | 5 | 4 | Dexa 0,2 mg (0,008–0,009/kg); CTM 2 mg (0,08–0,091/kg); Ambroxol 12 mg (0,48–0,55/kg) |
+| >25-28 kg | 10 | 5 | 5 | 5 | Dexa 0,25 mg (0,009–0,01/kg); CTM 2 mg (0,071–0,08/kg); Ambroxol 15 mg (0,54–0,6/kg) |
+| >28-30 kg | 10 | 5 | 5 | 5 | Dexa 0,25 mg (0,008–0,009/kg); CTM 2 mg (0,067–0,071/kg); Ambroxol 15 mg (0,5–0,54/kg) |
+| >30-32 kg | 10 | 5 | 5 | 5 | Dexa 0,25 mg (0,008–0,008/kg); CTM 2 mg (0,063–0,067/kg); Ambroxol 15 mg (0,47–0,5/kg) |
+| >32-35 kg | 10 | 6 | 5 | 6 | Dexa 0,3 mg (0,009–0,009/kg); CTM 2 mg (0,057–0,063/kg); Ambroxol 18 mg (0,51–0,56/kg) |
+| >35-38 kg | 10 | 6 | 5 | 6 | Dexa 0,3 mg (0,008–0,009/kg); CTM 2 mg (0,053–0,057/kg); Ambroxol 18 mg (0,47–0,51/kg) |
+| >38-40 kg | 10 | 7 | 5 | 7 | Dexa 0,35 mg (0,009–0,009/kg); CTM 2 mg (0,05–0,053/kg); Ambroxol 21 mg (0,53–0,55/kg) |
 
 ### BAPIL CETIRIZIN — 3x sehari
 
@@ -281,22 +282,22 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 | >7-8 kg | 15 | 2 | 1 | 2 | Guaifenesin 13,3 mg (1,67–1,9/kg); Cetirizin 0,667 mg (0,083–0,095/kg); Dexa 0,067 mg (0,008–0,01/kg) |
 | >8-9 kg | 13 | 2 | 1 | 2 | Guaifenesin 15,4 mg (1,71–1,92/kg); Cetirizin 0,769 mg (0,085–0,096/kg); Dexa 0,077 mg (0,009–0,01/kg) |
 | >9-10 kg | 12 | 2 | 1 | 2 | Guaifenesin 16,7 mg (1,67–1,85/kg); Cetirizin 0,833 mg (0,083–0,093/kg); Dexa 0,083 mg (0,008–0,009/kg) |
-| >10-11 kg | 10 | 3 | 1 | 3 | Guaifenesin 30 mg (2,73–3/kg); Cetirizin 1 mg (0,091–0,1/kg); Dexa 0,15 mg (0,014–0,015/kg) |
-| >11-12 kg | 10 | 3 | 1 | 3 | Guaifenesin 30 mg (2,5–2,73/kg); Cetirizin 1 mg (0,083–0,091/kg); Dexa 0,15 mg (0,012–0,014/kg) |
-| >12-13 kg | 10 | 3 | 1 | 3 | Guaifenesin 30 mg (2,31–2,5/kg); Cetirizin 1 mg (0,077–0,083/kg); Dexa 0,15 mg (0,012–0,012/kg) |
-| >13-14 kg | 10 | 3 | 1 | 3 | Guaifenesin 30 mg (2,14–2,31/kg); Cetirizin 1 mg (0,071–0,077/kg); Dexa 0,15 mg (0,011–0,012/kg) |
-| >14-15 kg | 15 | 3 | 2 | 3 | Guaifenesin 20 mg (1,33–1,43/kg); Cetirizin 1,3 mg (0,089–0,095/kg); Dexa 0,1 mg (0,007–0,007/kg) |
+| >10-11 kg | 10 | 2 | 1 | 2 | Guaifenesin 20 mg (1,82–2/kg); Cetirizin 1 mg (0,091–0,1/kg); Dexa 0,1 mg (0,009–0,01/kg) |
+| >11-12 kg | 10 | 2 | 1 | 2 | Guaifenesin 20 mg (1,67–1,82/kg); Cetirizin 1 mg (0,083–0,091/kg); Dexa 0,1 mg (0,008–0,009/kg) |
+| >12-13 kg | 10 | 2 | 1 | 2 | Guaifenesin 20 mg (1,54–1,67/kg); Cetirizin 1 mg (0,077–0,083/kg); Dexa 0,1 mg (0,008–0,008/kg) |
+| >13-14 kg | 10 | 2 | 1 | 2 | Guaifenesin 20 mg (1,43–1,54/kg); Cetirizin 1 mg (0,071–0,077/kg); Dexa 0,1 mg (0,007–0,008/kg) |
+| >14-15 kg | 15 | 4 | 2 | 4 | Guaifenesin 26,7 mg (1,78–1,9/kg); Cetirizin 1,3 mg (0,089–0,095/kg); Dexa 0,133 mg (0,009–0,01/kg) |
 | >15-16 kg | 14 | 4 | 2 | 4 | Guaifenesin 28,6 mg (1,79–1,9/kg); Cetirizin 1,4 mg (0,089–0,095/kg); Dexa 0,143 mg (0,009–0,01/kg) |
 | >16-18 kg | 13 | 4 | 2 | 4 | Guaifenesin 30,8 mg (1,71–1,92/kg); Cetirizin 1,5 mg (0,085–0,096/kg); Dexa 0,154 mg (0,009–0,01/kg) |
 | >18-20 kg | 12 | 4 | 2 | 4 | Guaifenesin 33,3 mg (1,67–1,85/kg); Cetirizin 1,7 mg (0,083–0,093/kg); Dexa 0,167 mg (0,008–0,009/kg) |
-| >20-22 kg | 10 | 5 | 2 | 5 | Guaifenesin 50 mg (2,27–2,5/kg); Cetirizin 2 mg (0,091–0,1/kg); Dexa 0,25 mg (0,011–0,013/kg) |
-| >22-25 kg | 10 | 5 | 2 | 5 | Guaifenesin 50 mg (2–2,27/kg); Cetirizin 2 mg (0,08–0,091/kg); Dexa 0,25 mg (0,01–0,011/kg) |
-| >25-28 kg | 10 | 6 | 2 | 6 | Guaifenesin 60 mg (2,14–2,4/kg); Cetirizin 2 mg (0,071–0,08/kg); Dexa 0,3 mg (0,011–0,012/kg) |
+| >20-22 kg | 10 | 4 | 2 | 4 | Guaifenesin 40 mg (1,82–2/kg); Cetirizin 2 mg (0,091–0,1/kg); Dexa 0,2 mg (0,009–0,01/kg) |
+| >22-25 kg | 10 | 4 | 2 | 4 | Guaifenesin 40 mg (1,6–1,82/kg); Cetirizin 2 mg (0,08–0,091/kg); Dexa 0,2 mg (0,008–0,009/kg) |
+| >25-28 kg | 10 | 5 | 2 | 5 | Guaifenesin 50 mg (1,79–2/kg); Cetirizin 2 mg (0,071–0,08/kg); Dexa 0,25 mg (0,009–0,01/kg) |
 | >28-30 kg | 11 | 6 | 3 | 6 | Guaifenesin 54,5 mg (1,82–1,95/kg); Cetirizin 2,7 mg (0,091–0,097/kg); Dexa 0,273 mg (0,009–0,01/kg) |
-| >30-32 kg | 10 | 7 | 3 | 7 | Guaifenesin 70 mg (2,19–2,33/kg); Cetirizin 3 mg (0,094–0,1/kg); Dexa 0,35 mg (0,011–0,012/kg) |
-| >32-35 kg | 10 | 7 | 3 | 7 | Guaifenesin 70 mg (2–2,19/kg); Cetirizin 3 mg (0,086–0,094/kg); Dexa 0,35 mg (0,01–0,011/kg) |
-| >35-38 kg | 10 | 8 | 3 | 8 | Guaifenesin 80 mg (2,11–2,29/kg); Cetirizin 3 mg (0,079–0,086/kg); Dexa 0,4 mg (0,011–0,011/kg) |
-| >38-40 kg | 10 | 8 | 3 | 8 | Guaifenesin 80 mg (2–2,11/kg); Cetirizin 3 mg (0,075–0,079/kg); Dexa 0,4 mg (0,01–0,011/kg) |
+| >30-32 kg | 10 | 5 | 3 | 5 | Guaifenesin 50 mg (1,56–1,67/kg); Cetirizin 3 mg (0,094–0,1/kg); Dexa 0,25 mg (0,008–0,008/kg) |
+| >32-35 kg | 10 | 6 | 3 | 6 | Guaifenesin 60 mg (1,71–1,88/kg); Cetirizin 3 mg (0,086–0,094/kg); Dexa 0,3 mg (0,009–0,009/kg) |
+| >35-38 kg | 10 | 6 | 3 | 6 | Guaifenesin 60 mg (1,58–1,71/kg); Cetirizin 3 mg (0,079–0,086/kg); Dexa 0,3 mg (0,008–0,009/kg) |
+| >38-40 kg | 10 | 7 | 3 | 7 | Guaifenesin 70 mg (1,75–1,84/kg); Cetirizin 3 mg (0,075–0,079/kg); Dexa 0,35 mg (0,009–0,009/kg) |
 
 ### AMB-CTZ-DEXA — 3x sehari
 
@@ -308,22 +309,22 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 | >7-8 kg | 15 | 2 | 1 | 2 | Ambroxol 4 mg (0,5–0,57/kg); Cetirizin 0,667 mg (0,083–0,095/kg); Dexa 0,067 mg (0,008–0,01/kg) |
 | >8-9 kg | 13 | 2 | 1 | 2 | Ambroxol 4,6 mg (0,51–0,58/kg); Cetirizin 0,769 mg (0,085–0,096/kg); Dexa 0,077 mg (0,009–0,01/kg) |
 | >9-10 kg | 12 | 2 | 1 | 2 | Ambroxol 5 mg (0,5–0,56/kg); Cetirizin 0,833 mg (0,083–0,093/kg); Dexa 0,083 mg (0,008–0,009/kg) |
-| >10-11 kg | 20 | 3 | 2 | 3 | Ambroxol 4,5 mg (0,41–0,45/kg); Cetirizin 1 mg (0,091–0,1/kg); Dexa 0,075 mg (0,007–0,008/kg) |
-| >11-12 kg | 19 | 3 | 2 | 3 | Ambroxol 4,7 mg (0,39–0,43/kg); Cetirizin 1,1 mg (0,088–0,096/kg); Dexa 0,079 mg (0,007–0,007/kg) |
-| >12-13 kg | 17 | 3 | 2 | 3 | Ambroxol 5,3 mg (0,41–0,44/kg); Cetirizin 1,2 mg (0,09–0,098/kg); Dexa 0,088 mg (0,007–0,007/kg) |
-| >13-14 kg | 16 | 3 | 2 | 3 | Ambroxol 5,6 mg (0,4–0,43/kg); Cetirizin 1,3 mg (0,089–0,096/kg); Dexa 0,094 mg (0,007–0,007/kg) |
-| >14-15 kg | 15 | 3 | 2 | 3 | Ambroxol 6 mg (0,4–0,43/kg); Cetirizin 1,3 mg (0,089–0,095/kg); Dexa 0,1 mg (0,007–0,007/kg) |
+| >10-11 kg | 10 | 2 | 1 | 2 | Ambroxol 6 mg (0,55–0,6/kg); Cetirizin 1 mg (0,091–0,1/kg); Dexa 0,1 mg (0,009–0,01/kg) |
+| >11-12 kg | 10 | 2 | 1 | 2 | Ambroxol 6 mg (0,5–0,55/kg); Cetirizin 1 mg (0,083–0,091/kg); Dexa 0,1 mg (0,008–0,009/kg) |
+| >12-13 kg | 10 | 2 | 1 | 2 | Ambroxol 6 mg (0,46–0,5/kg); Cetirizin 1 mg (0,077–0,083/kg); Dexa 0,1 mg (0,008–0,008/kg) |
+| >13-14 kg | 10 | 2 | 1 | 2 | Ambroxol 6 mg (0,43–0,46/kg); Cetirizin 1 mg (0,071–0,077/kg); Dexa 0,1 mg (0,007–0,008/kg) |
+| >14-15 kg | 15 | 4 | 2 | 4 | Ambroxol 8 mg (0,53–0,57/kg); Cetirizin 1,3 mg (0,089–0,095/kg); Dexa 0,133 mg (0,009–0,01/kg) |
 | >15-16 kg | 14 | 4 | 2 | 4 | Ambroxol 8,6 mg (0,54–0,57/kg); Cetirizin 1,4 mg (0,089–0,095/kg); Dexa 0,143 mg (0,009–0,01/kg) |
 | >16-18 kg | 13 | 4 | 2 | 4 | Ambroxol 9,2 mg (0,51–0,58/kg); Cetirizin 1,5 mg (0,085–0,096/kg); Dexa 0,154 mg (0,009–0,01/kg) |
 | >18-20 kg | 12 | 4 | 2 | 4 | Ambroxol 10 mg (0,5–0,56/kg); Cetirizin 1,7 mg (0,083–0,093/kg); Dexa 0,167 mg (0,008–0,009/kg) |
-| >20-22 kg | 13 | 5 | 2 | 5 | Ambroxol 11,5 mg (0,52–0,58/kg); Cetirizin 1,5 mg (0,07–0,077/kg); Dexa 0,192 mg (0,009–0,01/kg) |
-| >22-25 kg | 14 | 5 | 3 | 5 | Ambroxol 10,7 mg (0,43–0,49/kg); Cetirizin 2,1 mg (0,086–0,097/kg); Dexa 0,179 mg (0,007–0,008/kg) |
-| >25-28 kg | 12 | 6 | 3 | 6 | Ambroxol 15 mg (0,54–0,6/kg); Cetirizin 2,5 mg (0,089–0,1/kg); Dexa 0,25 mg (0,009–0,01/kg) |
+| >20-22 kg | 10 | 4 | 2 | 4 | Ambroxol 12 mg (0,55–0,6/kg); Cetirizin 2 mg (0,091–0,1/kg); Dexa 0,2 mg (0,009–0,01/kg) |
+| >22-25 kg | 10 | 4 | 2 | 4 | Ambroxol 12 mg (0,48–0,55/kg); Cetirizin 2 mg (0,08–0,091/kg); Dexa 0,2 mg (0,008–0,009/kg) |
+| >25-28 kg | 10 | 5 | 2 | 5 | Ambroxol 15 mg (0,54–0,6/kg); Cetirizin 2 mg (0,071–0,08/kg); Dexa 0,25 mg (0,009–0,01/kg) |
 | >28-30 kg | 11 | 6 | 3 | 6 | Ambroxol 16,4 mg (0,55–0,58/kg); Cetirizin 2,7 mg (0,091–0,097/kg); Dexa 0,273 mg (0,009–0,01/kg) |
-| >30-32 kg | 12 | 7 | 3 | 7 | Ambroxol 17,5 mg (0,55–0,58/kg); Cetirizin 2,5 mg (0,078–0,083/kg); Dexa 0,292 mg (0,009–0,01/kg) |
-| >32-35 kg | 11 | 7 | 3 | 7 | Ambroxol 19,1 mg (0,55–0,6/kg); Cetirizin 2,7 mg (0,078–0,085/kg); Dexa 0,318 mg (0,009–0,01/kg) |
-| >35-38 kg | 12 | 8 | 3 | 8 | Ambroxol 20 mg (0,53–0,57/kg); Cetirizin 2,5 mg (0,066–0,071/kg); Dexa 0,333 mg (0,009–0,01/kg) |
-| >38-40 kg | 11 | 8 | 3 | 8 | Ambroxol 21,8 mg (0,55–0,57/kg); Cetirizin 2,7 mg (0,068–0,072/kg); Dexa 0,364 mg (0,009–0,01/kg) |
+| >30-32 kg | 10 | 5 | 3 | 5 | Ambroxol 15 mg (0,47–0,5/kg); Cetirizin 3 mg (0,094–0,1/kg); Dexa 0,25 mg (0,008–0,008/kg) |
+| >32-35 kg | 10 | 6 | 3 | 6 | Ambroxol 18 mg (0,51–0,56/kg); Cetirizin 3 mg (0,086–0,094/kg); Dexa 0,3 mg (0,009–0,009/kg) |
+| >35-38 kg | 10 | 6 | 3 | 6 | Ambroxol 18 mg (0,47–0,51/kg); Cetirizin 3 mg (0,079–0,086/kg); Dexa 0,3 mg (0,008–0,009/kg) |
+| >38-40 kg | 10 | 7 | 3 | 7 | Ambroxol 21 mg (0,53–0,55/kg); Cetirizin 3 mg (0,075–0,079/kg); Dexa 0,35 mg (0,009–0,009/kg) |
 
 ### Racikan Antasida (≥4 th) — 3x sehari
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.7 — 2026-11-18
+
+- **Koreksi aturan v0.8.6**: guaifenesin, ambroxol, dan dexa sekarang memakai **dosis minimal per kg**. Patokannya BB 10 kg = 2 tablet dalam 12 bungkus.
+  - Dosis per minum: GG ~1,7 mg/kg, ambroxol 0,5 mg/kg, dexa ~0,008 mg/kg.
+  - BB di bawah 10 kg mendapat tablet lebih sedikit (minimal 1). Bila 1 tablet masih terlalu besar, puyer diperbanyak (maks 30 bungkus).
+  - Contoh: BB 8 kg ISPA = GG 1, CTM 2, DEXA 1 tablet, buat 10 bungkus.
+
 ## v0.8.6 — 2026-11-18
 
 - **Guaifenesin, ambroxol, dan dexa di semua racikan = jumlah minimal tetap** (permintaan dokter):
