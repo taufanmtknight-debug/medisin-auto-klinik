@@ -24,3 +24,8 @@ Tiga kunjungan BPJS dewasa di POLI UMUM 2 (status Sedang Dilayani), tombol RESUM
 
 Setelah muat ulang ketiganya: 0 diagnosa/resep/racikan/tindakan/BHP baru tersimpan; tidak ada kunci localStorage dibuat.
 Catatan: template Konjungtivitis belum punya obat (tetes mata belum dipetakan).
+
+## Uji v0.8.9 (2026-11-18, Chrome laptop, tanpa menyimpan)
+- Pasien antrean BPJS yang belum punya diagnosa; mulai di tab Anamnesa, satu klik ke tab DOKTER → jalan otomatis berjalan ±12 dtk setelah build dimuat (sekitar 2 dtk setelah data tab DOKTER selesai dimuat): diagnosa K59.0 + K40.9, prognosa, jasa konsultasi BPJS (dry run), Paket Resep terbuka. Anamnesa yang sudah diisi tidak ditimpa.
+- Ketuk chip hijau tua K40.9 → hilang dari Diagnosa (tetap hilang setelah 4 dtk).
+- Muat ulang: diagnosa/resep/tindakan/BHP/racikan tetap 0, tidak ada permintaan tulis. Pengaturan otomatis="0" di laptop dikembalikan.
