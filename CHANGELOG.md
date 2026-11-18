@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.9 — 2026-11-18
+
+- **Jalan otomatis bekerja di klik pertama tab DOKTER** (laporan dokter). Saat tab DOKTER dibuka, Medisin memuat ulang data kunjungan (~1–2 detik); dulu RESUME jalan sebelum muatan selesai lalu tertimpa. Sekarang script menunggu halaman tenang (komponen ≥1,5 dtk, tidak ada respons API ≥1 dtk, maks 10 dtk). Bila data pasien tetap dimuat ulang sesudah RESUME dan Anamnesa kembali kosong, RESUME diulang sekali (hanya mengisi kolom kosong).
+- **Panel Paket Resep: ketuk diagnosis hijau tua (✓) = batal pilih** (permintaan dokter), sama dengan ✕. Diagnosa yang sudah tersimpan ditandai hapus (dihapus saat SIMPAN SEMUA); ketuk lagi untuk memilih kembali.
+
 ## v0.8.8 — 2026-11-18
 
 - **CTM juga dosis paling minimal** (koreksi dokter): ~0,08 mg/kg/dosis, dibulatkan ke bawah, **maks 1 tablet per kelipatan 5 kg** (20 kg = maks 4 tablet) dan maks 2 mg/dosis. Contoh BB 20 kg GG-CTM-DEXA = GG 3, CTM 4, DEXA 3 tablet, 10 bungkus.
