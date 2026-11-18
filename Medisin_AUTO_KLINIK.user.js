@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.8
+// @version      0.8.9
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.8";
+  const SCRIPT_VERSION_FALLBACK = "0.8.9";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -5533,9 +5533,13 @@
     const dxChoicesEl = shade.querySelector("#ak-medgroup-dx-choices");
     const dxSearchEl = shade.querySelector("#ak-medgroup-dx-search");
     const dxResultsEl = shade.querySelector("#ak-medgroup-dx-results");
+    // v0.8.9 (permintaan dokter): pilihan hijau tua (terpilih) bisa diketuk lagi untuk batal pilih,
+    // sama dengan ✕. Diagnosa tersimpan ditandai hapus (dihapus saat SIMPAN SEMUA).
+    const dxEntriesFor = (d) => selectedIcdEntries().filter((e) => d.icd.some((c) => icdCodeMatches(c, e.code)));
     const dxBtn = (d) => {
-      const on = selectedIcdEntries().some((e) => d.icd.some((c) => icdCodeMatches(c, e.code)));
-      return `<button type="button" class="akm-dxc-btn${on ? " akm-dxc-on" : ""}" data-dx-key="${escapePreviewHtml(d.key)}"><b>${escapePreviewHtml(d.icd[0])}</b>${escapePreviewHtml(d.label)}${on ? " ✓" : ""}</button>`;
+      const marks = dxDeleteMarksForPage();
+      const on = dxEntriesFor(d).some((e) => !marks.has(e.code));
+      return `<button type="button" class="akm-dxc-btn${on ? " akm-dxc-on" : ""}" data-dx-key="${escapePreviewHtml(d.key)}" title="${on ? "Ketuk untuk batal pilih" : "Ketuk untuk memilih"}"><b>${escapePreviewHtml(d.icd[0])}</b>${escapePreviewHtml(d.label)}${on ? " ✓" : ""}</button>`;
     };
     const renderDxChoices = () => {
       if (!dxChoicesEl) return;
@@ -5615,9 +5619,17 @@
       const b = ev.target.closest?.("button[data-dx-key],button[data-icd-i],button[data-dx-del]");
       if (!b) return;
       ev.preventDefault();
-      if (b.dataset.dxDel) {
+      let dropCodes = b.dataset.dxDel ? [b.dataset.dxDel] : [];
+      if (b.dataset.dxKey) {
+        const d = DIAGNOSIS_TEMPLATES.find((x) => x.key === b.dataset.dxKey);
+        const marks = dxDeleteMarksForPage();
+        const hit = d ? dxEntriesFor(d) : [];
+        const live = hit.filter((e) => !marks.has(e.code)).map((e) => e.code);
+        // Terpilih -> batal pilih; tersimpan yang ditandai hapus -> batal hapus.
+        dropCodes = live.length ? live : hit.filter((e) => marks.has(e.code)).map((e) => e.code);
+      }
+      for (const code of dropCodes) {
         // v0.7.0: hapus diagnosa yang kurang cocok (hanya yang belum tersimpan).
-        const code = b.dataset.dxDel;
         let r;
         try {
           r = removeUnsavedDiagnosis(code);
@@ -5636,6 +5648,8 @@
                 ? `${code} akan dihapus saat SIMPAN SEMUA (ketuk ↺ untuk batal).`
                 : `${code} batal dihapus.`
               : `${code} tidak ditemukan di isian Diagnosa.`;
+      }
+      if (dropCodes.length) {
         renderDx(selectedIcdEntries(), readFieldText("Diagnosa"));
         renderDxPreview();
         renderDxChoices();
@@ -6803,14 +6817,40 @@
   // Sekali per kunjungan, hanya bila belum ada diagnosa/resep tersimpan.
   const autoRunDone = new Set();
   let autoRunBusy = false;
+  // v0.8.9 (laporan dokter): klik pertama tab DOKTER memuat ulang data kunjungan Medisin
+  // (beberapa permintaan, ~1-2 dtk). Dulu RESUME jalan sebelum muatan selesai lalu
+  // tertimpa, sehingga dokter harus mengklik lagi. Sekarang tunggu halaman tenang dulu.
+  let lastApiAt = 0;
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) if (/medisin\.id\/api\//.test(e.name)) lastApiAt = Math.max(lastApiAt, e.responseEnd || performance.now());
+    }).observe({ type: "resource", buffered: false });
+  } catch (_) {}
+  // Siap bila komponen sudah >=1,5 dtk, tidak ada respons API >=1 dtk, dan objek pasien
+  // tidak berganti >=1 dtk; paling lama 10 dtk lalu jalan juga. (pure, diuji)
+  function autoRunSettled(st) {
+    if (st.now - st.mountedAt >= 10000) return true;
+    return st.now - st.mountedAt >= 1500 && st.now - st.lastApiAt >= 1000 && st.now - st.pasienSince >= 1000;
+  }
+  const autoWait = { id: null, mountedAt: 0, pasien: null, pasienSince: 0, rs: null };
+  let autoRecheck = null;
   async function maybeAutoRun() {
     if (autoRunBusy || !autoRunEnabled() || !isTargetPage()) return;
     const id = urlKunjunganId();
-    if (!id || autoRunDone.has(id)) return;
+    if (!id) return;
+    if (autoRecheck && autoRecheck.id === id) return autoRunRecheck();
+    if (autoRunDone.has(id)) return;
     const p = pasienAktif();
     const dg = p && findVm("Diagnosa");
     const rs = p && findVm("Resep");
-    if (!p || !dg || !rs) return;
+    const now = performance.now();
+    if (!p || !dg || !rs) {
+      autoWait.id = null;
+      return;
+    }
+    if (autoWait.id !== id || autoWait.rs !== rs) Object.assign(autoWait, { id, mountedAt: now, pasien: p, pasienSince: now, rs });
+    if (autoWait.pasien !== p) Object.assign(autoWait, { pasien: p, pasienSince: now });
+    if (!autoRunSettled({ now, mountedAt: autoWait.mountedAt, lastApiAt, pasienSince: autoWait.pasienSince })) return;
     autoRunDone.add(id);
     let seen = false;
     try {
@@ -6825,10 +6865,31 @@
     }
     autoRunBusy = true;
     try {
-      await sleep(400);
+      await runTemplate("resume-diagnosis");
+      autoRecheck = { id, until: performance.now() + 8000, pasien: pasienAktif(), done: false };
+    } finally {
+      autoRunBusy = false;
+    }
+  }
+  // Jaring pengaman: bila Medisin masih memuat ulang data pasien sesudah RESUME (Anamnesa
+  // kembali kosong), jalankan RESUME sekali lagi. Hanya mengisi kolom kosong.
+  async function autoRunRecheck() {
+    const r = autoRecheck;
+    if (performance.now() > r.until || r.done) {
+      autoRecheck = null;
+      return;
+    }
+    const p = pasienAktif();
+    if (!p || p === r.pasien) return;
+    if (!String(p.keluhan || "").trim() || String(p.keluhan_lainya || "").trim()) return;
+    r.done = true;
+    LOG("Jalan otomatis: data pasien dimuat ulang Medisin, RESUME diulang sekali");
+    autoRunBusy = true;
+    try {
       await runTemplate("resume-diagnosis");
     } finally {
       autoRunBusy = false;
+      autoRecheck = null;
     }
   }
 
@@ -7755,6 +7816,7 @@
       repeatLastVisit,
       fillSickLetter,
       maybeAutoRun,
+      autoRunSettled,
       goNextPatient,
       maybeContinueNextPatient,
       toggleAutoRun,

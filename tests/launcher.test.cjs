@@ -62,3 +62,19 @@ test("v0.6.2: buka-PIN batal bila kunci.json diubah lagi (kunci ulang jarak jauh
   assert.equal(a.stamp, api.parseLockText('{ "aktif":false,"pesan":"","kunci_ke":1 }').stamp);
   assert.match(source, /return !!v && v === String\(lockState\?\.stamp \|\| "lama"\);/);
 });
+
+// v0.8.9: jalan otomatis menunggu tab DOKTER selesai memuat; pilihan hijau tua bisa dibatalkan.
+test("jalan otomatis menunggu halaman tenang (tab DOKTER klik pertama)", () => {
+  const s = api.autoRunSettled;
+  assert.equal(s({ now: 1000, mountedAt: 0, lastApiAt: 0, pasienSince: 0 }), false, "baru terpasang");
+  assert.equal(s({ now: 3000, mountedAt: 0, lastApiAt: 2500, pasienSince: 0 }), false, "API masih merespons");
+  assert.equal(s({ now: 3000, mountedAt: 0, lastApiAt: 1000, pasienSince: 2500 }), false, "data pasien baru diganti");
+  assert.equal(s({ now: 3000, mountedAt: 0, lastApiAt: 1900, pasienSince: 1900 }), true);
+  assert.equal(s({ now: 10000, mountedAt: 0, lastApiAt: 9990, pasienSince: 9990 }), true, "paling lama 10 dtk");
+  assert.doesNotMatch(source, /await sleep\(400\);\s*await runTemplate\("resume-diagnosis"\)/);
+});
+
+test("pilihan diagnosis hijau tua: ketuk lagi = batal pilih", () => {
+  assert.match(source, /dropCodes = live\.length \? live : hit\.filter\(\(e\) => marks\.has\(e\.code\)\)/);
+  assert.match(source, /Ketuk untuk batal pilih/);
+});
