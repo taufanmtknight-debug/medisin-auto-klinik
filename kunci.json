@@ -1,5 +1,5 @@
 {
-  "aktif": true,
-  "pesan": "",
-  "kunci_ke": 1
+  "aktif": false,
+  "pesan": "AUTO KLINIK dimatikan oleh dokter.",
+  "kunci_ke": 2
 }
