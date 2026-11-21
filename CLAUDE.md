@@ -24,6 +24,7 @@ Pengguna adalah dokter; balas dalam Bahasa Indonesia sederhana. Website: `https:
 - Satu file, 9 bagian (bagian 9 = alur cepat v0.4.0, sumber `engine-alur.js` di generator) (lihat komentar di atas file). Bagian 2–4 = jembatan Medisin (state Vue); bagian 1, 5–8 dibawa dari versi Klinik Pintar.
 - Komponen Medisin dicari dengan `name` ATAU `_componentTag` (`Resep`, `Racikan`, `Diagnosa`, `dokter`). Data pasien hanya dipakai lewat `pasienAktif()` (id kunjungan store = URL).
 - `@name`/`@namespace` jangan diubah. `@inject-into page` wajib. Naikkan `@version` + `SCRIPT_VERSION_FALLBACK` bersamaan, tulis CHANGELOG.
-- Satu-satunya akses API di luar `AK-WRITE-BLOCK`: GET `master/product` untuk membaca stok (v0.8.3), dijaga tes.
+- Satu-satunya akses API di luar `AK-WRITE-BLOCK`: GET `master/product` untuk membaca stok (v0.8.3), dijaga tes. Di luar Medisin: GET `kunci.json` dan POST laporan perangkat ke Google Form dokter (v0.9.0, tanpa data pasien).
+- Pertanyaan "AUTO KLINIK aktif di perangkat mana": baca Google Sheet `1DNuYWlGjp7-lYajU-hBwxua5wy-Fa4EIqtPU6_o6chw` (tab "Form responses 1", kolom Laporan = JSON) lewat konektor Google Sheets; kelompokkan per `id`, ambil baris terakhir. Waktu di Sheet = WIB.
 - `npm test` harus lulus; tes `medisin.test.cjs` menjaga: tidak menimpa isian dokter, nama obat persis, simpan/API tulis hanya di blok `AK-WRITE-BLOCK`, SUBMIT/PCare tidak pernah.
 - Uji di Medisin asli tanpa memasang: di Console halaman proses, `fetch` file raw dari GitHub lalu `(0,eval)(teks)`; ubah data hanya di memori, jangan tekan SIMPAN, muat ulang setelahnya, hapus kunci localStorage `auto-klinik-medisin:*` hasil uji.

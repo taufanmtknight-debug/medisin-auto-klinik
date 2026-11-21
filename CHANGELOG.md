@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.9.0 — 2026-11-21
+
+- **Laporan perangkat** (permintaan dokter): tiap perangkat yang membuka Medisin dengan AUTO KLINIK mengirim satu baris ke Google Form "Auto Klinik Perangkat" milik dokter (masuk ke Google Sheet dokter) saat mulai, tiap 10 menit selama Medisin terbuka, dan saat status kunci berubah. Isinya hanya: kode perangkat acak (tersimpan di `auto-klinik-medisin:perangkat`), jenis perangkat & browser, versi, aktif/terkunci, jalan otomatis nyala/mati, dan apakah sedang di halaman pelayanan. Tanpa data pasien, alamat halaman, atau nama akun. Perangkat yang terkunci tetap melapor.
+
 ## v0.8.9 — 2026-11-18
 
 - **Jalan otomatis bekerja di klik pertama tab DOKTER** (laporan dokter). Saat tab DOKTER dibuka, Medisin memuat ulang data kunjungan (~1–2 detik); dulu RESUME jalan sebelum muatan selesai lalu tertimpa. Sekarang script menunggu halaman tenang (komponen ≥1,5 dtk, tidak ada respons API ≥1 dtk, maks 10 dtk). Bila data pasien tetap dimuat ulang sesudah RESUME dan Anamnesa kembali kosong, RESUME diulang sekali (hanya mengisi kolom kosong).
