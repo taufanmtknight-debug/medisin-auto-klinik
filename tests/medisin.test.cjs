@@ -462,7 +462,10 @@ test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare t
   // v0.8.3: satu-satunya akses API di luar blok tulis = GET daftar produk (baca stok).
   const STOCK_GET = 'const r = await vm.$klinik.get("master/product", { params });';
   assert.ok(source.includes(STOCK_GET));
-  const outside = (source.slice(0, a) + source.slice(b)).replace(LOCK_FETCH, "").replace(STOCK_GET, "").replace(/\/\/[^\n]*/g, "");
+  // v0.9.0: laporan perangkat (POST ke Google Form dokter, tanpa data pasien).
+  const DEVICE_FETCH = 'await fetch(DEVICE_REPORT_URL, { method: "POST", mode: "no-cors", body, cache: "no-store", credentials: "omit" })';
+  assert.equal(source.split(DEVICE_FETCH).length, 2);
+  const outside = (source.slice(0, a) + source.slice(b)).replace(LOCK_FETCH, "").replace(DEVICE_FETCH, "").replace(STOCK_GET, "").replace(/\/\/[^\n]*/g, "");
   // Di luar blok: tidak ada pemanggilan simpan/submit/API tulis sama sekali.
   for (const re of [
     /\.onSave\w*\s*\(/,
@@ -489,7 +492,7 @@ test("sumber script: simpan HANYA di blok SIMPAN SEMUA/riwayat, SUBMIT & PCare t
     /XMLHttpRequest/,
     /\.(?:put|patch)\s*\(/,
   ])
-    assert.doesNotMatch(code.replace(LOCK_FETCH, ""), re);
+    assert.doesNotMatch(code.replace(LOCK_FETCH, "").replace(DEVICE_FETCH, ""), re);
   // Di dalam blok: hanya 4 simpan milik Medisin + baca riwayat + permintaan lewat penjaga.
   const saves = [...block.matchAll(/\.(onSave\w+)\s*\(/g)].map((m) => m[1]).sort();
   assert.deepEqual(saves, ["onSaveBhp", "onSaveDiagnosa", "onSaveResep", "onSaveTindakan"]);

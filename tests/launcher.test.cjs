@@ -18,9 +18,9 @@ test("kunci.json: aktif false = terkunci, true = terbuka, rusak = abaikan", () =
   assert.equal(p('{"aktif": false,}').locked, true);
   assert.equal(p(""), null);
   assert.equal(p("<html>404</html>"), null);
-  // File di repo valid dan awalnya terbuka.
+  // File di repo valid (terbuka atau terkunci sesuai permintaan dokter).
   const file = fs.readFileSync(path.join(__dirname, "..", "kunci.json"), "utf8");
-  assert.equal(p(file).locked, false);
+  assert.equal(typeof p(file).locked, "boolean");
   assert.match(api.LOCK_URL, /^https:\/\/raw\.githubusercontent\.com\/taufanmtknight-debug\/medisin-auto-klinik\/.+\/kunci\.json$/);
 });
 
@@ -77,4 +77,18 @@ test("jalan otomatis menunggu halaman tenang (tab DOKTER klik pertama)", () => {
 test("pilihan diagnosis hijau tua: ketuk lagi = batal pilih", () => {
   assert.match(source, /dropCodes = live\.length \? live : hit\.filter\(\(e\) => marks\.has\(e\.code\)\)/);
   assert.match(source, /Ketuk untuk batal pilih/);
+});
+
+// v0.9.0: laporan perangkat ke Google Form dokter, tanpa data pasien.
+test("laporan perangkat: hanya jenis perangkat, versi, status", () => {
+  assert.equal(api.deviceLabel("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"), "Windows · Chrome");
+  assert.equal(api.deviceLabel("Mozilla/5.0 (Linux; Android 14; SM-A145F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"), "Android (SM-A145F) · Chrome");
+  assert.equal(api.deviceLabel("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"), "Android · Chrome");
+  const r = JSON.parse(api.deviceReport({ id: "abc123", ua: "Windows Chrome/1", ver: "0.9.0", locked: true, auto: false, pelayanan: true }));
+  assert.deepEqual(Object.keys(r).sort(), ["halaman", "id", "otomatis", "perangkat", "status", "versi"]);
+  assert.equal(r.status, "terkunci");
+  assert.match(api.DEVICE_REPORT_URL, /^https:\/\/docs\.google\.com\/forms\/d\/e\/[\w-]+\/formResponse$/);
+  // Pemanggil laporan tidak mengirim data pasien.
+  const fn = source.slice(source.indexOf("async function reportDevice"), source.indexOf("let lockChecking"));
+  assert.doesNotMatch(fn, /pasien|keluhan|location\.href|nama|storePasien/i);
 });

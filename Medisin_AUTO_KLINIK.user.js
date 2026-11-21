@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.8.9
+// @version      0.9.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.8.9";
+  const SCRIPT_VERSION_FALLBACK = "0.9.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -7576,6 +7576,59 @@
   function lockMessage() {
     return "AUTO KLINIK sedang dikunci dokter." + (lockState?.pesan ? " " + lockState.pesan : "");
   }
+  // ---- Laporan perangkat (v0.9.0, permintaan dokter) ----
+  // Tiap perangkat melapor ke Google Form milik dokter (masuk ke Google Sheet dokter): saat mulai, tiap 10 menit selama
+  // Medisin terbuka, dan saat status kunci berubah. Isinya HANYA kode perangkat acak, jenis
+  // perangkat/browser, versi, aktif/terkunci, jalan otomatis, dan jenis halaman.
+  // Tanpa data pasien, tanpa alamat halaman, tanpa nama akun.
+  const DEVICE_REPORT_URL = "https://docs.google.com/forms/d/e/1FAIpQLSen3SrWByuoOxdxJg7l6ylgkpXPfTP0XA_dAPjI-eijt-KbUA/formResponse";
+  const DEVICE_REPORT_FIELD = "entry.1002490282";
+  const DEVICE_ID_KEY = "auto-klinik-medisin:perangkat";
+  function deviceId() {
+    try {
+      let id = localStorage.getItem(DEVICE_ID_KEY);
+      if (!/^[a-z0-9]{6}$/.test(id || "")) {
+        id = Math.random().toString(36).slice(2, 8).padEnd(6, "0");
+        localStorage.setItem(DEVICE_ID_KEY, id);
+      }
+      return id;
+    } catch (_) {
+      return "------";
+    }
+  }
+  // (pure, diuji) "Android (SM-A145F) · Chrome", "Windows · Chrome", ...
+  function deviceLabel(ua) {
+    const u = String(ua || "");
+    const android = u.match(/Android[^;)]*;\s*([^;)]+?)(?:\s+Build\/[^;)]*)?\)/);
+    const model = android && android[1] && !/^(?:K|wv|Linux)$/i.test(android[1].trim()) ? ` (${android[1].trim()})` : "";
+    const os = /Android/.test(u) ? `Android${model}` : /iPhone|iPad/.test(u) ? "iPhone/iPad" : /Windows/.test(u) ? "Windows" : /Mac OS X/.test(u) ? "Mac" : /CrOS/.test(u) ? "ChromeOS" : /Linux/.test(u) ? "Linux" : "lainnya";
+    const br = /Edg\//.test(u) ? "Edge" : /OPR\/|Opera/.test(u) ? "Opera" : /SamsungBrowser/.test(u) ? "Samsung Internet" : /Firefox\//.test(u) ? "Firefox" : /Kiwi/.test(u) ? "Kiwi" : /Chrome\//.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "browser lain";
+    return `${os} · ${br}`;
+  }
+  // (pure, diuji) Isi laporan: hanya keterangan perangkat & script.
+  function deviceReport(o) {
+    return JSON.stringify({
+      id: String(o.id || ""),
+      perangkat: deviceLabel(o.ua),
+      versi: String(o.ver || ""),
+      status: o.locked ? "terkunci" : "aktif",
+      otomatis: o.auto ? "nyala" : "mati",
+      halaman: o.pelayanan ? "pelayanan pasien" : "lain",
+    });
+  }
+  let lastReportAt = 0;
+  async function reportDevice(force = false) {
+    if (!force && Date.now() - lastReportAt < 600000) return;
+    lastReportAt = Date.now();
+    const body = new URLSearchParams();
+    body.set(DEVICE_REPORT_FIELD, deviceReport({ id: deviceId(), ua: navigator.userAgent, ver: VERSION, locked: akLocked(), auto: autoRunEnabled(), pelayanan: isTargetPage() }));
+    try {
+      await fetch(DEVICE_REPORT_URL, { method: "POST", mode: "no-cors", body, cache: "no-store", credentials: "omit" });
+    } catch (e) {
+      LOG("Laporan perangkat gagal (dicoba lagi nanti):", e?.message || e);
+    }
+  }
+
   let lockChecking = false;
   async function refreshRemoteLock() {
     if (lockChecking) return;
@@ -7594,6 +7647,7 @@
         localStorage.setItem(LOCK_KEY, JSON.stringify(lockState));
       } catch (_) {}
       if (changed) {
+        reportDevice(true);
         remountLauncher();
         notify(next.locked ? lockMessage() : "AUTO KLINIK dibuka kembali.", next.locked ? "warn" : "success", 8000);
       }
@@ -7632,6 +7686,8 @@
     addStyle(STYLES + DRUGMAP_STYLES + ALUR_STYLES + LAUNCHER_STYLES);
     refreshRemoteLock();
     setInterval(refreshRemoteLock, 120000);
+    setTimeout(() => reportDevice(true), 5000);
+    setInterval(() => reportDevice(false), 60000);
     window.addEventListener("resize", () => applyLauncherPos(document.getElementById("auto-klinik-box")));
     document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refreshRemoteLock());
     hookSpaNavigation();
@@ -7748,6 +7804,9 @@
       lockEffective,
       clampLauncherPos,
       LOCK_URL,
+      DEVICE_REPORT_URL,
+      deviceLabel,
+      deviceReport,
       RED_FLAGS,
       detectRedFlags,
       redFlagHtml,
