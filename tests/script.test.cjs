@@ -75,7 +75,7 @@ test("regresi dosis berbasis BB sama dengan v8.1.6", () => {
   assert.deepEqual(plain(qty("CEFADROXIL_ANAK_", 40)), ["8"]);
   // v0.8.0: per mg/kg (lihat tes "v0.8.0: dosis anak per mg/kg").
   const lm = api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 10).tpl;
-  assert.deepEqual([lm.doseFreq, lm.duration, lm.compoundInstruction], ["2", "6", "buat 12"]); // 2x sehari, bungkus menyesuaikan
+  assert.deepEqual([lm.doseFreq, lm.duration, lm.compoundInstruction], ["2", "5", "buat 10"]); // 2x sehari, bungkus menyesuaikan
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 3), "0.5");
   assert.equal(dose("MUAL_MUNTAH_SYRUP_ANAK_", 10), "2");
 
@@ -627,11 +627,9 @@ test("v0.8.0: ibuprofen/CTM/domperidon <6 bln, ranitidin <2 th, antasida <4 th t
   assert.deepEqual([sy(4.5).medicines[0].item, sy(4.5).medicines[0].dose, sy(8).medicines[0].dose, sy(13).medicines[0].dose], ["ANTASIDA_SYRUP", "2.5", "5", "10"]);
   assert.equal(api.ITEMS.ANTASIDA_SYRUP.target, "BPJS -- ANTASIDA DOEN SYRUP");
   assert.match(res("LAMBUNG_MUAL_RACIKAN_BARU", 10, 1.9).note, /≥2 tahun/);
-  // 2-4 th: ranitidin saja (antasida dibuang); >=4 th: keduanya.
-  const lm3 = res("LAMBUNG_MUAL_RACIKAN_BARU", 13, 3);
-  assert.deepEqual(lm3.racikans[0].tpl.ingredients.map((i) => i.item), ["RANITIDINE_HCL"]);
-  assert.match(lm3.info, /ANTASIDA .*umur <4 tahun/);
-  assert.equal(res("LAMBUNG_MUAL_RACIKAN_BARU", 17, 5).racikans[0].tpl.ingredients.length, 2);
+  // v0.9.2: racikan ranitidin saja (antasida punya racikan sendiri).
+  for (const [kg, age] of [[13, 3], [17, 5]])
+    assert.deepEqual(res("LAMBUNG_MUAL_RACIKAN_BARU", kg, age).racikans[0].tpl.ingredients.map((i) => i.item), ["RANITIDINE_HCL"]);
   // Bayi <6 bulan: ISPA & Bapil 2 tetap, tanpa CTM; guaifenesin/dexa/ambroxol/cetirizine tetap.
   const ispa = res("ISPA_ANAK", 5, 0.3).racikans[0].tpl;
   assert.deepEqual(ispa.ingredients.map((i) => i.item), ["GUAIFENESIN_100", "DEXAMETHASONE_05"]);
@@ -745,7 +743,7 @@ test("v0.8.4: racikan bapil cetirizin (tanpa CTM) & nama racikan singkatan obat"
   const ac = api.getWeightTemplate("BARU_BAPIL_AMB_CTZ_", 10).tpl;
   assert.equal(api.racikanShortName(ac), "AMB-CTZ-DEXA");
   assert.ok(api.MEDICATION_ITEMS_FLAT.some((x) => x.key === "BAPIL_AMB_CTZ_ANAK"));
-  assert.equal(api.racikanShortName(api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 20).tpl), "ANTS-RANI");
+  assert.equal(api.racikanShortName(api.getWeightTemplate("BARU_LAMBUNG_MUAL_", 20).tpl), "RANI");
   assert.equal(api.racikanShortName(api.getWeightTemplate("DEMAM_ANAK_", 12).tpl), ""); // 1 obat: nama lama
   assert.equal(api.racikanShortName(api.SALEP_RACIKAN), ""); // salep: nama lama
 });
@@ -784,14 +782,13 @@ test("v0.8.8: CTM dosis minimal: maks 1 tablet per kelipatan 5 kg (20 kg maks 4 
 });
 
 
-test("v0.9.1: racikan lambung+mual & mual muntah dinamai singkatan isinya", () => {
+test("v0.9.1/0.9.2: racikan ranitidin & domperidon dinamai singkatan isinya", () => {
   const it = (k) => api.MEDICATION_ITEMS_FLAT.find((x) => x.key === k);
   const nm = (k, kg, age) => api.racikanShortName(api.resolveMedicationItem(it(k), kg, age).racikans[0].tpl);
-  assert.equal(nm("LAMBUNG_MUAL_RACIKAN_BARU", 17, 5), "ANTS-RANI");
-  assert.equal(nm("LAMBUNG_MUAL_RACIKAN_BARU", 13, 3), "RANI");
+  assert.equal(nm("LAMBUNG_MUAL_RACIKAN_BARU", 17, 5), "RANI");
   assert.equal(nm("MUAL_MUNTAH_RACIKAN_BARU", 10, 2), "DOMP");
-  assert.match(it("LAMBUNG_MUAL_RACIKAN_BARU").label, /ANTS-RANI/);
-  assert.match(it("MUAL_MUNTAH_RACIKAN_BARU").label, /DOMP/);
+  assert.equal(it("LAMBUNG_MUAL_RACIKAN_BARU").label, "Racikan Ranitidin");
+  assert.equal(it("MUAL_MUNTAH_RACIKAN_BARU").label, "Racikan Domperidon");
   // Racikan 1 obat lain tetap memakai nama lama.
   assert.equal(api.racikanShortName({ unit: "pulvis", ingredients: [{ item: "PARACETAMOL_500" }] }), "");
 });

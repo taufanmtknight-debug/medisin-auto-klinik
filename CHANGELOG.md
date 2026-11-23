@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.9.2 — 2026-11-23
+
+- **Racikan lambung = ranitidin saja** (permintaan dokter; antasida sudah punya racikan sendiri). Dosis ranitidin tetap minimal ~1,2–1,8 mg/kg/dosis, 2x sehari; hanya BB 9–10 kg berubah dari 1 tab/12 bungkus menjadi 1 tab/10 bungkus (15 mg/dosis).
+- Nama di Paket Resep: **Racikan Ranitidin** dan **Racikan Domperidon** (tanpa keterangan dalam kurung). Nama racikan di Medisin: RANI dan DOMP.
+
 ## v0.9.1 — 2026-11-23
 
 - **Nama racikan lambung + mual dan mual muntah = singkatan isinya** (permintaan dokter), sama seperti racikan lain. Lambung + mual = **ANTS-RANI** (umur 2–4 th tanpa antasida = **RANI**), mual muntah = **DOMP**. Nama ini dipakai di kolom nama racikan Medisin dan di daftar Paket Resep.

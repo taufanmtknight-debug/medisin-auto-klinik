@@ -7,7 +7,7 @@ Dihitung otomatis per mg/kg (permintaan dokter 2026-11-18). 1 bungkus sekali min
 - Target per dosis: paracetamol 12,5 mg/kg (10–15), ibuprofen 7,5 (5–10), domperidon 0,2 (maks 0,25), CTM 0,1 (maks 2 mg), dexa 0,015 (maks 0,5 mg), guaifenesin 4 (maks 100 mg), ambroxol 0,5, cetirizin 0,25 mg/kg/hari, ranitidin 1,5, antasida 1/40 tablet/kg (maks 1 tablet).
 - Bayi <6 bulan: racikan yang berisi CTM dihitung ulang tanpa CTM (jumlah bungkus bisa berbeda dari tabel).
 - BB < 2 kg: tidak ada template (diisi manual).
-- Racikan Lambung + Mual dan Antasida mulai 8 kg. Cetirizin, Bapil 2, Lambung + Mual, Mual Muntah (baru) dan Antasida berhenti di 40 kg. Yang lain sampai 50 kg.
+- Racikan Ranitidin dan Antasida mulai 8 kg. Cetirizin, Bapil 2, Ranitidin, Domperidon dan Antasida berhenti di 40 kg. Yang lain sampai 50 kg.
 - Antibiotik (amoxicillin, cefadroxil puyer/sirup) **tidak diubah**.
 
 ## Batas umur
@@ -16,8 +16,8 @@ Dihitung otomatis per mg/kg (permintaan dokter 2026-11-18). 1 bungkus sekali min
 | Ibuprofen (puyer) | 6 bulan | tidak bisa dipilih; saran demam → paracetamol |
 | CTM | 6 bulan | dibuang dari Racikan ISPA & Bapil 2 ("tanpa CTM") |
 | Domperidon (puyer & sirup) | 6 bulan | tidak bisa dipilih |
-| Ranitidin (Racikan Lambung + Mual) | 2 tahun | tidak bisa dipilih |
-| Antasida (tablet, sirup, puyer, dan di Racikan Lambung) | 4 tahun | tidak bisa dipilih; umur 2–4 th Racikan Lambung = ranitidin saja |
+| Ranitidin (Racikan Ranitidin) | 2 tahun | tidak bisa dipilih |
+| Antasida (tablet, sirup, puyer) | 4 tahun | tidak bisa dipilih |
 | Guaifenesin, dexametason, ambroxol, cetirizin, paracetamol | tanpa batas umur | — |
 
 Umur yang tidak terbaca dianggap belum cukup umur.
@@ -164,30 +164,30 @@ Umur yang tidak terbaca dianggap belum cukup umur.
 | >40-45 kg | 10 | 8 | Domperidon 8 mg (0,18–0,2/kg) |
 | >45-50 kg | 10 | 9 | Domperidon 9 mg (0,18–0,2/kg) |
 
-### Racikan Lambung + Mual (≥2 th; antasida ≥4 th) — 2x sehari
+### Racikan Ranitidin (≥2 th) — 2x sehari (v0.9.2: tanpa antasida)
 
-| BB | Bungkus | Antasida (tab) | Ranitidin (tab) | Per bungkus |
-|---|---|---|---|---|
-| 8-9 kg | 11 | 2 | 1 | Antasida 0,18 tab (0,02–0,023/kg); Ranitidin 13,6 mg (1,52–1,7/kg) |
-| >9-10 kg | 12 | 3 | 1 | Antasida 0,25 tab (0,025–0,028/kg); Ranitidin 12,5 mg (1,25–1,39/kg) |
-| >10-11 kg | 10 | 3 | 1 | Antasida 0,3 tab (0,027–0,03/kg); Ranitidin 15 mg (1,36–1,5/kg) |
-| >11-12 kg | 10 | 3 | 1 | Antasida 0,3 tab (0,025–0,027/kg); Ranitidin 15 mg (1,25–1,36/kg) |
-| >12-13 kg | 14 | 4 | 2 | Antasida 0,29 tab (0,022–0,024/kg); Ranitidin 21,4 mg (1,65–1,79/kg) |
-| >13-14 kg | 13 | 4 | 2 | Antasida 0,31 tab (0,022–0,024/kg); Ranitidin 23,1 mg (1,65–1,78/kg) |
-| >14-15 kg | 13 | 5 | 2 | Antasida 0,38 tab (0,026–0,027/kg); Ranitidin 23,1 mg (1,54–1,65/kg) |
-| >15-16 kg | 12 | 5 | 2 | Antasida 0,42 tab (0,026–0,028/kg); Ranitidin 25 mg (1,56–1,67/kg) |
-| >16-18 kg | 11 | 5 | 2 | Antasida 0,45 tab (0,025–0,028/kg); Ranitidin 27,3 mg (1,52–1,7/kg) |
-| >18-20 kg | 10 | 5 | 2 | Antasida 0,5 tab (0,025–0,028/kg); Ranitidin 30 mg (1,5–1,67/kg) |
-| >20-22 kg | 10 | 5 | 2 | Antasida 0,5 tab (0,023–0,025/kg); Ranitidin 30 mg (1,36–1,5/kg) |
-| >22-25 kg | 10 | 6 | 2 | Antasida 0,6 tab (0,024–0,027/kg); Ranitidin 30 mg (1,2–1,36/kg) |
-| >25-28 kg | 10 | 7 | 3 | Antasida 0,7 tab (0,025–0,028/kg); Ranitidin 45 mg (1,61–1,8/kg) |
-| >28-30 kg | 10 | 7 | 3 | Antasida 0,7 tab (0,023–0,025/kg); Ranitidin 45 mg (1,5–1,61/kg) |
-| >30-32 kg | 10 | 8 | 3 | Antasida 0,8 tab (0,025–0,027/kg); Ranitidin 45 mg (1,41–1,5/kg) |
-| >32-35 kg | 10 | 8 | 3 | Antasida 0,8 tab (0,023–0,025/kg); Ranitidin 45 mg (1,29–1,41/kg) |
-| >35-38 kg | 10 | 9 | 4 | Antasida 0,9 tab (0,024–0,026/kg); Ranitidin 60 mg (1,58–1,71/kg) |
-| >38-40 kg | 10 | 10 | 4 | Antasida 1 tab (0,025–0,026/kg); Ranitidin 60 mg (1,5–1,58/kg) |
+| BB | Bungkus | Ranitidin (tab) | Per bungkus |
+|---|---|---|---|
+| 8-9 kg | 11 | 1 | Ranitidin 13,64 mg (1,52–1,7/kg) |
+| >9-10 kg | 10 | 1 | Ranitidin 15 mg (1,5–1,67/kg) |
+| >10-11 kg | 10 | 1 | Ranitidin 15 mg (1,36–1,5/kg) |
+| >11-12 kg | 10 | 1 | Ranitidin 15 mg (1,25–1,36/kg) |
+| >12-13 kg | 14 | 2 | Ranitidin 21,43 mg (1,65–1,79/kg) |
+| >13-14 kg | 13 | 2 | Ranitidin 23,08 mg (1,65–1,78/kg) |
+| >14-15 kg | 13 | 2 | Ranitidin 23,08 mg (1,54–1,65/kg) |
+| >15-16 kg | 12 | 2 | Ranitidin 25 mg (1,56–1,67/kg) |
+| >16-18 kg | 11 | 2 | Ranitidin 27,27 mg (1,52–1,7/kg) |
+| >18-20 kg | 10 | 2 | Ranitidin 30 mg (1,5–1,67/kg) |
+| >20-22 kg | 10 | 2 | Ranitidin 30 mg (1,36–1,5/kg) |
+| >22-25 kg | 10 | 2 | Ranitidin 30 mg (1,2–1,36/kg) |
+| >25-28 kg | 10 | 3 | Ranitidin 45 mg (1,61–1,8/kg) |
+| >28-30 kg | 10 | 3 | Ranitidin 45 mg (1,5–1,61/kg) |
+| >30-32 kg | 10 | 3 | Ranitidin 45 mg (1,41–1,5/kg) |
+| >32-35 kg | 10 | 3 | Ranitidin 45 mg (1,29–1,41/kg) |
+| >35-38 kg | 10 | 4 | Ranitidin 60 mg (1,58–1,71/kg) |
+| >38-40 kg | 10 | 4 | Ranitidin 60 mg (1,5–1,58/kg) |
 
-### Racikan Mual Muntah baru (≥6 bln) — 3x sehari
+### Racikan Domperidon (≥6 bln) — 3x sehari
 
 | BB | Bungkus | Domperidon (tab) | Per bungkus |
 |---|---|---|---|
