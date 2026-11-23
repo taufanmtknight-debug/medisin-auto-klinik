@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.9.1 — 2026-11-23
+
+- **Nama racikan lambung + mual dan mual muntah = singkatan isinya** (permintaan dokter), sama seperti racikan lain. Lambung + mual = **ANTS-RANI** (umur 2–4 th tanpa antasida = **RANI**), mual muntah = **DOMP**. Nama ini dipakai di kolom nama racikan Medisin dan di daftar Paket Resep.
+
 ## v0.9.0 — 2026-11-21
 
 - **Laporan perangkat** (permintaan dokter): tiap perangkat yang membuka Medisin dengan AUTO KLINIK mengirim satu baris ke Google Form "Auto Klinik Perangkat" milik dokter (masuk ke Google Sheet dokter) saat mulai, tiap 10 menit selama Medisin terbuka, dan saat status kunci berubah. Isinya hanya: kode perangkat acak (tersimpan di `auto-klinik-medisin:perangkat`), jenis perangkat & browser, versi, aktif/terkunci, jalan otomatis nyala/mati, dan apakah sedang di halaman pelayanan. Tanpa data pasien, alamat halaman, atau nama akun. Perangkat yang terkunci tetap melapor.

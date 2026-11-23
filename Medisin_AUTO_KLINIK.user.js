@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.9.0
+// @version      0.9.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.9.0";
+  const SCRIPT_VERSION_FALLBACK = "0.9.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -519,13 +519,13 @@
     // v10.0.9 (permintaan dokter): Ibuprofen 400 mg, tiap 7 kg -> +1 tablet, buat 10 puyer, 3x sehari.
     { prefix: "IBUPROFEN_ANAK_", dosed: true, title: "IBUPROFEN ANAK", name: "puyer ibuprofen", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["IBUPROFEN_400"] },
     { prefix: "ANTIBIOTIK_ANAK_", title: "ANTIBIOTIK ANAK", name: "puyer antibiotik", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
-    { prefix: "MUAL_MUNTAH_ANAK_", dosed: true, title: "MUAL MUNTAH ANAK", name: "puyer mual muntah", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DOMPERIDONE_10"] },
+    { prefix: "MUAL_MUNTAH_ANAK_", dosed: true, shortName: true, title: "MUAL MUNTAH ANAK", name: "puyer mual muntah", maxKg: 50, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DOMPERIDONE_10"] },
     // Cefadroxil puyer: pola jumlah tablet sama seperti Amoxicillin, tetapi 2x sehari.
     { prefix: "CEFADROXIL_ANAK_", title: "CEFADROXIL", name: "cefadroxil", maxKg: 40, duration: "5", doseFreq: "2", instruction: "setelah makan", items: ["CEFADROXIL_500"] },
     // v7.4.2: racikan "baru" (BB <= 40 kg). Dosis/instruksi mengikuti input pengguna.
     // v0.5.2 (permintaan dokter): ranitidin 1,5 mg/kg/dosis 2x sehari = 1/2 tablet 150 mg per 5 kg dalam 10 bungkus (5 hari).
-    { prefix: "BARU_LAMBUNG_MUAL_", dosed: true, minKg: 8, title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
-    { prefix: "BARU_MUAL_MUNTAH_", dosed: true, title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
+    { prefix: "BARU_LAMBUNG_MUAL_", dosed: true, shortName: true, minKg: 8, title: "LAMBUNG + MUAL", name: "lambung,mual", maxKg: 40, duration: "5", doseFreq: "2", instruction: "ac", items: ["ANTASIDA_TABLET", { item: "RANITIDINE_HCL", perBand: 0.5 }] },
+    { prefix: "BARU_MUAL_MUNTAH_", dosed: true, shortName: true, title: "MUAL MUNTAH BARU", name: "mual muntah", maxKg: 40, duration: "3", doseFreq: "3", instruction: "30 menit ac", items: ["DOMPERIDONE_10"] },
     { prefix: "BARU_AMOXICILLIN_", title: "AMOXICILLIN", name: "amoxicillin", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["AMOXICILLIN_500"] },
     { prefix: "BARU_CETIRIZINE_", dosed: true, title: "CETIRIZINE", name: "cetirizine", maxKg: 40, duration: "10", doseFreq: "1", instruction: "setelah makan", items: ["CETIRIZINE_10"] },
     { prefix: "BARU_BAPIL2_", dosed: true, title: "BAPIL 2", name: "batuk pilek 2", maxKg: 40, duration: "3", doseFreq: "3", instruction: "setelah makan", items: ["DEXAMETHASONE_05", "CTM_4", "AMBROXOL_30"] },
@@ -562,7 +562,7 @@
   for (const s of CHILD_PUYER_SERIES.filter((x) => x.dosed)) {
     for (const band of dosedBands(s.maxKg, s.minKg)) {
       const key = s.prefix + bandKey(band);
-      const tpl = buildDosedRacikan({ ...RACIKAN_TEMPLATES[key], ...(s.doseRules ? { doseRules: s.doseRules } : {}) }, s.items.map((it) => (typeof it === "string" ? it : it.item)), band);
+      const tpl = buildDosedRacikan({ ...RACIKAN_TEMPLATES[key], ...(s.doseRules ? { doseRules: s.doseRules } : {}), ...(s.shortName ? { shortName: true } : {}) }, s.items.map((it) => (typeof it === "string" ? it : it.item)), band);
       if (tpl) RACIKAN_TEMPLATES[key] = tpl;
       else delete RACIKAN_TEMPLATES[key];
     }
@@ -954,7 +954,7 @@
         },
         {
           key: "LAMBUNG_MUAL_RACIKAN_BARU",
-          label: "Racikan Lambung + Mual — Anak (BB)",
+          label: "Racikan ANTS-RANI (lambung + mual) — Anak (BB)",
           type: "weight-racikan",
           prefix: "BARU_LAMBUNG_MUAL_",
           title: "RACIKAN LAMBUNG + MUAL",
@@ -963,7 +963,7 @@
         },
         {
           key: "MUAL_MUNTAH_RACIKAN_BARU",
-          label: "Racikan Mual Muntah — Anak (BB)",
+          label: "Racikan DOMP (mual muntah) — Anak (BB)",
           type: "weight-racikan",
           prefix: "BARU_MUAL_MUNTAH_",
           title: "RACIKAN MUAL MUNTAH",
@@ -3868,7 +3868,8 @@
   function racikanShortName(tpl) {
     if (!tpl || racikanJenisFor(tpl) !== "kertas_puyer") return "";
     const drugs = (tpl.ingredients || []).filter((i) => i.item !== "POT_PLASTIK" && ITEMS[i.item]?.unit !== "pcs");
-    if (drugs.length < 2) return "";
+    // v0.9.1: racikan bertanda shortName juga dinamai singkatan walau isinya 1 obat (mis. DOMP).
+    if (drugs.length < (tpl.shortName ? 1 : 2)) return "";
     const ORDER = ["PCT", "IBU", "GG", "AMB", "CTM", "CTZ", "LORA", "DEXA", "MP", "DOMP", "ANTS", "RANI", "AMOX", "CFD", "ZINC"];
     const rank = (x) => (ORDER.indexOf(x) < 0 ? 99 : ORDER.indexOf(x));
     return [...new Set(drugs.map((i) => drugShortName(i.item)))].sort((a, b) => rank(a) - rank(b)).join("-");

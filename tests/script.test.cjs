@@ -783,3 +783,15 @@ test("v0.8.8: CTM dosis minimal: maks 1 tablet per kelipatan 5 kg (20 kg maks 4 
   assert.equal(q20("BARU_BAPIL2_"), "4");
 });
 
+
+test("v0.9.1: racikan lambung+mual & mual muntah dinamai singkatan isinya", () => {
+  const it = (k) => api.MEDICATION_ITEMS_FLAT.find((x) => x.key === k);
+  const nm = (k, kg, age) => api.racikanShortName(api.resolveMedicationItem(it(k), kg, age).racikans[0].tpl);
+  assert.equal(nm("LAMBUNG_MUAL_RACIKAN_BARU", 17, 5), "ANTS-RANI");
+  assert.equal(nm("LAMBUNG_MUAL_RACIKAN_BARU", 13, 3), "RANI");
+  assert.equal(nm("MUAL_MUNTAH_RACIKAN_BARU", 10, 2), "DOMP");
+  assert.match(it("LAMBUNG_MUAL_RACIKAN_BARU").label, /ANTS-RANI/);
+  assert.match(it("MUAL_MUNTAH_RACIKAN_BARU").label, /DOMP/);
+  // Racikan 1 obat lain tetap memakai nama lama.
+  assert.equal(api.racikanShortName({ unit: "pulvis", ingredients: [{ item: "PARACETAMOL_500" }] }), "");
+});
