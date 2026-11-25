@@ -57,12 +57,12 @@ Versi aturan: 2026-11-25. ⚠️ = perlu verifikasi (nilai paling ketat dipakai 
 | PCV (pneumokokus) · batasUsia | 5 tahun | IDAI2023 hal. 66 & 74 | ✅ terverifikasi | >5 tahun hanya risiko tinggi: 1 dosis PCV13 (cek manual). |
 | Rotavirus · merek · Rotarix (RV1) · jumlahDosis | 2 | IDAI2023 hal. 66–67 & 74; ROTARIX 4.2 | ✅ terverifikasi |  |
 | Rotavirus · merek · Rotarix (RV1) · minUsiaDosis1 | 6 minggu | IDAI2023 hal. 74; ROTARIX 4.2 | ✅ terverifikasi |  |
-| Rotavirus · merek · Rotarix (RV1) · maksUsiaDosis1 | usia: 84 hari; termasuk: true | IDAI2023 hal. 74 (dosis pertama 6–12 minggu) | ⚠️ perlu verifikasi | CDC: maks 14 minggu 6 hari (104 hari). EMA: tidak ada batas dosis 1, seri selesai ≤24 minggu. Dipakai 12 minggu 0 hari (ketat). |
+| Rotavirus · merek · Rotarix (RV1) · maksUsiaDosis1 | usia: 84 hari; termasuk: true | IDAI2023 hal. 74 (dosis pertama 6–12 minggu); keputusan dokter 2026-11-25 | ✅ terverifikasi | Dokter memilih IDAI 12 minggu 0 hari (CDC 14 minggu 6 hari tidak dipakai). |
 | Rotavirus · merek · Rotarix (RV1) · interval | 4 minggu | IDAI2023 hal. 74; ROTARIX 4.2 | ✅ terverifikasi |  |
 | Rotavirus · merek · Rotarix (RV1) · maksUsiaSeri | usia: 168 hari; termasuk: true | IDAI2023 hal. 74 (paling lambat 24 minggu); ROTARIX 4.2 (harus selesai sebelum 24 minggu) | ⚠️ perlu verifikasi | CDC: dosis terakhir maks 8 bulan 0 hari. Dipakai 24 minggu 0 hari. |
 | Rotavirus · merek · RotaTeq (RV5) · jumlahDosis | 3 | IDAI2023 hal. 74 | ✅ terverifikasi |  |
 | Rotavirus · merek · RotaTeq (RV5) · minUsiaDosis1 | 6 minggu | IDAI2023 hal. 74 | ✅ terverifikasi |  |
-| Rotavirus · merek · RotaTeq (RV5) · maksUsiaDosis1 | usia: 84 hari; termasuk: true | IDAI2023 hal. 74 (dosis pertama 6–12 minggu) | ⚠️ perlu verifikasi | CDC: maks 14 minggu 6 hari. Dipakai 12 minggu 0 hari. |
+| Rotavirus · merek · RotaTeq (RV5) · maksUsiaDosis1 | usia: 84 hari; termasuk: true | IDAI2023 hal. 74 (dosis pertama 6–12 minggu); keputusan dokter 2026-11-25 | ✅ terverifikasi | Dokter memilih IDAI 12 minggu 0 hari (CDC 14 minggu 6 hari tidak dipakai). |
 | Rotavirus · merek · RotaTeq (RV5) · interval | 4 minggu | IDAI2023 hal. 74 (interval 4–10 minggu) | ✅ terverifikasi |  |
 | Rotavirus · merek · RotaTeq (RV5) · intervalMaks | 10 minggu | IDAI2023 hal. 74 | ⚠️ perlu verifikasi | Bila jarak >10 minggu: cek manual (tidak ada aturan lanjutan di sumber). |
 | Rotavirus · merek · RotaTeq (RV5) · maksUsiaSeri | usia: 224 hari; termasuk: true | IDAI2023 hal. 74 (dosis ketiga paling lambat 32 minggu) | ⚠️ perlu verifikasi | CDC: maks 8 bulan 0 hari. Dipakai 32 minggu 0 hari. Label RotaTeq belum dibaca. |

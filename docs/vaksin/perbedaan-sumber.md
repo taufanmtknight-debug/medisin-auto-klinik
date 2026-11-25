@@ -5,8 +5,8 @@ Mengubah keputusan = mengubah satu nilai di `vaksin/vaksin-rules.js` (ganti stat
 
 | # | Aturan | IDAI 2023 | Kepmenkes 1098/2024 | CDC/ACIP 2025 / label | Dipakai sekarang |
 |---|---|---|---|---|---|
-| 1 | Rotarix: usia maksimal dosis 1 | 6–12 minggu (hal. 74) | – | CDC: 14 minggu 6 hari; EMA SmPC: tidak ada batas dosis 1, seri selesai ≤24 minggu | **12 minggu 0 hari (84 hari)** |
-| 2 | RotaTeq: usia maksimal dosis 1 | 6–12 minggu (hal. 74) | – | CDC: 14 minggu 6 hari; label RotaTeq belum terbaca (unduhan gagal) | **12 minggu 0 hari** |
+| 1 | Rotarix: usia maksimal dosis 1 | 6–12 minggu (hal. 74) | – | CDC: 14 minggu 6 hari; EMA SmPC: tidak ada batas dosis 1, seri selesai ≤24 minggu | ✅ **Diputuskan dokter 2026-11-25: IDAI 12 minggu 0 hari (84 hari)** |
+| 2 | RotaTeq: usia maksimal dosis 1 | 6–12 minggu (hal. 74) | – | CDC: 14 minggu 6 hari; label RotaTeq belum terbaca (unduhan gagal) | ✅ **Diputuskan dokter 2026-11-25: IDAI 12 minggu 0 hari** |
 | 3 | RotaTeq: dosis terakhir | ≤32 minggu | – | CDC: ≤8 bulan 0 hari | **32 minggu 0 hari** |
 | 4 | RV program: batas seri | dosis terakhir usia 6 bulan (hal. 67) | kejar: sampai sebelum usia 7 bulan (hal. 13) | – | **sebelum 6 bulan**; dosis 1 hanya bila 3 dosis bisa selesai sebelum itu |
 | 5 | RV program: produk & usia minimal dosis 1 | teks: ORV116E; catatan tabel: RV1 (Rotarix) sejak 2022 | jadwal 2, 3, 4 bulan; usia minimal tidak tertulis | – | **mulai 2 bulan** |
@@ -35,5 +35,5 @@ Mengubah keputusan = mengubah satu nilai di `vaksin/vaksin-rules.js` (ganti stat
 
 ## Kasus uji dokter yang hasilnya berbeda dari harapan
 
-- **Kasus 2 (14 minggu 6 hari):** harapan "Rotarix 🟢, RotaTeq 🔴". Tidak ada satu sumber pun yang memberi hasil itu: dengan IDAI (12 minggu) keduanya 🔴; dengan CDC (14 minggu 6 hari) keduanya 🟢. Alat sekarang: keduanya 🔴 (paling ketat). Tes juga membuktikan bila dokter memilih batas CDC, Rotarix menjadi 🟢.
+- **Kasus 2 (14 minggu 6 hari):** harapan "Rotarix 🟢, RotaTeq 🔴". Tidak ada satu sumber pun yang memberi hasil itu: dengan IDAI (12 minggu) keduanya 🔴; dengan CDC (14 minggu 6 hari) keduanya 🟢. Dokter memutuskan (2026-11-25) memakai IDAI 12 minggu: keduanya 🔴. Tes juga membuktikan bila dokter memilih batas CDC, Rotarix menjadi 🟢.
 - **Kasus 1 (4,5 bulan):** DTP1, polio1, PCV1 tampil 🟡 TERLAMBAT, KEJAR (bukan 🟢) karena jadwalnya sudah lewat; tetap diberikan hari ini. IPV1 🟢 (jadwal 4 bulan). Rotavirus: Rotarix & RotaTeq 🔴; RV program 🔴 karena 3 dosis tidak bisa selesai sebelum 6 bulan (nilai #4).

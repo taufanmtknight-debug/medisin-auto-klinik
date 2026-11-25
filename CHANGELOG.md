@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.1 — 2026-11-25
+
+- CEK VAKSIN: batas dosis 1 Rotarix & RotaTeq = **12 minggu 0 hari (IDAI)** sesuai keputusan dokter; aturan ini tidak lagi bertanda ⚠️ (baris rotavirus masih ⚠️ karena batas seri/RV program belum diputuskan).
+
 ## v0.10.0 — 2026-11-25
 
 - **CEK VAKSIN** (permintaan dokter): tombol baru di menu AUTO KLINIK. Dokter mengisi riwayat dosis (jenis, tanggal, merek, buku KIA/ingatan), kondisi saat ini, prematur, uji tuberkulin, daerah endemis JE, dan vaksin yang tersedia. Hasil per vaksin berwarna (🟢 boleh hari ini, 🔵 belum waktunya + tanggal, 🟡 terlambat/kejar, 🔴 tidak boleh, 🟠 tunda, ⚪ perlu cek, ✅ selesai) dengan alasan dan sumber, lalu "Hari ini berikan" (rute + saran lokasi), "Jadwal kejar", "Catatan khusus", dan tombol **Salin ringkasan** (tanpa nama/No RM/tanggal lahir).

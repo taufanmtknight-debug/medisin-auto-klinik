@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.10.0
+// @version      0.10.1
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.10.0";
+  const SCRIPT_VERSION_FALLBACK = "0.10.1";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -6167,7 +6167,7 @@ const VAKSIN_RULES = (() => {
             label: "Rotarix (RV1)",
             jumlahDosis: T(2, "IDAI2023 hal. 66–67 & 74; ROTARIX 4.2"),
             minUsiaDosis1: T("6 minggu", "IDAI2023 hal. 74; ROTARIX 4.2"),
-            maksUsiaDosis1: P({ usia: "84 hari", termasuk: true }, "IDAI2023 hal. 74 (dosis pertama 6–12 minggu)", "CDC: maks 14 minggu 6 hari (104 hari). EMA: tidak ada batas dosis 1, seri selesai ≤24 minggu. Dipakai 12 minggu 0 hari (ketat)."),
+            maksUsiaDosis1: T({ usia: "84 hari", termasuk: true }, "IDAI2023 hal. 74 (dosis pertama 6–12 minggu); keputusan dokter 2026-11-25", "Dokter memilih IDAI 12 minggu 0 hari (CDC 14 minggu 6 hari tidak dipakai)."),
             interval: T("4 minggu", "IDAI2023 hal. 74; ROTARIX 4.2"),
             maksUsiaSeri: P({ usia: "168 hari", termasuk: true }, "IDAI2023 hal. 74 (paling lambat 24 minggu); ROTARIX 4.2 (harus selesai sebelum 24 minggu)", "CDC: dosis terakhir maks 8 bulan 0 hari. Dipakai 24 minggu 0 hari."),
           },
@@ -6175,7 +6175,7 @@ const VAKSIN_RULES = (() => {
             label: "RotaTeq (RV5)",
             jumlahDosis: T(3, "IDAI2023 hal. 74"),
             minUsiaDosis1: T("6 minggu", "IDAI2023 hal. 74"),
-            maksUsiaDosis1: P({ usia: "84 hari", termasuk: true }, "IDAI2023 hal. 74 (dosis pertama 6–12 minggu)", "CDC: maks 14 minggu 6 hari. Dipakai 12 minggu 0 hari."),
+            maksUsiaDosis1: T({ usia: "84 hari", termasuk: true }, "IDAI2023 hal. 74 (dosis pertama 6–12 minggu); keputusan dokter 2026-11-25", "Dokter memilih IDAI 12 minggu 0 hari (CDC 14 minggu 6 hari tidak dipakai)."),
             interval: T("4 minggu", "IDAI2023 hal. 74 (interval 4–10 minggu)"),
             intervalMaks: P("10 minggu", "IDAI2023 hal. 74", "Bila jarak >10 minggu: cek manual (tidak ada aturan lanjutan di sumber)."),
             maksUsiaSeri: P({ usia: "224 hari", termasuk: true }, "IDAI2023 hal. 74 (dosis ketiga paling lambat 32 minggu)", "CDC: maks 8 bulan 0 hari. Dipakai 32 minggu 0 hari. Label RotaTeq belum dibaca."),
