@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.10.0 — 2026-11-25
+
+- **CEK VAKSIN** (permintaan dokter): tombol baru di menu AUTO KLINIK. Dokter mengisi riwayat dosis (jenis, tanggal, merek, buku KIA/ingatan), kondisi saat ini, prematur, uji tuberkulin, daerah endemis JE, dan vaksin yang tersedia. Hasil per vaksin berwarna (🟢 boleh hari ini, 🔵 belum waktunya + tanggal, 🟡 terlambat/kejar, 🔴 tidak boleh, 🟠 tunda, ⚪ perlu cek, ✅ selesai) dengan alasan dan sumber, lalu "Hari ini berikan" (rute + saran lokasi), "Jadwal kejar", "Catatan khusus", dan tombol **Salin ringkasan** (tanpa nama/No RM/tanggal lahir).
+- **Hanya menampilkan**: tidak mengisi, tidak menyimpan, tidak memanggil API. Riwayat dosis hanya di memori halaman; yang diingat perangkat hanya pengaturan klinik (endemis JE, vaksin program/swasta) di `auto-klinik-medisin:vaksin-klinik`.
+- Semua aturan klinis di satu file data `vaksin/vaksin-rules.js` (sumber + halaman, tanggal verifikasi, status). Bila sumber berbeda dipakai nilai paling ketat sampai dokter memutuskan (`docs/vaksin/perbedaan-sumber.md`). Tabel aturan: `docs/vaksin/aturan.md` (dibuat otomatis). Usia dihitung dalam hari dari tanggal lahir ke tanggal kunjungan (juga minggu & bulan kalender), tanpa pembulatan; dosis sebelum usia/jarak minimal = tidak sah (tanpa toleransi). Cakupan 0–6 tahun.
+- Tanggal lahir/kunjungan dicari dari data pasien Medisin; bila tidak terbaca dokter mengisi manual (dan diberi peringatan bila berbeda dari umur Medisin).
+
 ## v0.9.2 — 2026-11-23
 
 - **Racikan lambung = ranitidin saja** (permintaan dokter; antasida sudah punya racikan sendiri). Dosis ranitidin tetap minimal ~1,2–1,8 mg/kg/dosis, 2x sehari; hanya BB 9–10 kg berubah dari 1 tab/12 bungkus menjadi 1 tab/10 bungkus (15 mg/dosis).
