@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Medisin - AUTO KLINIK
 // @namespace    medisin-auto-klinik
-// @version      0.10.1
+// @version      0.11.0
 // @description  AUTO KLINIK untuk app.medisin.id — RESUME + DIAGNOSIS + RESEP, Resume, Paket Resep Golongan. Hanya mengisi; tidak pernah menekan SIMPAN/SUBMIT.
 // @author       taufanmtknight-debug
 // @match        https://app.medisin.id/*
@@ -37,7 +37,7 @@
 
   // Versi diambil dari header (GM_info) agar label launcher tidak pernah beda
   // dengan @version. Nilai cadangan WAJIB sama dengan @version (dicek oleh test).
-  const SCRIPT_VERSION_FALLBACK = "0.10.1";
+  const SCRIPT_VERSION_FALLBACK = "0.11.0";
   const VERSION =
     (typeof GM_info !== "undefined" && GM_info?.script?.version) ||
     SCRIPT_VERSION_FALLBACK;
@@ -7637,17 +7637,26 @@ if (typeof module === "object" && module && module.exports) module.exports = { c
       });
       return;
     }
-    if (remoteLocked()) {
-      // Dibuka dengan PIN di perangkat ini: tombol untuk mengunci lagi.
+    const endText = sessionEndText();
+    if (endText) {
+      const note = document.createElement("div");
+      note.className = "ak-sub-note";
+      note.textContent = `🔒 Terkunci otomatis pukul ${endText} (7 jam); buka lagi dengan PIN.`;
+      box.querySelector("#auto-klinik-submenu .ak-sub-note")?.after(note);
+    }
+    if (remoteLocked() || sessionStart()) {
+      // Tombol untuk mengunci perangkat ini sekarang (buka lagi dengan PIN).
       const relock = document.createElement("button");
       relock.type = "button";
       relock.className = "ak-relock";
-      relock.textContent = "🔒 Kunci lagi di perangkat ini";
+      relock.textContent = "🔒 Kunci sekarang di perangkat ini";
       relock.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
         setLocalOpen(false);
+        setSessionStart(Date.now() - SESSION_MS);
         remountLauncher();
+        reportDevice(true);
         notify("AUTO KLINIK dikunci lagi di perangkat ini.", "warn", 6000);
       });
       box.querySelector("#auto-klinik-submenu")?.appendChild(relock);
@@ -9042,8 +9051,43 @@ if (typeof module === "object" && module && module.exports) module.exports = { c
   function remoteLocked() {
     return !!lockState?.locked;
   }
+  // v0.11.0 (permintaan dokter): terkunci otomatis 7 jam setelah mulai dipakai. Jam mulai
+  // dicatat saat script pertama jalan (setelah dipasang/diaktifkan) dan diulang saat dibuka PIN.
+  const SESSION_KEY = "auto-klinik-medisin:mulai-pakai";
+  const SESSION_MS = 7 * 60 * 60 * 1000;
+  function sessionStart() {
+    try {
+      const v = Number(localStorage.getItem(SESSION_KEY));
+      return Number.isFinite(v) && v > 0 ? v : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+  function setSessionStart(ms) {
+    try {
+      localStorage.setItem(SESSION_KEY, String(ms));
+    } catch (_) {}
+  }
+  // (pure, diuji) Habis waktu bila sudah >= 7 jam sejak mulai.
+  function sessionExpired(start, now, limit = SESSION_MS) {
+    return start > 0 && now - start >= limit;
+  }
+  function ensureSessionStart() {
+    const s = sessionStart();
+    // Jam perangkat mundur (s di masa depan) -> mulai dihitung dari sekarang.
+    if (!s || s > Date.now() + 60000) setSessionStart(Date.now());
+  }
+  function timeLocked() {
+    return sessionExpired(sessionStart(), Date.now());
+  }
+  function sessionEndText() {
+    const s = sessionStart();
+    if (!s) return "";
+    const d = new Date(s + SESSION_MS);
+    return `${String(d.getHours()).padStart(2, "0")}.${String(d.getMinutes()).padStart(2, "0")}`;
+  }
   function akLocked() {
-    return lockEffective(remoteLocked(), readLocalOpen());
+    return lockEffective(remoteLocked(), readLocalOpen()) || timeLocked();
   }
   async function pinMatches(pin) {
     const digits = String(pin || "").replace(/\s+/g, "");
@@ -9073,9 +9117,11 @@ if (typeof module === "object" && module && module.exports) module.exports = { c
       ev.preventDefault();
       const input = panel.querySelector("input");
       if (await pinMatches(input.value)) {
-        setLocalOpen(true);
+        if (remoteLocked()) setLocalOpen(true);
+        setSessionStart(Date.now());
         remountLauncher();
-        notify("AUTO KLINIK dibuka dengan PIN di perangkat ini. Kunci lagi lewat menu bila perlu.", "success", 8000);
+        reportDevice(true);
+        notify(`AUTO KLINIK dibuka dengan PIN di perangkat ini sampai pukul ${sessionEndText()} (7 jam).`, "success", 8000);
       } else {
         input.value = "";
         panel.querySelector(".ak-pin-msg").textContent = "PIN salah.";
@@ -9086,6 +9132,8 @@ if (typeof module === "object" && module && module.exports) module.exports = { c
     panel.querySelector("input").focus();
   }
   function lockMessage() {
+    if (!lockEffective(remoteLocked(), readLocalOpen()) && timeLocked())
+      return "AUTO KLINIK terkunci otomatis setelah 7 jam dipakai.";
     return "AUTO KLINIK sedang dikunci dokter." + (lockState?.pesan ? " " + lockState.pesan : "");
   }
   // ---- Laporan perangkat (v0.9.0, permintaan dokter) ----
@@ -9196,8 +9244,19 @@ if (typeof module === "object" && module && module.exports) module.exports = { c
     }
     root?.setAttribute("data-auto-klinik", VERSION);
     addStyle(STYLES + DRUGMAP_STYLES + ALUR_STYLES + LAUNCHER_STYLES);
+    ensureSessionStart();
     refreshRemoteLock();
     setInterval(refreshRemoteLock, 120000);
+    // Kunci 7 jam: cek tiap 30 detik, launcher diganti saat waktunya habis.
+    let lastLocked = akLocked();
+    setInterval(() => {
+      const now = akLocked();
+      if (now === lastLocked) return;
+      lastLocked = now;
+      reportDevice(true);
+      remountLauncher();
+      if (now) notify(lockMessage() + " Masukkan PIN untuk 7 jam berikutnya.", "warn", 10000);
+    }, 30000);
     setTimeout(() => reportDevice(true), 5000);
     setInterval(() => reportDevice(false), 60000);
     window.addEventListener("resize", () => applyLauncherPos(document.getElementById("auto-klinik-box")));
@@ -9317,6 +9376,8 @@ if (typeof module === "object" && module && module.exports) module.exports = { c
       addDiagnosisChoice,
       parseLockText,
       lockEffective,
+      sessionExpired,
+      SESSION_MS,
       clampLauncherPos,
       LOCK_URL,
       DEVICE_REPORT_URL,

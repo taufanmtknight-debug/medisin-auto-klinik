@@ -50,7 +50,7 @@ test("v0.6.1 PIN: buka di perangkat ini hanya saat dikunci; PIN tidak tertulis p
   assert.doesNotMatch(source, /\b\d{6}\b(?=[^\n]*PIN)/);
   // Kunci jarak jauh dibuka → buka-PIN dihapus.
   assert.match(source, /if \(!next\.locked\) setLocalOpen\(false\);/);
-  assert.match(source, /Kunci lagi di perangkat ini/);
+  assert.match(source, /Kunci sekarang di perangkat ini/);
 });
 
 test("v0.6.2: buka-PIN batal bila kunci.json diubah lagi (kunci ulang jarak jauh)", () => {
@@ -91,4 +91,17 @@ test("laporan perangkat: hanya jenis perangkat, versi, status", () => {
   // Pemanggil laporan tidak mengirim data pasien.
   const fn = source.slice(source.indexOf("async function reportDevice"), source.indexOf("let lockChecking"));
   assert.doesNotMatch(fn, /pasien|keluhan|location\.href|nama|storePasien/i);
+});
+
+test("v0.11.0: kunci otomatis 7 jam sejak mulai dipakai / dibuka PIN", () => {
+  const { api, source } = loadScript();
+  const H = 3600 * 1000;
+  assert.equal(api.SESSION_MS, 7 * H);
+  assert.equal(api.sessionExpired(0, Date.now()), false, "belum ada jam mulai");
+  assert.equal(api.sessionExpired(1000, 1000 + 7 * H - 1), false, "6 jam 59 menit 59 detik");
+  assert.equal(api.sessionExpired(1000, 1000 + 7 * H), true, "tepat 7 jam");
+  assert.match(source, /return lockEffective\(remoteLocked\(\), readLocalOpen\(\)\) \|\| timeLocked\(\);/);
+  // PIN memulai 7 jam baru; mulai dicatat saat script jalan.
+  assert.match(source, /if \(await pinMatches\(input\.value\)\) \{\s*if \(remoteLocked\(\)\) setLocalOpen\(true\);\s*setSessionStart\(Date\.now\(\)\);/);
+  assert.match(source, /ensureSessionStart\(\);\s*refreshRemoteLock\(\);/);
 });

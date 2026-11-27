@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.11.0 — 2026-11-27
+
+- **Kunci otomatis 7 jam** (permintaan dokter): di tiap perangkat, AUTO KLINIK terkunci sendiri 7 jam setelah mulai dipakai. Jam mulai dicatat saat script pertama jalan setelah versi ini dipasang/diaktifkan, dan diulang setiap kali dibuka dengan **PIN** (7 jam baru). Jam kunci tampil di menu ("Terkunci otomatis pukul …"). Dicek tiap 30 detik; saat habis, tombol menjadi abu-abu bergembok dan laporan perangkat dikirim.
+- Tombol "Kunci sekarang di perangkat ini" (dulu "Kunci lagi") juga mengakhiri 7 jam tersebut.
+- Kunci jarak jauh `kunci.json` tetap berlaku seperti biasa; PIN membuka keduanya.
+
 ## v0.10.1 — 2026-11-25
 
 - CEK VAKSIN: batas dosis 1 Rotarix & RotaTeq = **12 minggu 0 hari (IDAI)** sesuai keputusan dokter; aturan ini tidak lagi bertanda ⚠️ (baris rotavirus masih ⚠️ karena batas seri/RV program belum diputuskan).
